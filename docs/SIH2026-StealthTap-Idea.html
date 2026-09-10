@@ -1,0 +1,505 @@
+<title>StealthTap Idea Submission</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --ground:#0B1220; --surface:#131C2E; --surface-2:#1A2740; --raise:#22314F;
+    --ink:#EAF0FA; --ink-dim:#9BABC6; --ink-faint:#6E7F9E;
+    --accent:#38C6CD; --accent-deep:#1E8E96; --amber:#F2A65A;
+    --crit:#F4677A; --ok:#54D6AC; --warn:#F2A65A;
+    --line:#26344B; --line-soft:#1D2B41;
+    --sans:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{
+    margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  }
+  .deck{scroll-snap-type:y mandatory;height:100vh;overflow-y:auto}
+  .slide{
+    scroll-snap-align:start;min-height:100vh;width:100%;
+    display:flex;flex-direction:column;position:relative;
+    padding:52px 68px 46px;background:
+      radial-gradient(1100px 520px at 78% -8%, rgba(56,198,205,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 108%, rgba(242,166,90,.06), transparent 55%),
+      var(--ground);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .eyebrow{
+    font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);display:flex;gap:14px;align-items:center;
+  }
+  .eyebrow .sep{width:26px;height:1px;background:var(--line)}
+  .eyebrow .pgn{color:var(--ink-faint)}
+  h1.title{
+    font-weight:700;font-size:44px;line-height:1.08;letter-spacing:-.015em;
+    margin:14px 0 4px;text-wrap:balance;max-width:22ch;
+  }
+  h2.title{
+    font-weight:700;font-size:30px;line-height:1.1;letter-spacing:-.01em;
+    margin:12px 0 20px;text-wrap:balance;
+  }
+  .lede{color:var(--ink-dim);font-size:15.5px;max-width:66ch;margin:0 0 8px}
+  .foot{
+    position:absolute;left:68px;right:68px;bottom:20px;display:flex;justify-content:space-between;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;color:var(--ink-faint);
+    text-transform:uppercase;
+  }
+  .chip{
+    display:inline-block;
+    font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--accent);border:1px solid var(--accent-deep);border-radius:999px;
+    padding:3px 10px;background:rgba(56,198,205,.07);white-space:nowrap;
+  }
+  .panel{
+    background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;
+  }
+  .panel h3{
+    margin:0 0 10px;font-size:13px;font-weight:600;letter-spacing:.02em;color:var(--ink);
+    display:flex;align-items:center;gap:9px;
+  }
+  .panel h3 .ic{
+    width:22px;height:22px;flex:0 0 22px;border-radius:7px;background:var(--surface-2);
+    border:1px solid var(--line);display:grid;place-items:center;color:var(--accent);
+  }
+  .panel h3 .ic svg{width:13px;height:13px}
+  ul.tight{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+  ul.tight li{position:relative;padding-left:16px;font-size:13.5px;color:var(--ink-dim);line-height:1.45}
+  ul.tight li::before{content:"";position:absolute;left:0;top:8px;width:5px;height:5px;border-radius:1px;background:var(--accent)}
+  ul.tight li b{color:var(--ink);font-weight:600}
+  .mono{font-family:var(--mono)}
+  .grid{display:grid;gap:14px}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .stat .n{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--ink);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .stat .n .u{font-size:13px;color:var(--accent);margin-left:4px}
+  .stat .l{font-size:11.5px;color:var(--ink-faint);margin-top:3px;letter-spacing:.02em}
+  table.ref{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.ref th{
+    text-align:left;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ink-faint);font-weight:500;padding:0 12px 8px;border-bottom:1px solid var(--line);
+  }
+  table.ref td{padding:9px 12px;border-bottom:1px solid var(--line-soft);color:var(--ink-dim);vertical-align:top}
+  table.ref td b{color:var(--ink);font-weight:600}
+  table.ref tr:last-child td{border-bottom:none}
+  .kv{display:flex;flex-direction:column;gap:11px}
+  .kv .row{display:grid;grid-template-columns:132px 1fr;gap:14px;align-items:baseline}
+  .kv .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+  .kv .v{font-size:15px;color:var(--ink);font-weight:500}
+  .kv .v.big{font-size:19px;font-weight:600;line-height:1.25}
+  .fill{color:var(--amber);border-bottom:1px dashed var(--amber);font-family:var(--mono);font-size:13px}
+  .nav{
+    position:fixed;right:20px;bottom:18px;z-index:40;display:flex;gap:8px;align-items:center;
+    background:rgba(19,28,46,.86);backdrop-filter:blur(8px);border:1px solid var(--line);
+    border-radius:999px;padding:6px 8px;
+  }
+  .nav button{
+    all:unset;cursor:pointer;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+    color:var(--ink-dim);border:1px solid var(--line);
+  }
+  .nav button:hover{color:var(--ink);border-color:var(--accent-deep)}
+  .nav button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .nav .dots{display:flex;gap:6px;padding:0 6px}
+  .nav .dot{width:6px;height:6px;border-radius:50%;background:var(--line);transition:background .2s,transform .2s}
+  .nav .dot.on{background:var(--accent);transform:scale(1.4)}
+  .diagram{width:100%;height:auto;display:block}
+  .diagram text{font-family:var(--mono);fill:var(--ink-dim)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:22px;flex:1;min-height:0}
+  .row-3-2{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;flex:1;min-height:0}
+  .cols3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .cols4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .flowchips{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}
+  .flowchips .fc{
+    display:flex;gap:8px;align-items:center;background:var(--surface);border:1px solid var(--line);
+    border-radius:10px;padding:8px 11px;font-size:11.5px;color:var(--ink-dim);
+  }
+  .flowchips .fc b{color:var(--ink);font-weight:600;font-size:12px}
+  .flowchips .fc .d{width:20px;height:20px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;color:var(--accent)}
+  .flowchips .fc .d svg{width:12px;height:12px}
+  @media print{
+    .deck{height:auto;overflow:visible}
+    .slide{min-height:0;page-break-after:always;padding:40px 44px}
+    .nav{display:none}
+    body{background:#0B1220}
+  }
+  @media (max-width:900px){
+    .slide{padding:32px 24px 60px}
+    .row2,.row-3-2,.cols3,.cols4,.cols2{grid-template-columns:1fr}
+    h1.title{font-size:34px}
+    .foot{left:24px;right:24px}
+  }
+</style>
+
+<div class="deck" id="deck">
+
+  <!-- ═══════════ SLIDE 1 — TITLE ═══════════ -->
+  <section class="slide" id="s1">
+    <div class="eyebrow"><span>Smart India Hackathon 2026</span><span class="sep"></span><span class="pgn">Idea Submission · 1 / 6</span></div>
+
+    <div style="display:grid;grid-template-columns:1.25fr .95fr;gap:40px;flex:1;align-items:center">
+      <div>
+        <div class="chip" style="margin-bottom:18px">National Technical Research Organisation · NTRO</div>
+        <h1 class="title">StealthTap</h1>
+        <p class="lede" style="font-size:17px;color:var(--ink);max-width:34ch;margin-top:6px">
+          Passive AI threat intelligence for one-directional (data-diode) IP traffic.
+        </p>
+
+        <div class="kv" style="margin-top:30px">
+          <div class="row"><span class="k">Problem&nbsp;ID</span><span class="v big mono">26145</span></div>
+          <div class="row"><span class="k">Title</span><span class="v">AI-Based Detection of Cyber Threats in Unidirectional IP Traffic</span></div>
+          <div class="row"><span class="k">Theme</span><span class="v">Blockchain &amp; Cybersecurity</span></div>
+          <div class="row"><span class="k">PS&nbsp;Category</span><span class="v">Software</span></div>
+          <div class="row"><span class="k">Team&nbsp;Name</span><span class="v">TeamXOR</span></div>
+          <div class="row"><span class="k">Team&nbsp;ID</span><span class="v"><span class="fill">&lsaquo; enter Team ID &rsaquo;</span></span></div>
+        </div>
+      </div>
+
+      <!-- diode motif -->
+      <svg class="diagram" viewBox="0 0 360 300" role="img" aria-label="A one-way data diode: traffic passes from the production network into the monitoring enclave, with no path back.">
+        <defs>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 Z" fill="#38C6CD"/>
+          </marker>
+        </defs>
+        <rect x="8" y="60" width="120" height="180" rx="12" fill="#131C2E" stroke="#26344B"/>
+        <rect x="232" y="60" width="120" height="180" rx="12" fill="#131C2E" stroke="#26344B"/>
+        <text x="68" y="52" text-anchor="middle" font-size="10" letter-spacing="1" fill="#9BABC6">PRODUCTION</text>
+        <text x="292" y="52" text-anchor="middle" font-size="10" letter-spacing="1" fill="#38C6CD">MONITORING ENCLAVE</text>
+        <!-- diode -->
+        <path d="M150,150 L210,120 L210,180 Z" fill="rgba(56,198,205,.12)" stroke="#38C6CD" stroke-width="1.5"/>
+        <line x1="210" y1="112" x2="210" y2="188" stroke="#38C6CD" stroke-width="2.5"/>
+        <text x="180" y="205" text-anchor="middle" font-size="9" fill="#6E7F9E">DATA&nbsp;DIODE</text>
+        <!-- forward flows -->
+        <line x1="128" y1="110" x2="150" y2="130" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#ar)"/>
+        <line x1="128" y1="150" x2="150" y2="150" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#ar)"/>
+        <line x1="128" y1="190" x2="150" y2="170" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#ar)"/>
+        <line x1="210" y1="150" x2="230" y2="150" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#ar)"/>
+        <!-- blocked return -->
+        <path d="M290,220 C240,230 200,230 176,214" fill="none" stroke="#F4677A" stroke-width="1.5" stroke-dasharray="4 4"/>
+        <line x1="169" y1="204" x2="183" y2="224" stroke="#F4677A" stroke-width="2"/>
+        <line x1="183" y1="204" x2="169" y2="224" stroke="#F4677A" stroke-width="2"/>
+        <text x="250" y="244" text-anchor="middle" font-size="9" fill="#F4677A">no return path</text>
+      </svg>
+    </div>
+    <div class="foot"><span>TeamXOR · StealthTap</span><span>SIH 2026 · PS 26145 · NTRO</span></div>
+  </section>
+
+  <!-- ═══════════ SLIDE 2 — PROPOSED SOLUTION ═══════════ -->
+  <section class="slide" id="s2">
+    <div class="eyebrow"><span>Idea Title</span><span class="sep"></span><span class="pgn">Proposed Solution · 2 / 6</span></div>
+    <h2 class="title">One passive pipeline. Six threat classes. Zero packets sent back.</h2>
+    <p class="lede">
+      StealthTap sits behind a mirror port or hardware diode. It <b style="color:var(--ink)">only watches</b> — no probes,
+      no completed handshakes, no blocking. Every verdict comes from passively observed metadata:
+      flow records, DNS queries, TLS fingerprints, OT function codes. <b style="color:var(--ink)">Payload is never decrypted.</b>
+    </p>
+
+    <div class="row-3-2" style="margin-top:14px">
+      <div style="display:flex;flex-direction:column;gap:14px;min-height:0">
+        <div class="panel" style="flex:1">
+          <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M12 3v18"/></svg></span>How it addresses the problem</h3>
+          <ul class="tight">
+            <li><b>Four interchangeable ingest paths</b> — upload PCAP, live NIC capture, live streaming (Zeek→Redpanda), offline batch — feed <b>one</b> detection stack and <b>one</b> alert schema.</li>
+            <li><b>Read-only by construction</b> — the capture NIC gets no IP, ARP off, no route; the sensor container drops every capability except <span class="mono">NET_RAW</span>, publishes no ports, runs read-only.</li>
+            <li><b>Near real time</b> — kernel-level capture + phase-split scoring; measured detection latency <b>157&nbsp;ms&nbsp;p50</b> on the live path.</li>
+            <li><b>Explainable output</b> — every alert carries a MITRE ATT&amp;CK mapping, the evidence, which tool fired, and a chain-of-custody hash.</li>
+          </ul>
+        </div>
+        <div class="flowchips">
+          <div class="fc"><span class="d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span><span><b>Per-threat mechanism</b><br>not one model for all six</span></div>
+          <div class="fc"><span class="d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg></span><span><b>Hybrid ML</b><br>XGBoost + Isolation Forest</span></div>
+          <div class="fc"><span class="d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg></span><span><b>Real JA4</b><br>from the TLS ClientHello</span></div>
+          <div class="fc"><span class="d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 20h8"/></svg></span><span><b>Coverage report</b><br>"did every tool run?" is checkable</span></div>
+        </div>
+      </div>
+
+      <!-- 4-path architecture diagram -->
+      <div class="panel" style="display:flex;flex-direction:column">
+        <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>Four ingest paths, one engine</h3>
+        <svg class="diagram" viewBox="0 0 340 340" role="img" aria-label="Upload PCAP, live NIC capture, live streaming and offline batch all feed one shared detection stack, then one alert store and dashboard.">
+          <defs>
+            <marker id="a2" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#5E7BA6"/></marker>
+          </defs>
+          <!-- sources -->
+          <g font-size="10">
+            <rect x="6"  y="10" width="150" height="34" rx="8" fill="#1A2740" stroke="#26344B"/><text x="81" y="31" text-anchor="middle" fill="#EAF0FA">Upload PCAP</text>
+            <rect x="6"  y="54" width="150" height="34" rx="8" fill="#1A2740" stroke="#26344B"/><text x="81" y="75" text-anchor="middle" fill="#EAF0FA">Live NIC capture</text>
+            <rect x="6"  y="98" width="150" height="34" rx="8" fill="#1A2740" stroke="#26344B"/><text x="81" y="119" text-anchor="middle" fill="#EAF0FA">Live streaming (Zeek)</text>
+            <rect x="6"  y="142" width="150" height="34" rx="8" fill="#1A2740" stroke="#26344B"/><text x="81" y="163" text-anchor="middle" fill="#EAF0FA">Offline batch</text>
+          </g>
+          <!-- engine -->
+          <rect x="196" y="46" width="138" height="92" rx="10" fill="rgba(56,198,205,.08)" stroke="#38C6CD"/>
+          <text x="265" y="74" text-anchor="middle" font-size="10.5" fill="#38C6CD">DETECTION STACK</text>
+          <text x="265" y="92" text-anchor="middle" font-size="9" fill="#9BABC6">ENG01–13 · hybrid ML</text>
+          <text x="265" y="106" text-anchor="middle" font-size="9" fill="#9BABC6">Zeek · Suricata · YARA</text>
+          <text x="265" y="122" text-anchor="middle" font-size="9" fill="#9BABC6">standardized Alert</text>
+          <!-- connectors -->
+          <path d="M156,27 C182,27 182,74 196,74" fill="none" stroke="#5E7BA6" stroke-width="1.3" marker-end="url(#a2)"/>
+          <path d="M156,71 C182,71 182,88 196,88" fill="none" stroke="#5E7BA6" stroke-width="1.3" marker-end="url(#a2)"/>
+          <path d="M156,115 C182,115 182,104 196,104" fill="none" stroke="#5E7BA6" stroke-width="1.3" marker-end="url(#a2)"/>
+          <path d="M156,159 C182,159 182,118 196,118" fill="none" stroke="#5E7BA6" stroke-width="1.3" marker-end="url(#a2)"/>
+          <!-- store + dash -->
+          <rect x="196" y="176" width="138" height="30" rx="8" fill="#1A2740" stroke="#26344B"/><text x="265" y="195" text-anchor="middle" font-size="10" fill="#EAF0FA">PostgreSQL · one history</text>
+          <rect x="196" y="222" width="138" height="30" rx="8" fill="#1A2740" stroke="#26344B"/><text x="265" y="241" text-anchor="middle" font-size="10" fill="#EAF0FA">Dashboard · live SSE</text>
+          <line x1="265" y1="138" x2="265" y2="176" stroke="#5E7BA6" stroke-width="1.3" marker-end="url(#a2)"/>
+          <line x1="265" y1="206" x2="265" y2="222" stroke="#5E7BA6" stroke-width="1.3" marker-end="url(#a2)"/>
+          <!-- threat classes row -->
+          <text x="10" y="205" font-size="9" fill="#6E7F9E">SIX PS THREAT CLASSES</text>
+          <g font-size="8.5" fill="#9BABC6">
+            <text x="10" y="222">DDoS / spoofed-source flood</text>
+            <text x="10" y="238">C2 beaconing</text>
+            <text x="10" y="254">DGA · DNS tunnelling</text>
+            <text x="10" y="270">Encrypted malware (JA4)</text>
+            <text x="10" y="286">Reconnaissance</text>
+            <text x="10" y="302">Data exfiltration</text>
+          </g>
+          <text x="10" y="326" font-size="8.5" fill="#F2A65A">+ OT (Modbus / DNP3 / EtherNet-IP) · lateral movement · Kerberoasting · brute force</text>
+        </svg>
+      </div>
+    </div>
+    <div class="foot"><span>TeamXOR · StealthTap</span><span>Innovation &amp; uniqueness</span></div>
+  </section>
+
+  <!-- ═══════════ SLIDE 3 — TECHNICAL APPROACH ═══════════ -->
+  <section class="slide" id="s3">
+    <div class="eyebrow"><span>Technical Approach</span><span class="sep"></span><span class="pgn">Stack &amp; workflow · 3 / 6</span></div>
+    <h2 class="title">Deliberate tools, wired into one coherent pipeline</h2>
+
+    <div class="cols3" style="margin-bottom:16px">
+      <div class="panel">
+        <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>Protocol parsing</h3>
+        <ul class="tight">
+          <li><b>Zeek 6.0.3</b> + 6 <b>ICSNPP</b> OT plugins — Modbus, DNP3, S7comm, EtherNet/IP, OPC-UA, PROFINET</li>
+          <li>In-process <b>flow assembler</b> with real <b>JA4</b> + Modbus/DNP3 decode for the live path</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 7l10 5 10-5M2 17l10 5 10-5"/></svg></span>Signatures &amp; rules</h3>
+        <ul class="tight">
+          <li><b>Suricata 7</b> + 20,829 ET Open rules (concurrent with Zeek)</li>
+          <li><b>YARA</b> ~401 rules on cleartext-extracted files · MITRE <b>BZAR</b> for SMB lateral movement</li>
+          <li><b>ENG01–13</b> behavioural engines — rate/entropy, CV-periodicity, fan-out, byte-ratio, OT command codes</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span>ML &amp; serving</h3>
+        <ul class="tight">
+          <li><b>XGBoost + Isolation Forest</b> per family → <b>ONNX Runtime</b> (CPU, no GPU)</li>
+          <li>One <span class="mono">feature_extraction</span> module for train <b>and</b> serve — no train/serve skew</li>
+          <li><b>FastAPI</b> + SSE · <b>PostgreSQL</b> · <b>Redpanda</b>+Faust · React/TS dashboard · <b>Docker</b> (12 services)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="panel" style="flex:1;display:flex;flex-direction:column">
+      <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h4l3-8 4 16 3-8h2"/></svg></span>End-to-end methodology</h3>
+      <svg class="diagram" viewBox="0 0 980 176" role="img" aria-label="Workflow: packet or PCAP, then protocol parsing and flow assembly, then parallel rule engines, hybrid ML and signature matching, then a standardized alert, then PostgreSQL, then the dashboard. A training loop feeds labelled data through the shared feature module into ONNX models.">
+        <defs>
+          <marker id="a3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#38C6CD"/></marker>
+          <marker id="a3d" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 Z" fill="#F2A65A"/></marker>
+        </defs>
+        <!-- main row -->
+        <g font-size="11">
+          <rect x="8"   y="54" width="120" height="46" rx="9" fill="#1A2740" stroke="#26344B"/><text x="68"  y="76" text-anchor="middle" fill="#EAF0FA">Packet / PCAP</text><text x="68" y="90" text-anchor="middle" font-size="8.5" fill="#6E7F9E">mirror · diode · file</text>
+          <rect x="168" y="54" width="140" height="46" rx="9" fill="#1A2740" stroke="#26344B"/><text x="238" y="72" text-anchor="middle" fill="#EAF0FA">Parse &amp; assemble</text><text x="238" y="88" text-anchor="middle" font-size="8.5" fill="#6E7F9E">Zeek / flow assembler</text>
+          <rect x="348" y="20" width="188" height="116" rx="10" fill="rgba(56,198,205,.07)" stroke="#38C6CD"/>
+          <text x="442" y="40" text-anchor="middle" font-size="10" fill="#38C6CD">DETECTION (parallel)</text>
+          <rect x="362" y="50" width="160" height="24" rx="6" fill="#131C2E" stroke="#26344B"/><text x="442" y="66" text-anchor="middle" font-size="9.5" fill="#9BABC6">ENG01–13 rule engines</text>
+          <rect x="362" y="78" width="160" height="24" rx="6" fill="#131C2E" stroke="#26344B"/><text x="442" y="94" text-anchor="middle" font-size="9.5" fill="#9BABC6">hybrid ML (per family)</text>
+          <rect x="362" y="106" width="160" height="24" rx="6" fill="#131C2E" stroke="#26344B"/><text x="442" y="122" text-anchor="middle" font-size="9.5" fill="#9BABC6">Suricata · YARA · BZAR</text>
+          <rect x="576" y="54" width="140" height="46" rx="9" fill="#1A2740" stroke="#26344B"/><text x="646" y="72" text-anchor="middle" fill="#EAF0FA">Standardized Alert</text><text x="646" y="88" text-anchor="middle" font-size="8.5" fill="#6E7F9E">MITRE-mapped · explainable</text>
+          <rect x="756" y="54" width="104" height="46" rx="9" fill="#1A2740" stroke="#26344B"/><text x="808" y="80" text-anchor="middle" fill="#EAF0FA">PostgreSQL</text>
+          <rect x="892" y="54" width="80" height="46" rx="9" fill="#1A2740" stroke="#26344B"/><text x="932" y="74" text-anchor="middle" fill="#EAF0FA">Dash-</text><text x="932" y="88" text-anchor="middle" fill="#EAF0FA">board</text>
+        </g>
+        <line x1="128" y1="77" x2="168" y2="77" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#a3)"/>
+        <line x1="308" y1="77" x2="348" y2="77" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#a3)"/>
+        <line x1="536" y1="77" x2="576" y2="77" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#a3)"/>
+        <line x1="716" y1="77" x2="756" y2="77" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#a3)"/>
+        <line x1="860" y1="77" x2="892" y2="77" stroke="#38C6CD" stroke-width="1.5" marker-end="url(#a3)"/>
+        <!-- training loop -->
+        <g font-size="9.5">
+          <rect x="348" y="150" width="118" height="20" rx="6" fill="#131C2E" stroke="#3A3020"/><text x="407" y="164" text-anchor="middle" fill="#F2A65A">labelled datasets</text>
+          <rect x="486" y="150" width="150" height="20" rx="6" fill="#131C2E" stroke="#3A3020"/><text x="561" y="164" text-anchor="middle" fill="#F2A65A">shared feature_extraction</text>
+          <rect x="656" y="150" width="150" height="20" rx="6" fill="#131C2E" stroke="#3A3020"/><text x="731" y="164" text-anchor="middle" fill="#F2A65A">XGBoost + IForest → ONNX</text>
+        </g>
+        <line x1="466" y1="160" x2="486" y2="160" stroke="#F2A65A" stroke-width="1.3" marker-end="url(#a3d)"/>
+        <line x1="636" y1="160" x2="656" y2="160" stroke="#F2A65A" stroke-width="1.3" marker-end="url(#a3d)"/>
+        <path d="M731,150 C731,120 560,120 470,112" fill="none" stroke="#F2A65A" stroke-width="1.3" stroke-dasharray="3 4" marker-end="url(#a3d)"/>
+        <text x="150" y="164" font-size="9" fill="#6E7F9E">TRAINING LOOP →</text>
+      </svg>
+      <p class="mono" style="font-size:10.5px;color:var(--ink-faint);margin:8px 0 0">
+        Coverage report attached to every analysis · records-processed / alerts-fired per tool
+      </p>
+    </div>
+    <div class="foot"><span>TeamXOR · StealthTap</span><span>Working prototype — 12-service Docker stack, 57+ automated tests</span></div>
+  </section>
+
+  <!-- ═══════════ SLIDE 4 — FEASIBILITY & VIABILITY ═══════════ -->
+  <section class="slide" id="s4">
+    <div class="eyebrow"><span>Feasibility &amp; Viability</span><span class="sep"></span><span class="pgn">Evidence &amp; risk · 4 / 6</span></div>
+    <h2 class="title">A running prototype, not a proposal</h2>
+
+    <div class="row2" style="margin-top:6px">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="cols2">
+          <div class="stat"><div class="n">12</div><div class="l">Docker services orchestrated &amp; running</div></div>
+          <div class="stat"><div class="n">749,719</div><div class="l">labelled rows across 3 trained ML families</div></div>
+          <div class="stat"><div class="n">157<span class="u">ms</span></div><div class="l">live-path detection latency (p50) · 328 ms p95</div></div>
+          <div class="stat"><div class="n">57<span class="u">+</span></div><div class="l">automated tests · engines, features, schema</div></div>
+        </div>
+        <div class="panel" style="flex:1">
+          <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></span>Why it is feasible</h3>
+          <ul class="tight">
+            <li><b>CPU-only ML</b> — tree models give microsecond inference; deployable in an enclave with no GPU.</li>
+            <li><b>All 5 architectural constraints met</b> — read-only ingest, no decryption, streaming, <b>measured</b> throughput/latency, standardized schema.</li>
+            <li><b>DGA model trained at scale</b> — 674,898 rows · Precision 0.935 · Recall 0.880 · ROC-AUC 0.972.</li>
+            <li>Verified end to end: <span class="mono">/analyze/pcap</span> on the reference capture, live Wi-Fi capture, and the dashboard.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="panel" style="display:flex;flex-direction:column">
+        <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg></span>Challenges &amp; how we handle them</h3>
+        <table class="ref">
+          <thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+          <tbody>
+            <tr><td><b>Spoofed multi-source DDoS</b> is invisible to per-source counters</td><td>source-IP <b>HyperLogLog entropy</b> per destination</td></tr>
+            <tr><td><b>Train/serve feature skew</b> silently degrades models</td><td>one feature module imported by both sides; schema-version gated</td></tr>
+            <tr><td><b>Isolation Forest</b> weak on known patterns</td><td>auto-demoted to <b>advisory</b>; XGBoost drives, IF flags novelty</td></tr>
+            <tr><td><b>High-speed link</b> overruns user space</td><td>in-kernel BPF + mmap ring + FANOUT; kernel drop counter surfaced; bounded queue</td></tr>
+            <tr><td>Small <span class="mono">flow</span>/<span class="mono">modbus</span> datasets</td><td>retrain on CICIDS2017/18 + CIC-Modbus-2023 — pipeline already parity-tested</td></tr>
+            <tr><td>Public JA4 threat intel is still small</td><td>real JA4 computed on-box; intel file is append-only &amp; operator-extensible</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="foot"><span>TeamXOR · StealthTap</span><span>Open-source · auditable · no per-sensor licensing</span></div>
+  </section>
+
+  <!-- ═══════════ SLIDE 5 — IMPACT & BENEFITS ═══════════ -->
+  <section class="slide" id="s5">
+    <div class="eyebrow"><span>Impact &amp; Benefits</span><span class="sep"></span><span class="pgn">Who gains, and how · 5 / 6</span></div>
+    <h2 class="title">Detection where you cannot probe back</h2>
+
+    <div class="row2" style="margin-top:6px">
+      <div class="panel" style="display:flex;flex-direction:column">
+        <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></span>Target audience</h3>
+        <ul class="tight" style="gap:12px">
+          <li><b>Critical-infrastructure operators</b> — power grids, water, transport, telecom, refineries — monitoring gateway and peering links through data diodes.</li>
+          <li><b>NTRO &amp; national CERT teams</b> — sovereign, auditable visibility into diode-isolated enclaves without adding an attack surface.</li>
+          <li><b>SOC / OT-security analysts</b> — one dashboard, one alert schema, MITRE-mapped evidence across IT and OT in a single passive tap.</li>
+        </ul>
+        <div class="cols2" style="margin-top:auto;padding-top:14px">
+          <div class="stat"><div class="n">6&nbsp;+&nbsp;7</div><div class="l">PS threat classes + extra classes (OT, lateral movement, Kerberoasting, brute force)</div></div>
+          <div class="stat"><div class="n">0</div><div class="l">packets ever transmitted toward the monitored link</div></div>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns:1fr 1fr;align-content:start">
+        <div class="panel">
+          <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/></svg></span>Security</h3>
+          <ul class="tight"><li>IT + OT threats from one tap: Modbus / DNP3 / EtherNet-IP control-command abuse, SMB lateral movement, Kerberoasting, credential brute force</li><li>Forensic chain-of-custody hash on every alert</li></ul>
+        </div>
+        <div class="panel">
+          <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></span>Economic</h3>
+          <ul class="tight"><li>Commodity CPU hardware, fully open-source stack</li><li>No per-sensor licensing — a fraction of Claroty / Dragos / Nozomi cost</li></ul>
+        </div>
+        <div class="panel">
+          <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></span>Operational</h3>
+          <ul class="tight"><li>Near-real-time alerting on the live path; bounded latency under load</li><li>Same engines &amp; schema across upload / live / streaming — one thing to learn</li></ul>
+        </div>
+        <div class="panel">
+          <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/><circle cx="12" cy="12" r="10"/></svg></span>National</h3>
+          <ul class="tight"><li>Indigenous, inspectable capability for protecting Indian critical infrastructure</li><li>No black-box dependency; every detection is explainable to an analyst</li></ul>
+        </div>
+      </div>
+    </div>
+    <div class="foot"><span>TeamXOR · StealthTap</span><span>Social · economic · operational · strategic</span></div>
+  </section>
+
+  <!-- ═══════════ SLIDE 6 — RESEARCH & REFERENCES ═══════════ -->
+  <section class="slide" id="s6">
+    <div class="eyebrow"><span>Research &amp; References</span><span class="sep"></span><span class="pgn">Sources · 6 / 6</span></div>
+    <h2 class="title">Datasets, tools and standards</h2>
+
+    <div class="row2" style="margin-top:6px">
+      <div class="panel" style="display:flex;flex-direction:column">
+        <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></span>Training data</h3>
+        <table class="ref">
+          <thead><tr><th>Family</th><th>Source</th><th>Rows</th></tr></thead>
+          <tbody>
+            <tr><td><b>DGA / DNS</b></td><td><b>chrmor/DGA_domains_dataset</b> — 25 DGA families + Alexa benign, Netlab 360 OpenData. Cucchiarelli et&nbsp;al. 2021, <i>Expert Systems with Applications</i>, DOI 10.1016/j.eswa.2020.114551</td><td class="mono">674,898</td></tr>
+            <tr><td><b>Flow / DDoS</b></td><td><b>StopDDoS/packet-captures</b> — amplification &amp; flood pcaps (memcached, NTP, CLDAP, DNS ANY, SYN-flood). Upgrade path: CICIDS2017/2018 (UNB&nbsp;CIC)</td><td class="mono">23,213</td></tr>
+            <tr><td><b>OT / Modbus</b></td><td><b>ITI/ICS-Security-Tools</b> Modbus captures. Upgrade path: CIC Modbus 2023 (UNB) — attack types mapped to MITRE ATT&amp;CK for ICS</td><td class="mono">51,608</td></tr>
+            <tr><td><b>TLS / JA4</b></td><td>no public labelled set — planned self-generation from C2-emulator + ordinary browser traffic</td><td class="mono">—</td></tr>
+          </tbody>
+        </table>
+        <p class="mono" style="font-size:10.5px;color:var(--ink-faint);margin:10px 0 0">Total: 749,719 labelled rows · held-out 20% stratified test per family</p>
+      </div>
+
+      <div class="panel" style="display:flex;flex-direction:column">
+        <h3><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg></span>Tools &amp; standards</h3>
+        <ul class="tight" style="gap:9px">
+          <li><b>Zeek</b> network security monitor · <b>ICSNPP</b> OT protocol analyzers (CISA)</li>
+          <li><b>Suricata</b> + <b>Emerging Threats Open</b> ruleset · <b>YARA</b> (Yara-Rules, GPLv2)</li>
+          <li><b>BZAR</b> — MITRE-authored Zeek scripts for ATT&amp;CK SMB/DCE-RPC lateral movement</li>
+          <li><b>MITRE ATT&amp;CK</b> &amp; <b>ATT&amp;CK for ICS</b> — every alert's technique mapping</li>
+          <li><b>JA4 / JA4+</b> TLS fingerprint spec &amp; threat intel — <b>FoxIO-LLC/ja4</b></li>
+          <li><b>ONNX Runtime</b> · <b>XGBoost</b> · <b>scikit-learn</b> IsolationForest</li>
+          <li>IEEE 1815 (DNP3) · Modbus &amp; CIP / EtherNet-IP specifications</li>
+          <li>Unidirectional-gateway / data-diode monitoring practice (NIST SP 800-82 OT security)</li>
+        </ul>
+        <p class="mono" style="font-size:10.5px;color:var(--ink-faint);margin:auto 0 0;padding-top:12px">
+          Prototype repository, model contract &amp; training guide included in submission bundle.
+        </p>
+      </div>
+    </div>
+    <div class="foot"><span>TeamXOR · StealthTap</span><span>SIH 2026 · PS 26145 · NTRO</span></div>
+  </section>
+
+</div>
+
+<nav class="nav" aria-label="Slide navigation">
+  <button id="prev" aria-label="Previous slide">&#8593;</button>
+  <div class="dots" id="dots"></div>
+  <button id="next" aria-label="Next slide">&#8595;</button>
+</nav>
+
+<script>
+(function(){
+  var deck=document.getElementById('deck');
+  var slides=Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var dotsWrap=document.getElementById('dots');
+  slides.forEach(function(s,i){
+    var inner=document.createElement('span');
+    inner.className='dot'; inner.setAttribute('role','button'); inner.setAttribute('tabindex','0');
+    inner.setAttribute('aria-label','Go to slide '+(i+1));
+    inner.style.cursor='pointer';
+    function jump(){ slides[i].scrollIntoView({behavior:'smooth'}); }
+    inner.addEventListener('click',jump);
+    inner.addEventListener('keydown',function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); jump(); } });
+    dotsWrap.appendChild(inner);
+  });
+  var dotEls=dotsWrap.querySelectorAll('.dot');
+  var cur=0;
+  function mark(i){ cur=i; dotEls.forEach(function(el,j){ el.classList.toggle('on', j===i); }); }
+  var io=new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ mark(slides.indexOf(e.target)); } });
+  },{root:deck,threshold:.55});
+  slides.forEach(function(s){ io.observe(s); });
+  mark(0);
+  function go(n){ n=Math.max(0,Math.min(slides.length-1,n)); slides[n].scrollIntoView({behavior:'smooth'}); }
+  document.getElementById('prev').addEventListener('click',function(){ go(cur-1); });
+  document.getElementById('next').addEventListener('click',function(){ go(cur+1); });
+  window.addEventListener('keydown',function(e){
+    if(e.key==='ArrowDown'||e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){ e.preventDefault(); go(cur+1); }
+    else if(e.key==='ArrowUp'||e.key==='ArrowLeft'||e.key==='PageUp'){ e.preventDefault(); go(cur-1); }
+    else if(e.key==='Home'){ e.preventDefault(); go(0); }
+    else if(e.key==='End'){ e.preventDefault(); go(slides.length-1); }
+  });
+})();
+</script>

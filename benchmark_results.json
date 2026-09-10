@@ -1,0 +1,29 @@
+[
+  {
+    "file": ".\\samples\\simulated_attack_traffic.pcap",
+    "runs": 5,
+    "flows": 600,
+    "wall_time_median": 9.865135431289673,
+    "wall_time_p95": 9.958617925643921,
+    "detection_seconds_median": 1.831,
+    "flows_per_sec_median": 327.6897870016385
+  },
+  {
+    "file": ".\\samples\\modbus_iti_test.pcap",
+    "runs": 5,
+    "flows": 9,
+    "wall_time_median": 8.867584228515625,
+    "wall_time_p95": 8.945752382278442,
+    "detection_seconds_median": 0.743,
+    "flows_per_sec_median": 12.113055181695827
+  },
+  {
+    "file": ".\\samples\\netbios_ssn2.pcap",
+    "runs": 5,
+    "flows": 12329,
+    "wall_time_median": 36.32451319694519,
+    "wall_time_p95": 36.522700548172,
+    "detection_seconds_median": 28.253,
+    "flows_per_sec_median": 436.3784376880331
+  }
+]

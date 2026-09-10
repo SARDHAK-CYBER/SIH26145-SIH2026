@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StealthTap — AI-DPI Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0B0E13;
+    --panel: #12161E;
+    --panel-raised: #171C26;
+    --line: #232A38;
+    --text: #E4E8F1;
+    --text-dim: #8B93A7;
+    --accent: #4DD9C4;
+    --accent-dim: #2B7A6F;
+    --sev-critical: #F0546B;
+    --sev-high: #F0904F;
+    --sev-medium: #E8C15A;
+    --sev-low: #6E7891;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+  }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  header .mark {
+    width: 10px; height: 10px;
+    background: var(--accent);
+    border-radius: 2px;
+    display: inline-block;
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.02em; }
+  header .sub { color: var(--text-dim); font-size: 13px; }
+
+  main { max-width: 960px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  .mode-select { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 40px; }
+  .mode-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 24px;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .mode-card:hover:not(.disabled) { border-color: var(--accent-dim); }
+  .mode-card.active { border-color: var(--accent); background: var(--panel-raised); }
+  .mode-card.disabled { opacity: 0.45; cursor: not-allowed; }
+  .mode-card .num { font-family: 'IBM Plex Mono', monospace; color: var(--accent); font-size: 13px; margin-bottom: 10px; }
+  .mode-card.disabled .num { color: var(--text-dim); }
+  .mode-card h2 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .mode-card p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+  .mode-card .status { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--text-dim); margin-top: 12px; }
+
+  .dropzone {
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    padding: 48px 24px;
+    text-align: center;
+    background: var(--panel);
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .dropzone.drag { border-color: var(--accent); background: var(--panel-raised); }
+  .dropzone p { color: var(--text-dim); font-size: 14px; margin-bottom: 16px; }
+  .dropzone .filename { font-family: 'IBM Plex Mono', monospace; color: var(--accent); font-size: 13px; margin-top: 12px; }
+
+  input[type=file] { display: none; }
+  button {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 500;
+    font-size: 13px;
+    background: var(--accent);
+    color: #05100E;
+    border: none;
+    border-radius: 4px;
+    padding: 10px 20px;
+    cursor: pointer;
+  }
+  button:hover { background: #63e6d3; }
+  button:disabled { background: var(--line); color: var(--text-dim); cursor: not-allowed; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+  button.ghost:hover { border-color: var(--accent-dim); background: transparent; }
+
+  .results { margin-top: 40px; display: none; }
+  .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-bottom: 24px; }
+  .stat { background: var(--panel); padding: 18px; }
+  .stat .label { font-size: 11px; color: var(--text-dim); text-transform: none; margin-bottom: 6px; }
+  .stat .value { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 600; }
+
+  .section-title { font-size: 13px; color: var(--text-dim); margin: 28px 0 12px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { text-align: left; font-weight: 500; color: var(--text-dim); font-size: 11px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  tbody td { padding: 10px 12px; border-bottom: 1px solid var(--line); font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+  tbody tr:hover { background: var(--panel); }
+  .sev-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 10px; font-family: 'IBM Plex Sans', sans-serif; font-weight: 600; }
+  .sev-CRITICAL { background: rgba(240,84,107,0.15); color: var(--sev-critical); }
+  .sev-HIGH { background: rgba(240,144,79,0.15); color: var(--sev-high); }
+  .sev-MEDIUM { background: rgba(232,193,90,0.15); color: var(--sev-medium); }
+  .sev-LOW { background: rgba(110,120,145,0.2); color: var(--sev-low); }
+
+  .empty-state { text-align: center; padding: 40px; color: var(--text-dim); font-size: 13px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; margin-right: 8px; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="mark"></span>
+  <h1>StealthTap</h1>
+  <span class="sub">Advanced AI-DPI — Unidirectional Traffic Analysis</span>
+</header>
+
+<main>
+  <div class="mode-select">
+    <div class="mode-card active" id="mode-upload">
+      <div class="num">01</div>
+      <h2>Upload PCAP File</h2>
+      <p>Submit a captured or replayed .pcap file for full offline analysis across all detection engines.</p>
+      <div class="status">● ACTIVE</div>
+    </div>
+    <div class="mode-card disabled" id="mode-live">
+      <div class="num">02</div>
+      <h2>Live Capture Analysis</h2>
+      <p>Select a network interface and analyze traffic as it arrives, in real time.</p>
+      <div class="status">○ NOT YET AVAILABLE</div>
+    </div>
+  </div>
+
+  <div id="upload-panel">
+    <div class="dropzone" id="dropzone">
+      <p>Drop a .pcap or .pcapng file here, or</p>
+      <button class="ghost" id="browse-btn">Choose file</button>
+      <input type="file" id="file-input" accept=".pcap,.pcapng">
+      <div class="filename" id="filename-display"></div>
+    </div>
+    <div style="margin-top: 16px; text-align: right;">
+      <button id="analyze-btn" disabled>Run analysis</button>
+    </div>
+  </div>
+
+  <div class="results" id="results">
+    <div id="pipeline-badges" style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;"></div>
+    <div class="stat-row">
+      <div class="stat"><div class="label">Flows parsed</div><div class="value mono" id="stat-flows">—</div></div>
+      <div class="stat"><div class="label">DNS queries</div><div class="value mono" id="stat-dns">—</div></div>
+      <div class="stat"><div class="label">Alerts raised</div><div class="value mono" id="stat-alerts">—</div></div>
+      <div class="stat"><div class="label">Detection time</div><div class="value mono" id="stat-time">—</div></div>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin:20px 0 12px;">
+      <div class="section-title" style="margin:0;">DETECTED ALERTS</div>
+      <button class="ghost" id="toggle-json-btn" style="font-size:12px; padding:6px 12px;">View full response JSON</button>
+    </div>
+    <pre id="full-json" class="mono" style="display:none; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:16px; margin-bottom:16px; font-size:11px; max-height:400px; overflow:auto; white-space:pre-wrap; word-break:break-all;"></pre>
+
+    <table>
+      <thead>
+        <tr><th>Severity</th><th>Threat class</th><th>Source</th><th>Destination</th><th>Confidence</th><th>Detected by</th><th>MITRE</th></tr>
+      </thead>
+      <tbody id="alerts-body"></tbody>
+    </table>
+    <div class="empty-state" id="no-alerts" style="display:none;">No alerts raised for this capture.</div>
+  </div>
+</main>
+
+<script>
+const API_BASE = window.STEALTHTAP_API || 'http://localhost:8000';
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('file-input');
+const browseBtn = document.getElementById('browse-btn');
+const analyzeBtn = document.getElementById('analyze-btn');
+const filenameDisplay = document.getElementById('filename-display');
+let selectedFile = null;
+
+browseBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => setFile(e.target.files[0]));
+
+['dragover', 'dragenter'].forEach(evt =>
+  dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(evt =>
+  dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', (e) => {
+  if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+});
+
+function setFile(file) {
+  if (!file) return;
+  selectedFile = file;
+  filenameDisplay.textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+  analyzeBtn.disabled = false;
+}
+
+document.getElementById('mode-live').addEventListener('click', () => {
+  alert('Live Capture Analysis is not available yet — Upload PCAP is the active mode.');
+});
+
+analyzeBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  analyzeBtn.disabled = true;
+  analyzeBtn.innerHTML = '<span class="spinner"></span>Analyzing…';
+
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+
+  try {
+    const resp = await fetch(`${API_BASE}/analyze/pcap`, { method: 'POST', body: formData });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Analysis failed');
+    }
+    const data = await resp.json();
+    renderResults(data);
+  } catch (err) {
+    alert(`Analysis failed: ${err.message}`);
+  } finally {
+    analyzeBtn.disabled = false;
+    analyzeBtn.textContent = 'Run analysis';
+  }
+});
+
+function renderResults(data) {
+  document.getElementById('results').style.display = 'block';
+  document.getElementById('stat-flows').textContent = data.packet_summary.conn_flows;
+  document.getElementById('stat-dns').textContent = data.packet_summary.dns_queries;
+  document.getElementById('stat-alerts').textContent = data.alert_count;
+  document.getElementById('stat-time').textContent =
+    (data.timing.parse_seconds + data.timing.detection_seconds).toFixed(2) + 's';
+
+  const badges = document.getElementById('pipeline-badges');
+  const parserOk = data.parser_used === 'zeek';
+  const modelsOk = (data.models_active || []).length > 0;
+  const suricataRan = (data.pipeline_coverage && data.pipeline_coverage.suricata && data.pipeline_coverage.suricata.ran) || false;
+  badges.innerHTML = `
+    <span class="mono" style="font-size:11px; padding:4px 10px; border-radius:999px; border:1px solid ${parserOk ? 'var(--accent)' : '#E8C15A'}; color:${parserOk ? 'var(--accent)' : '#E8C15A'};">
+      ${parserOk ? '●' : '○'} ${parserOk ? 'Zeek (real parse)' : 'scapy (fallback)'}
+    </span>
+    <span class="mono" style="font-size:11px; padding:4px 10px; border-radius:999px; border:1px solid ${suricataRan ? 'var(--accent)' : '#E8C15A'}; color:${suricataRan ? 'var(--accent)' : '#E8C15A'};">
+      ${suricataRan ? '●' : '○'} Suricata: ${data.suricata_alert_count ?? 0} alert(s)
+    </span>
+    <span class="mono" style="font-size:11px; padding:4px 10px; border-radius:999px; border:1px solid ${modelsOk ? 'var(--accent)' : '#E8C15A'}; color:${modelsOk ? 'var(--accent)' : '#E8C15A'};">
+      ${modelsOk ? '●' : '○'} ML: ${modelsOk ? data.models_active.join(', ') : 'none loaded'}
+    </span>
+    <span class="mono" style="font-size:11px; padding:4px 10px; border-radius:999px; border:1px solid ${data.yara_active ? 'var(--accent)' : '#E8C15A'}; color:${data.yara_active ? 'var(--accent)' : '#E8C15A'};">
+      ${data.yara_active ? '●' : '○'} ${data.yara_active ? 'YARA active' : 'YARA: no rules loaded'}
+    </span>
+  `;
+
+  document.getElementById('full-json').textContent = JSON.stringify(data, null, 2);
+
+  const tbody = document.getElementById('alerts-body');
+  tbody.innerHTML = '';
+  const noAlerts = document.getElementById('no-alerts');
+
+  if (!data.alerts.length) {
+    noAlerts.style.display = 'block';
+    return;
+  }
+  noAlerts.style.display = 'none';
+
+  const order = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+  const sorted = [...data.alerts].sort((a, b) => order[a.severity] - order[b.severity]);
+
+  sorted.forEach((a, i) => {
+    const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.innerHTML = `
+      <td><span class="sev-badge sev-${a.severity}">${a.severity}</span></td>
+      <td>${a.threat_class}</td>
+      <td>${a.flow_identifier.src_ip}:${a.flow_identifier.src_port}</td>
+      <td>${a.flow_identifier.dst_ip}:${a.flow_identifier.dst_port}</td>
+      <td>${a.confidence_score.toFixed(1)}%</td>
+      <td>${a.detection_mode}</td>
+      <td>${a.mitre_attack.technique_id}</td>
+    `;
+    const detailRow = document.createElement('tr');
+    detailRow.style.display = 'none';
+    detailRow.innerHTML = `<td colspan="7" style="padding:0;"><pre class="mono" style="margin:0; padding:14px 18px; font-size:11px; background:rgba(0,0,0,0.2); white-space:pre-wrap; word-break:break-all;">${JSON.stringify(a, null, 2)}</pre></td>`;
+    tr.addEventListener('click', () => {
+      detailRow.style.display = detailRow.style.display === 'none' ? 'table-row' : 'none';
+    });
+    tbody.appendChild(tr);
+    tbody.appendChild(detailRow);
+  });
+}
+
+document.getElementById('toggle-json-btn').addEventListener('click', () => {
+  const el = document.getElementById('full-json');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+});
+</script>
+
+</body>
+</html>

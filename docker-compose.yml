@@ -1,0 +1,202 @@
+# Zeek is deliberately NOT defined here -- it must be attached to the
+# "capture" network namespace created by scripts/setup_netns.sh, with
+# zero IP and no route anywhere:
+#
+#   docker run --network=ns:/var/run/netns/capture \
+#     --cap-drop=ALL --cap-add=NET_RAW --cap-add=NET_ADMIN \
+#     -v stealthtap_zeek_logs:/zeek-logs \
+#     stealthtap-zeek
+#
+# (Verify /zeek-logs matches whatever working directory Zeek is actually
+# configured to write conn.log/dns.log/ssl.log/modbus.log/extracted_files
+# to in zeek/local.zeek -- adjust the mount path below to match if not.)
+#
+# EVERYTHING below this line runs on the normal Docker bridge network.
+# log-shipper only reads Zeek's already-written JSON log files off the
+# shared volume above and produces to Redpanda -- it never touches a raw
+# packet and needs no special network placement.
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"
+
+  redis:
+    # redis-stack-server ships the RedisBloom module (Count-Min Sketch, HLL)
+    image: redis/redis-stack-server:7.2.0-v11
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=stealthtap
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set a real password in .env, do not use a default}
+      - POSTGRES_DB=stealthtap
+    ports:
+      - "5432:5432"
+    volumes:
+      - stealthtap_postgres_data:/var/lib/postgresql/data
+
+  opensearch:
+    # Kept for now (existing OT/IT batch path still writes here). Once
+    # the PostgreSQL-backed API and React/Grafana dashboard are the
+    # primary path, this can be retired -- don't remove it yet, there
+    # are still working consumers depending on it.
+    image: opensearchproject/opensearch:2.14.0
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD:?set a real password in .env, do not use a default}
+    ports:
+      - "9200:9200"
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.14.0
+    environment:
+      - OPENSEARCH_HOSTS=https://opensearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - opensearch
+
+  log-shipper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["python", "src/log_shipper.py"]
+    environment:
+      - REDPANDA_BROKER=redpanda:9092
+      - ZEEK_LOG_DIR=/zeek-logs
+    volumes:
+      - stealthtap_zeek_logs:/zeek-logs:ro
+    depends_on:
+      - redpanda
+
+  streaming-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["python", "-m", "src.streaming_engine", "worker"]
+    environment:
+      - REDPANDA_BROKER=kafka://redpanda:9092
+      - REDIS_URL=redis://redis:6379/0
+      - RELAY_SOCKET=/var/run/stealthtap/alerts.sock
+    volumes:
+      - stealthtap_relay_socket:/var/run/stealthtap
+    depends_on:
+      - redpanda
+      - redis
+      - log-shipper
+
+  zeek-batch:
+    # NEW: real Zeek (+ ICSNPP OT plugins) for uploaded-pcap analysis,
+    # separate from your existing live-capture zeek/Dockerfile. No
+    # capture-namespace isolation needed -- this only ever touches files
+    # handed to it via the shared volumes below, never a live interface.
+    build:
+      context: .
+      dockerfile: zeek-batch.Dockerfile
+    volumes:
+      - stealthtap_zeek_incoming:/incoming
+      - stealthtap_zeek_outgoing:/outgoing
+
+  suricata-batch:
+    # Real signature-based network detection (20,829 ET Open rules),
+    # complementing zeek-batch (protocol parsing) and YARA (file
+    # signatures). Same job-queue pattern, separate volumes -- kept
+    # independent rather than sharing zeek-batch's queue.
+    build:
+      context: .
+      dockerfile: suricata-batch.Dockerfile
+    volumes:
+      - stealthtap_suricata_incoming:/incoming
+      - stealthtap_suricata_outgoing:/outgoing
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint: ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      - DATABASE_URL=postgresql://stealthtap:${POSTGRES_PASSWORD:?set a real password in .env}@postgres:5432/stealthtap
+      - MODELS_DIR=/models
+      - ZEEK_INCOMING_DIR=/incoming
+      - ZEEK_OUTGOING_DIR=/outgoing
+      - SURICATA_INCOMING_DIR=/suricata_incoming
+      - SURICATA_OUTGOING_DIR=/suricata_outgoing
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/models:ro
+      - ./samples:/opt/stealthtap/samples:ro   # bundled pcap for GET /api/sample/analysis
+      - stealthtap_zeek_incoming:/incoming
+      - stealthtap_zeek_outgoing:/outgoing
+      - stealthtap_suricata_incoming:/suricata_incoming
+      - stealthtap_suricata_outgoing:/suricata_outgoing
+    depends_on:
+      - postgres
+      - zeek-batch
+      - suricata-batch
+
+  dashboard:
+    build:
+      context: ./dashboard-app
+      args:
+        VITE_API_BASE: http://localhost:8000
+        VITE_LIVE_API_BASE: http://localhost:8100
+    ports:
+      - "4173:4173"
+    depends_on:
+      - api
+
+  # ── LIVE TAP ──────────────────────────────────────────────────────────
+  # Enable with:  docker compose --profile tap up -d sensor
+  # Runs on the monitoring host, captures $CAPTURE_IFACE at kernel level,
+  # runs the full engine + ONNX pipeline, and forwards alerts to the API's
+  # shared PostgreSQL store. Stealth: host network, only NET_RAW/NET_ADMIN,
+  # NO published ports (control API bound to 127.0.0.1), read-only rootfs.
+  sensor:
+    profiles: ["tap"]
+    build:
+      context: .
+      dockerfile: sensor.Dockerfile
+    network_mode: host          # required to see a real host NIC
+    cap_drop: ["ALL"]
+    cap_add: ["NET_RAW", "NET_ADMIN"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    environment:
+      - STEALTHTAP_API_URL=${STEALTHTAP_API_URL:-http://127.0.0.1:8000}
+      - REDIS_URL=${SENSOR_REDIS_URL:-redis://127.0.0.1:6379/0}
+      - MODELS_DIR=/models
+      - CAPTURE_IFACE=${CAPTURE_IFACE:-eth0}
+      - CAPTURE_BPF=${CAPTURE_BPF:-ip or ip6}
+      - LIVE_HIGHSPEED_PPS=${LIVE_HIGHSPEED_PPS:-50000}
+      - LIVE_HIGHSPEED_MBPS=${LIVE_HIGHSPEED_MBPS:-200}
+    volumes:
+      - ./models:/models:ro
+    restart: unless-stopped
+    # Headless auto-start on the configured interface. Drop `command:` to
+    # run `serve` instead and drive start/stop from the dashboard.
+    command: ["run", "--iface", "${CAPTURE_IFACE:-eth0}", "--bpf", "${CAPTURE_BPF:-ip or ip6}", "--buffer-mb", "128", "--json"]
+
+volumes:
+  stealthtap_zeek_logs:
+  stealthtap_relay_socket:
+  stealthtap_postgres_data:
+  stealthtap_zeek_incoming:
+  stealthtap_zeek_outgoing:
+  stealthtap_suricata_incoming:
+  stealthtap_suricata_outgoing:

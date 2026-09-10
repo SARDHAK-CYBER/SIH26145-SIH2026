@@ -1,0 +1,18 @@
+[
+  {
+    "feature": "modbus_is_write",
+    "importance": 0.88729
+  },
+  {
+    "feature": "modbus_register_address",
+    "importance": 0.08329
+  },
+  {
+    "feature": "modbus_func_dangerous",
+    "importance": 0.02727
+  },
+  {
+    "feature": "modbus_register_sweep_count",
+    "importance": 0.00215
+  }
+]

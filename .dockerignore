@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+node_modules/
+logs/
+.git/
+.env
+*.pem
+*.key
+tests/
+samples/
+*.pcap
+.dockerignore
+Dockerfile
