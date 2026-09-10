@@ -1,0 +1,13 @@
+# Model-training-only dependencies. Install alongside requirements.txt
+# when you want to (re)build the ONNX model artifacts in models/:
+#
+#   pip install -r requirements.txt -r requirements-train.txt
+#   python scripts/train_family.py flow   models/flow_training_data.csv
+#   python scripts/train_family.py modbus models/modbus_training_data.csv
+#
+# The serving pipeline does NOT need these -- it only needs onnxruntime,
+# already in requirements.txt.
+pandas>=2.0
+xgboost>=2.0
+skl2onnx>=1.16
+onnxmltools>=1.12

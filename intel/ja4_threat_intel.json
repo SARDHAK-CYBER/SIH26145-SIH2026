@@ -1,0 +1,126 @@
+{
+  "malicious": {
+    "t13d190900_9dc949149365_97f8aa674fd9": {
+      "application": "Sliver Agent",
+      "fingerprint_type": "ja4",
+      "notes": ""
+    },
+    "t130200_1301_a56c5b993250": {
+      "application": "Sliver Agent",
+      "fingerprint_type": "ja4s",
+      "notes": ""
+    },
+    "t13i190800_9dc949149365_97f8aa674fd9": {
+      "application": "Sliver Agent",
+      "fingerprint_type": "ja4",
+      "notes": ""
+    },
+    "000000000000_4f24da86fad6_bf0f0589fc03": {
+      "application": "Sliver/Havoc C2 Server",
+      "fingerprint_type": "ja4x",
+      "notes": ""
+    },
+    "000000000000_7c32fa18c13e_bf0f0589fc03": {
+      "application": "Sliver/Havoc C2 Server",
+      "fingerprint_type": "ja4x",
+      "notes": ""
+    },
+    "ge11cn020000_9ed1ff1f7b03_cd8dafe26982": {
+      "application": "IcedID Dropper",
+      "fingerprint_type": "ja4h",
+      "notes": ""
+    },
+    "t13d201100_2b729b4bf6f3_9e7b989ebec8": {
+      "application": "IcedID",
+      "fingerprint_type": "ja4",
+      "notes": ""
+    },
+    "t120300_c030_5e2616a54c73": {
+      "application": "IcedID",
+      "fingerprint_type": "ja4s",
+      "notes": ""
+    },
+    "2166164053c1_2166164053c1_30d204a01551": {
+      "application": "Cobalt Strike Cat C2",
+      "fingerprint_type": "ja4x",
+      "notes": ""
+    },
+    "ge11cn060000_4e59edc1297a_4da5efaf0cb": {
+      "application": "Cobalt Strike beacon",
+      "fingerprint_type": "ja4h",
+      "notes": ""
+    },
+    "2bab15409345_af684594efb4_000000000000": {
+      "application": "Qakbot C2",
+      "fingerprint_type": "ja4x",
+      "notes": ""
+    },
+    "1a59268f55e5_1a59268f55e5_795797892f9c": {
+      "application": "Pikabot C2",
+      "fingerprint_type": "ja4x",
+      "notes": "NOT Aegir"
+    },
+    "po10nn060000_cdb958d032b0": {
+      "application": "Darkgate Client",
+      "fingerprint_type": "ja4h",
+      "notes": ""
+    },
+    "po11nn050000_d253db9d024b": {
+      "application": "Lumma Client",
+      "fingerprint_type": "ja4h",
+      "notes": ""
+    },
+    "t12i190700_d83cc789557e_16bbda4055b2": {
+      "application": "Cobalt Strike v4.9.1 beacon",
+      "fingerprint_type": "ja4",
+      "notes": "Cobalt Strike v4.9.1 over wininet"
+    },
+    "t120300_c030_52d195ce1d92": {
+      "application": "Cobalt Strike v4.9.1 beacon",
+      "fingerprint_type": "ja4s",
+      "notes": "Cobalt Strike v4.9.1 over winhttp"
+    },
+    "t12i210700_76e208dd3e22_16bbda4055b2": {
+      "application": "Cobalt Strike v4.9.1 beacon",
+      "fingerprint_type": "ja4",
+      "notes": "Cobalt Strike v4.9.1 over winhttp"
+    },
+    "t12d190800_d83cc789557e_16bbda4055b2": {
+      "application": "Cobalt Strike v4.9.1 beacon",
+      "fingerprint_type": "ja4",
+      "notes": "Cobalt Strike v4.9.1 over wininet"
+    },
+    "t12d210800_76e208dd3e22_16bbda4055b2": {
+      "application": "Cobalt Strike v4.9.1 beacon",
+      "fingerprint_type": "ja4",
+      "notes": "Cobalt Strike v4.9.1 over winhttp"
+    }
+  },
+  "dual_use": {
+    "t13d880900_fcb5b95cb75a_b0d3b4ac2a14": {
+      "application": "SoftEther VPN Client",
+      "fingerprint_type": "ja4",
+      "notes": ""
+    },
+    "t13i880900_fcb5b95cb75a_b0d3b4ac2a14": {
+      "application": "SoftEther VPN Client",
+      "fingerprint_type": "ja4",
+      "notes": ""
+    },
+    "d55f458d5a6c_d55f458d5a6c_0fc8c171b6ae": {
+      "application": "SoftEther VPN Server",
+      "fingerprint_type": "ja4x",
+      "notes": ""
+    },
+    "ge11nn17enus_d488a5d46f42_000000000000_000000000000": {
+      "application": "ngrok 3.8.0",
+      "fingerprint_type": "ja4h",
+      "notes": "Chrome through ngrok"
+    },
+    "ge11nr15enus_a978addab902_000000000000_000000000000": {
+      "application": "ngrok 3.8.0",
+      "fingerprint_type": "ja4h",
+      "notes": "Chrome through ngrok"
+    }
+  }
+}

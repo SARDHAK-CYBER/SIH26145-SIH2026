@@ -1,0 +1,50 @@
+# ───────────── secrets ─────────────
+.env
+*.pem
+*.key
+*.p12
+*_rsa
+id_*
+secrets.*
+
+# ───────────── python ─────────────
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ───────────── node / frontend ─────────────
+node_modules/
+dashboard-app/dist/
+dashboard-app/dist-ssr/
+dashboard/node_modules/
+*.tsbuildinfo
+.vite/
+
+# ───────────── runtime / generated ─────────────
+logs/
+*.log
+zeek-logs/
+extracted_files/
+eve.json
+*.sock
+.claude/
+
+# ───────────── local capture artefacts ─────────────
+capture_*.pcap
+live_*.pcap
+/tmp_*
+
+# ───────────── editor / OS ─────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

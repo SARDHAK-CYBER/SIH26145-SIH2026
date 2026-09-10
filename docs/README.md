@@ -2,13 +2,6 @@
 
 **Team:** TeamXOR · **Event:** Smart India Hackathon 2026 · **PS ID:** 26145 · **Org:** National Technical Research Organisation (NTRO)
 
-**Repository:** https://github.com/SARDHAK-CYBER/SIH26145-SIH2026
-
-> **Secrets:** `.env` is git-ignored. Copy `.env.example` → `.env` and set your own
-> `POSTGRES_PASSWORD` / `OPENSEARCH_ADMIN_PASSWORD`; nothing else in the tree contains
-> credentials. `docker-compose.yml` reads them via `${VAR:?}` interpolation and fails
-> loudly if unset — there are no default passwords.
-
 ---
 
 ## 1. What this is
@@ -31,19 +24,16 @@ It runs as an IDS-style pipeline — protocol parsing, signature matching, behav
 ### Full stack (Docker)
 
 ```bash
-cp .env.example .env      # set OPENSEARCH_ADMIN_PASSWORD and POSTGRES_PASSWORD (required — compose refuses to start without them)
+cp .env.example .env      # set OPENSEARCH_ADMIN_PASSWORD and POSTGRES_PASSWORD
 docker compose up -d --build
 docker compose ps         # 11 services Up
 curl http://localhost:8000/health     # {"status":"ok","models_loaded":["flow","dns","modbus"],...}
 ```
 
-- **Dashboard** → http://localhost:4173 — SOC console (`dashboard-app/`, React + TS + Vite)
+- **Dashboard** → http://localhost:4173 (Upload PCAP + Live Capture tabs)
 - **API docs** → http://localhost:8000/docs
 - **Alerts** → `GET http://localhost:8000/alerts`
 - **OpenSearch Dashboards** (streaming path) → http://localhost:5601
-
-Frontend dev server, no Docker: `cd dashboard-app && npm install && npm run dev` → http://localhost:5173
-(reads `VITE_API_BASE` / `VITE_LIVE_API_BASE`, falls back to bundled sample data when the API is down).
 
 Generate a synthetic test capture: `python pcap_simulator.py` → upload `simulated_attack_traffic.pcap`.
 
@@ -141,44 +131,7 @@ Pydantic v2, `extra="forbid"`. `alert_id, timestamp, severity, confidence_score(
 
 ---
 
-## 5. Dashboard (`dashboard-app/`)
-
-React 18 + TypeScript + Vite 5, recharts, IBM Plex. Every panel is wired to a real
-API endpoint (`dashboard-app/src/api/client.ts`); no mock data path except the
-offline fallback. Served in Docker by `serve -s dist -l 4173`.
-
-- **Shell** — a left **sidebar** (brand mark at top-left + vertical nav) and a slim
-  **top bar** (global search, attribute filters, temporal range picker, and an
-  **Auto / Light / Dark** theme toggle persisted to `localStorage` and applied as
-  `data-theme` on `<html>`). To swap in a real logo file, drop
-  `dashboard-app/src/assets/logo.png` (or `.svg`) — `Logo.tsx` picks it up at build time.
-- **Dashboard** — KPI row, outlier-band chart, threat-class donut, resource dials,
-  top-talkers, live incident feed, and a **Custom Visualizers** section: pick any of
-  the 8 Visualizer Studio engines and add it as a saved panel.
-- **Discover** — OpenSearch-Discover-style event explorer: free-text filter over the
-  full alert JSON, a documents-over-time histogram, a click-to-pin field list, and an
-  expandable-row document table → forensic drawer.
-- **Visualizer Studio** — the 8 visualization engines (outlier band, donut, spline
-  waves, stacked bars, top-N, MITRE ATT&CK navigator, fabric dials, SHAP explainability).
-- **Index Patterns / JSON Studio** — field dictionaries per index + OpenSearch Query
-  DSL generation and payload inspection.
-- **AI Models & Engines** — per-family metric cards from `models/MANIFEST.json`
-  (`GET /models/manifest`), a live scoring sandbox (`POST /score/{family}`), and the
-  ENG-01…13 catalogue with real algorithms.
-- **PCAP Ingest** — drag-and-drop `.pcap`/`.pcapng` → `POST /analyze/pcap`; 1-click
-  sample capture via `GET /api/sample/analysis`.
-- **Live Capture** — NIC picker (`GET /capture/interfaces`), BPF filter, kernel-buffer
-  size, Start/Stop, and an SSE-fed telemetry grid (pps, Mbit/s, kernel/userspace drops,
-  active flows, detection-latency p50/p95/p99).
-
-Backend endpoints it depends on: `GET /health`, `GET /models/manifest`,
-`POST /score/{family}`, `POST /analyze/pcap`, `GET /alerts`, `GET /api/sample/analysis`,
-`GET /api/pipeline/status`, `GET /api/index-patterns`, and `/capture/*`
-(`src/api/dashboard.py` + `src/api/live_capture.py`, both mounted in `src/api/main.py`).
-
----
-
-## 6. Live capture — kernel-level, latency-measured
+## 5. Live capture — kernel-level, latency-measured
 
 `src/capture/` is the in-process live path (no Zeek, no containers required).
 
@@ -193,7 +146,7 @@ Backend endpoints it depends on: `GET /health`, `GET /models/manifest`,
 
 ---
 
-## 7. Project layout
+## 6. Project layout
 
 ```
 stealthtap-ntro/
@@ -215,9 +168,7 @@ stealthtap-ntro/
 │   └── simulate_attacks.py, yara_scan_worker.py
 ├── rules/                         ~401 YARA rules + 20,829 Suricata ET Open rules
 ├── intel/                         real JA4 threat intel (FoxIO)
-├── dashboard-app/                 SOC dashboard — React + TS + Vite (sidebar shell, Discover, Visualizer Studio, Live Capture, Auto/Light/Dark)
-│   └── src/{components,api/client.ts,styles/globals.css,types}
-├── dashboard/                     legacy single-file HTML mock-ups (kept for reference)
+├── dashboard-app/                 React + TypeScript + Vite (Upload + Live modes)
 ├── docs/                          PRD.md, MODEL_CONTRACT.md, TRAINING_GUIDE.md, LIVE_CAPTURE_DEPLOYMENT.md
 ├── docker-compose.yml             11 core services + `sensor` (profile: tap)
 ├── Dockerfile, sensor.Dockerfile, zeek-batch.Dockerfile, suricata-batch.Dockerfile
@@ -227,7 +178,7 @@ stealthtap-ntro/
 
 ---
 
-## 8. Current status — honest
+## 7. Current status — honest
 
 | Component | Status |
 |---|---|
@@ -245,20 +196,13 @@ stealthtap-ntro/
 | Pipeline coverage transparency | every analysis reports per-tool records-processed / alerts-fired |
 | Detection latency & throughput (PS constraint d) | **measured on the live path** (p50/p95/p99 + pps/Mbit/s + kernel drops), reported live in `/capture/status` |
 
-**Last verified** (local, this checkout): `pytest -q tests/` → **59 passed**; all core
-modules + ENG-01…13 import clean; `docker compose config` valid (11 services + `sensor`);
-`scripts/analyze_local.py` on the sample pcap → 16 alerts, `dns` XGBoost + rule engines
-firing, per-engine coverage reported; `dashboard-app` `npm run build` green.
-`src/streaming_engine.py` needs `faust-streaming` (installed only in the
-`streaming-engine` container, listed in `requirements.txt`).
-
 **Known open items:** (1) upload-path JA4 in `zeek-batch` is disabled — `FoxIO-LLC/ja4` is not a valid zkg shortname; set the `JA4_ZKG_SOURCE` build arg to a reachable source to enable it (the **live path** JA4 works via `src/capture/ja4.py`). (2) `flow`/`modbus` models were trained on modest in-repo datasets — retrain on CICIDS2017/2018 and CIC Modbus 2023 per `docs/TRAINING_GUIDE.md` for submission-grade numbers. (3) the live streaming path needs a real load test. (4) on some Windows dev hosts scapy's first import is slow/blocking — `SCAPY_USE_PCAPDNET=1` (set automatically by `src/capture/__init__.py` and `tests/conftest.py`) mitigates it; Linux/Docker are unaffected.
 
 Full detail: **`docs/PRD.md`** and **`docs/StealthTap_PRD_Status_Gap_Report.md`**.
 
 ---
 
-## 9. License notes
+## 8. License notes
 
 Bundles third-party open-source detection content, licenses kept alongside:
 - `rules/LICENSE_AND_ATTRIBUTION.md` — YARA rules (GPLv2, Yara-Rules/rules)

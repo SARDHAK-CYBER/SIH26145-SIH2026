@@ -1,0 +1,38 @@
+[
+  {
+    "feature": "orig_bytes",
+    "importance": 0.75777
+  },
+  {
+    "feature": "byte_ratio",
+    "importance": 0.17061
+  },
+  {
+    "feature": "duration_s",
+    "importance": 0.03871
+  },
+  {
+    "feature": "resp_bytes",
+    "importance": 0.01061
+  },
+  {
+    "feature": "proto_icmp",
+    "importance": 0.00931
+  },
+  {
+    "feature": "proto_tcp",
+    "importance": 0.00385
+  },
+  {
+    "feature": "bytes_per_second",
+    "importance": 0.0034
+  },
+  {
+    "feature": "total_bytes",
+    "importance": 0.00302
+  },
+  {
+    "feature": "proto_udp",
+    "importance": 0.00273
+  }
+]
