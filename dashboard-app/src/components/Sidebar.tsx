@@ -42,7 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, alertC
         <circle cx="12" cy="12" r="9" />
         <path d="M12 3v9l6 3" />
       </>),
-      badge: '8',
+      badge: '10',
     },
     {
       id: 'index_patterns',

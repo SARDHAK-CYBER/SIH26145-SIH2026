@@ -22,6 +22,19 @@ import type {
   ThreatClass,
   PipelineStatus,
 } from './types/alert';
+import type { VizConfig } from './lib/vizEngine';
+
+const PANELS_KEY = 'stealthtap-dash-panels-v2';
+
+function loadPanels(): VizConfig[] {
+  try {
+    const raw = localStorage.getItem(PANELS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveNavTab>('dashboard');
@@ -31,6 +44,15 @@ export default function App() {
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [isTemporalModalOpen, setIsTemporalModalOpen] = useState(false);
   const [pipeline, setPipeline] = useState<PipelineStatus | null>(null);
+
+  // Custom dashboard panels built in Visualizer Studio — persisted, always
+  // re-computed live from the current `filteredResult`, never cached values.
+  const [customPanels, setCustomPanels] = useState<VizConfig[]>(loadPanels);
+  useEffect(() => {
+    try { localStorage.setItem(PANELS_KEY, JSON.stringify(customPanels)); } catch { /* ignore */ }
+  }, [customPanels]);
+  const addPanel = (config: VizConfig) => setCustomPanels((p) => [...p, config]);
+  const removePanel = (id: string) => setCustomPanels((p) => p.filter((c) => c.id !== id));
 
   // Auto / Light / Dark theme — persisted, applied to <html data-theme>
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -212,6 +234,9 @@ export default function App() {
                 data={filteredResult}
                 onSelectAlert={setSelectedAlert}
                 onFilterByThreat={(tc) => handleUpdateFilter('threatClass', tc)}
+                panels={customPanels}
+                onRemovePanel={removePanel}
+                onCreateVisualization={() => setActiveTab('visualizers')}
               />
             )}
 
@@ -220,7 +245,7 @@ export default function App() {
             )}
 
             {activeTab === 'visualizers' && filteredResult && (
-              <VisualizerStudio data={filteredResult} />
+              <VisualizerStudio data={filteredResult} panelCount={customPanels.length} onAddToDashboard={addPanel} />
             )}
 
             {activeTab === 'index_patterns' && <IndexPatternsView />}
