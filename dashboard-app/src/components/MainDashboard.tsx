@@ -1,18 +1,13 @@
 import React from 'react';
 import {
   ResponsiveContainer,
-  AreaChart,
-  Area,
   PieChart,
   Pie,
   Cell,
-  XAxis,
-  YAxis,
   Tooltip,
-  Legend,
 } from 'recharts';
 import type { AnalysisResponse, Alert, Severity, ThreatClass } from '../types/alert';
-import type { VizConfig } from '../lib/vizEngine';
+import type { VizConfig, BucketInterval } from '../lib/vizEngine';
 import { VIZ_TYPES, runAggregation } from '../lib/vizEngine';
 import { VizChart } from './VizChart';
 
@@ -72,19 +67,23 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5);
 
-  // Outlier series mimicking Palo Alto Web Activity Outlier with shaded corridor
-  const outlierTimeline = [
-    { time: '14:00', eventCount: 18, lowerThreshold: 10, upperThreshold: 35, baseline: 22 },
-    { time: '14:05', eventCount: 24, lowerThreshold: 12, upperThreshold: 38, baseline: 25 },
-    { time: '14:10', eventCount: 22, lowerThreshold: 10, upperThreshold: 36, baseline: 23 },
-    { time: '14:15', eventCount: 88, lowerThreshold: 15, upperThreshold: 45, baseline: 30 }, // Spiking outlier!
-    { time: '14:20', eventCount: 65, lowerThreshold: 14, upperThreshold: 42, baseline: 28 }, // Outlier
-    { time: '14:25', eventCount: 31, lowerThreshold: 12, upperThreshold: 40, baseline: 26 },
-    { time: '14:30', eventCount: 28, lowerThreshold: 10, upperThreshold: 35, baseline: 22 },
-    { time: '14:35', eventCount: 94, lowerThreshold: 14, upperThreshold: 44, baseline: 29 }, // Second DDoS / Recon outlier!
-    { time: '14:40', eventCount: 42, lowerThreshold: 12, upperThreshold: 38, baseline: 25 },
-    { time: '14:45', eventCount: 25, lowerThreshold: 10, upperThreshold: 35, baseline: 22 },
-  ];
+  // Real alert-volume-over-time, split by severity -- computed live from
+  // this analysis result (auto-picks a bucket granularity from the actual
+  // timestamp span instead of a fixed interval, since an upload can be a
+  // few seconds of traffic or several hours).
+  const alertTimes = data.alerts.map((a) => a.timestamp);
+  const span = alertTimes.length > 1 ? Math.max(...alertTimes) - Math.min(...alertTimes) : 0;
+  const timelineInterval: BucketInterval = span <= 600 ? 'minute' : span <= 6 * 3600 ? '5min' : span <= 3 * 86400 ? 'hour' : 'day';
+  const timelineResult = runAggregation(data, {
+    id: 'main-dashboard-timeline', title: 'Alerts over time', indexPattern: 'stealthtap-alerts-*',
+    type: 'area', metric: { fn: 'count' },
+    bucket: { kind: 'date_histogram', field: 'timestamp', interval: timelineInterval },
+    split: { field: 'severity' }, filters: [],
+  });
+
+  const flaggedPct = data.packet_summary.conn_flows > 0
+    ? ((data.alert_count / data.packet_summary.conn_flows) * 100).toFixed(1)
+    : '0.0';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -97,7 +96,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
             {data.packet_summary.conn_flows.toLocaleString()}
           </div>
           <div className="kpi-sub">
-            <span style={{ color: 'var(--accent-emerald)' }}>↑ 12.4%</span>
+            <span style={{ color: 'var(--accent-emerald)' }}>{flaggedPct}% flagged</span>
             <span>{data.packet_summary.dns_queries} DNS • {data.packet_summary.tls_sessions} TLS</span>
           </div>
         </div>
@@ -161,82 +160,21 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         </div>
       </div>
 
-      {/* Row 2: Palo Alto Anomaly Outlier Visualizer & Threat Donut */}
+      {/* Row 2: Alert Timeline & Threat Donut */}
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 20 }}>
-        {/* Palo Alto Web & Network Outlier Chart with Shaded Corridor */}
+        {/* Alert volume over time, by severity -- real, from this result */}
         <div className="glass" style={{ padding: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <div>
-              <h2 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
-                Web &amp; Network Activity Outlier Visualizer
-              </h2>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                Dynamic threshold corridor with real-time outlier anomaly spikes
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 12, fontSize: 11 }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 8, height: 8, background: 'var(--accent-cyan)', borderRadius: 2 }} />
-                Activity Spikes
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-dim)' }}>
-                <span style={{ width: 8, height: 8, background: 'var(--chart-band-line)', borderRadius: 2 }} />
-                Baseline Corridor
-              </span>
+          <div style={{ marginBottom: 14 }}>
+            <h2 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
+              Alert Volume Over Time
+            </h2>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {data.alert_count} alerts from this analysis, bucketed per {timelineInterval === '5min' ? '5 minutes' : timelineInterval} and split by severity
             </div>
           </div>
 
           <div style={{ height: 240, width: '100%' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={outlierTimeline} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="spikeGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.7} />
-                    <stop offset="95%" stopColor="var(--accent-cyan)" stopOpacity={0.0} />
-                  </linearGradient>
-                  <linearGradient id="corridorGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--chart-band)" stopOpacity={0.9} />
-                    <stop offset="95%" stopColor="var(--chart-band)" stopOpacity={0.15} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="time" stroke="var(--text-dim)" fontSize={11} tickLine={false} />
-                <YAxis stroke="var(--text-dim)" fontSize={11} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--tooltip-bg)',
-                    border: '1px solid var(--glass-border)',
-                    borderRadius: 8,
-                    fontSize: 12,
-                    boxShadow: '0 8px 30px rgba(0,0,0,0.8)',
-                  }}
-                />
-                {/* Confidence Corridor Band */}
-                <Area
-                  type="monotone"
-                  dataKey="upperThreshold"
-                  stroke="var(--chart-band-line)"
-                  strokeDasharray="3 3"
-                  fill="url(#corridorGradient)"
-                  name="Upper Bound"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="lowerThreshold"
-                  stroke="var(--chart-band)"
-                  fill="transparent"
-                  name="Lower Bound"
-                />
-                {/* Actual Event Velocity Spikes */}
-                <Area
-                  type="monotone"
-                  dataKey="eventCount"
-                  stroke="var(--accent-cyan)"
-                  strokeWidth={2.5}
-                  fill="url(#spikeGradient)"
-                  name="Observed Events"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <VizChart result={timelineResult} type="area" height={240} />
           </div>
         </div>
 
