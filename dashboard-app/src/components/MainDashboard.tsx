@@ -321,76 +321,8 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         </div>
       </div>
 
-      {/* Row 3: Fortinet System Gauges + Top Talkers / Vectors */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        {/* Fortinet System Resources & Pipeline Gauges */}
-        <div className="glass" style={{ padding: 20 }}>
-          <div style={{ marginBottom: 14 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>System Resources & Ingestion Dials</h2>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              Hardware utilization & inspection throughput status
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, textAlign: 'center' }}>
-            {/* CPU Ring */}
-            <div>
-              <div style={{ position: 'relative', width: 70, height: 70, margin: '0 auto' }}>
-                <svg width="70" height="70" viewBox="0 0 36 36">
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-cyan)" strokeDasharray="18, 100" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-                <div className="mono" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>
-                  18%
-                </div>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>CPU Load</div>
-            </div>
-
-            {/* Memory Ring */}
-            <div>
-              <div style={{ position: 'relative', width: 70, height: 70, margin: '0 auto' }}>
-                <svg width="70" height="70" viewBox="0 0 36 36">
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-teal)" strokeDasharray="42, 100" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-                <div className="mono" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>
-                  42%
-                </div>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>Memory</div>
-            </div>
-
-            {/* Sessions / Flows Ring */}
-            <div>
-              <div style={{ position: 'relative', width: 70, height: 70, margin: '0 auto' }}>
-                <svg width="70" height="70" viewBox="0 0 36 36">
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-violet)" strokeDasharray="68, 100" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-                <div className="mono" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>
-                  68%
-                </div>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>Active Flows</div>
-            </div>
-
-            {/* ML Confidence Ring */}
-            <div>
-              <div style={{ position: 'relative', width: 70, height: 70, margin: '0 auto' }}>
-                <svg width="70" height="70" viewBox="0 0 36 36">
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3" />
-                  <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-amber)" strokeDasharray="94, 100" strokeWidth="3" strokeLinecap="round" />
-                </svg>
-                <div className="mono" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>
-                  94%
-                </div>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 6 }}>Avg Conf.</div>
-            </div>
-          </div>
-        </div>
-
+      {/* Row 3: Top Talkers / Vectors */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 20 }}>
         {/* Top Talker IPs & Target Ports */}
         <div className="glass" style={{ padding: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
