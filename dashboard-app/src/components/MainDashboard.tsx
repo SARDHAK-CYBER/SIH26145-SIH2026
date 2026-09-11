@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -11,27 +11,18 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
-import type { AnalysisResponse, Alert, Severity, ThreatClass, VisualizerType } from '../types/alert';
-import { VISUALIZERS, VISUALIZER_LABEL, VisualizerCanvas } from './VisualizerCanvas';
-
-const PANELS_KEY = 'stealthtap-dash-panels';
-
-function loadPanels(): VisualizerType[] {
-  try {
-    const raw = localStorage.getItem(PANELS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    const valid = new Set(VISUALIZERS.map((v) => v.id));
-    return Array.isArray(parsed) ? parsed.filter((p): p is VisualizerType => valid.has(p)) : [];
-  } catch {
-    return [];
-  }
-}
+import type { AnalysisResponse, Alert, Severity, ThreatClass } from '../types/alert';
+import type { VizConfig } from '../lib/vizEngine';
+import { VIZ_TYPES, runAggregation } from '../lib/vizEngine';
+import { VizChart } from './VizChart';
 
 interface MainDashboardProps {
   data: AnalysisResponse;
   onSelectAlert: (alert: Alert) => void;
   onFilterByThreat: (threatClass: ThreatClass) => void;
+  panels: VizConfig[];
+  onRemovePanel: (id: string) => void;
+  onCreateVisualization: () => void;
 }
 
 const SEVERITY_COLORS: Record<Severity, string> = {
@@ -49,18 +40,10 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
   data,
   onSelectAlert,
   onFilterByThreat,
+  panels,
+  onRemovePanel,
+  onCreateVisualization,
 }) => {
-  // User-added visualizer panels (persisted)
-  const [panels, setPanels] = useState<VisualizerType[]>(loadPanels);
-  const [pickerType, setPickerType] = useState<VisualizerType>(VISUALIZERS[0].id);
-
-  useEffect(() => {
-    try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)); } catch { /* ignore */ }
-  }, [panels]);
-
-  const addPanel = () => setPanels((p) => [...p, pickerType]);
-  const removePanel = (idx: number) => setPanels((p) => p.filter((_, i) => i !== idx));
-
   // Severity pie data
   const severityPie = (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as Severity[])
     .map((sev) => ({ name: sev, value: data.severity_counts[sev] || 0 }))
@@ -463,50 +446,46 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
         </div>
       </div>
 
-      {/* Custom Visualizers — user-composed panels */}
+      {/* Custom Visualizers — built in Visualizer Studio, computed live from this result */}
       <div className="glass" style={{ padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: panels.length ? 16 : 0 }}>
           <div>
             <h2 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Custom Visualizers</h2>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              Add any Visualizer Studio engine as a panel here. Your layout is saved on this device.
+              Aggregations over the current analysis result — built in Visualizer Studio, saved on this device.
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <select
-              className="mono"
-              value={pickerType}
-              onChange={(e) => setPickerType(e.target.value as VisualizerType)}
-              style={{
-                fontSize: 12, padding: '7px 10px', borderRadius: 'var(--radius-sm)',
-                background: 'var(--bg-inset)', color: 'var(--text)',
-                border: '1px solid var(--glass-border)', fontFamily: 'inherit',
-              }}
-            >
-              {VISUALIZERS.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-            </select>
-            <button className="btn-primary" onClick={addPanel} style={{ fontSize: 12, padding: '7px 14px' }}>
-              + Add Visualizer
-            </button>
-          </div>
+          <button className="btn-primary" onClick={onCreateVisualization} style={{ fontSize: 12, padding: '7px 14px' }}>
+            + Create Visualization
+          </button>
         </div>
 
-        {panels.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {panels.map((t, idx) => (
-              <div key={`${t}-${idx}`} className="glass-raised" style={{ padding: 18, borderRadius: 'var(--radius-md)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{VISUALIZER_LABEL[t]}</span>
+        {panels.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', padding: '10px 0' }}>
+            No visualizations yet. Build one in Visualizer Studio — pick an index pattern, a metric, a bucket and
+            filters — then “Add to Dashboard” to pin it here.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 16 }}>
+            {panels.map((cfg) => (
+              <div key={cfg.id} className="glass-raised" style={{ padding: 18, borderRadius: 'var(--radius-md)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{cfg.title}</div>
+                    <div className="mono" style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+                      {VIZ_TYPES.find((t) => t.id === cfg.type)?.label} · {cfg.indexPattern}
+                    </div>
+                  </div>
                   <button
                     className="btn-ghost"
-                    onClick={() => removePanel(idx)}
-                    style={{ fontSize: 11, padding: '4px 10px' }}
-                    aria-label={`Remove ${VISUALIZER_LABEL[t]} panel`}
+                    onClick={() => onRemovePanel(cfg.id)}
+                    style={{ fontSize: 11, padding: '4px 10px', flexShrink: 0 }}
+                    aria-label={`Remove ${cfg.title} panel`}
                   >
                     Remove
                   </button>
                 </div>
-                <VisualizerCanvas type={t} data={data} bare />
+                <VizChart result={runAggregation(data, cfg)} type={cfg.type} height={260} />
               </div>
             ))}
           </div>

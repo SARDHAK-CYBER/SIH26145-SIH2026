@@ -126,16 +126,6 @@ export interface TemporalRange {
   refreshSeconds: number;
 }
 
-export type VisualizerType =
-  | 'outlier'
-  | 'donut'
-  | 'timeline'
-  | 'stacked_bar'
-  | 'top_talkers'
-  | 'mitre_matrix'
-  | 'gauges'
-  | 'ai_explain';
-
 export type ActiveNavTab =
   | 'dashboard'
   | 'discover'
