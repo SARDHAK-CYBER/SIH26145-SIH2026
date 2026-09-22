@@ -45,7 +45,6 @@ if ROOT not in sys.path:
 from src.capture.backends import select_backend, capabilities, CaptureError
 from src.capture.flow_assembler import FlowAssembler
 from src.capture.interfaces import list_interfaces, resolve_capture_name
-from src.flow_mapping import map_record
 
 try:
     # Native Rust flow assembler (native/stealthtap_core) -- byte-for-byte
@@ -59,14 +58,12 @@ except ImportError:
 
 _FORCE_PYTHON_LIVE_ASSEMBLER = os.environ.get("STEALTHTAP_FORCE_PYTHON_LIVE_ASSEMBLER") == "1"
 
-try:
-    from src.inference.model_server import HybridModelServer, MIN_ML_CONFIDENCE
-    from src.inference.ml_alerts import build_ml_alert
-    from src.inference.fusion import standalone_threshold
-    _ML_OK = True
-except Exception as _exc:  # onnxruntime missing etc.
-    _ML_OK = False
-    MIN_ML_CONFIDENCE = 0.6
+from src.capture.scoring import (
+    ScoringEngine, DISPATCH_IMMEDIATE as _DISPATCH_IMMEDIATE,
+    DISPATCH_CONN_SNAPSHOT as _DISPATCH_CONN_SNAPSHOT,
+    DISPATCH_CONN_EXPIRE as _DISPATCH_CONN_EXPIRE,
+)
+from src.capture.engine_pool import EngineWorkerPool
 
 AlertCB = Callable[[dict], None]
 
@@ -74,20 +71,7 @@ SNAPSHOT_INTERVAL_S = float(os.environ.get("LIVE_SNAPSHOT_INTERVAL", "2.0"))
 ALERT_COOLDOWN_S = float(os.environ.get("LIVE_ALERT_COOLDOWN", "30.0"))
 HIGHSPEED_PPS = float(os.environ.get("LIVE_HIGHSPEED_PPS", "50000"))
 HIGHSPEED_MBPS = float(os.environ.get("LIVE_HIGHSPEED_MBPS", "200"))
-
-# log_type -> engine keys (mirrors src/api/pcap_analysis.py). For `conn`
-# the engine set depends on the phase: a mid-flight SNAPSHOT feeds only
-# the rate/fan-out engines that genuinely benefit from an incremental
-# view; the per-flow byte-ratio (ENG-06) and cross-flow periodicity
-# (ENG-02) run when the flow is COMPLETE (expire), so a half-finished
-# TLS handshake snapshot can't false-positive as exfiltration.
-_DISPATCH_IMMEDIATE = {
-    "dns": ("eng03",), "ssl": ("eng04",),
-    "modbus": ("eng07",), "dnp3": ("eng07",),
-    "http": ("eng09",), "kerberos": ("eng11",),
-}
-_DISPATCH_CONN_SNAPSHOT = ("eng01", "eng05", "eng13")
-_DISPATCH_CONN_EXPIRE = ("eng01", "eng02", "eng05", "eng06", "eng13")
+DEFAULT_ENGINE_WORKERS = int(os.environ.get("LIVE_ENGINE_WORKERS", "1"))
 _IMMEDIATE = set(_DISPATCH_IMMEDIATE)   # latency measurable end-to-end
 
 
@@ -139,7 +123,7 @@ class LiveAgent:
     def __init__(self, iface: str, bpf: Optional[str] = None, *,
                  prefer_kernel: bool = True, buffer_mb: int = 64, promisc: bool = True,
                  queue_size: int = 200_000, alert_sink: Optional[AlertCB] = None,
-                 cooldown_s: float = ALERT_COOLDOWN_S):
+                 cooldown_s: float = ALERT_COOLDOWN_S, num_workers: int = DEFAULT_ENGINE_WORKERS):
         self.iface_req = iface
         self.iface = resolve_capture_name(iface)
         self.bpf = bpf
@@ -147,6 +131,7 @@ class LiveAgent:
         self.buffer_mb = buffer_mb
         self.promisc = promisc
         self.cooldown_s = cooldown_s
+        self.num_workers_req = max(1, num_workers)
         self._q: "queue.Queue" = queue.Queue(maxsize=queue_size)
         if NATIVE_LIVE_ASSEMBLER_AVAILABLE and not _FORCE_PYTHON_LIVE_ASSEMBLER:
             self._assembler = NativeFlowAssemblerAdapter()
@@ -167,65 +152,38 @@ class LiveAgent:
         self._started_at = 0.0
         self.stats = {"dropped": 0, "alerts": 0, "backend": None, "kernel_level": False,
                       "kernel_buffer_set": None}
-        self._engines = None
-        self._model_server = None
-        self._baseline = None
+        self._scoring: Optional[ScoringEngine] = None   # num_workers == 1: in-process
+        self._pool: Optional[EngineWorkerPool] = None    # num_workers  > 1: multi-core
 
     # ---------------- engine wiring ----------------
     def _build_engines(self):
-        from redis import Redis
-        from src.engines.eng01_ddos import VolumetricDDoSDetector
-        from src.engines.eng02_c2_beaconing import C2BeaconingDetector
-        from src.engines.eng03_dga_dns import DGADetector
-        from src.engines.eng04_encrypted_malware import EncryptedMalwareDetector
-        from src.engines.eng05_recon import ReconDetector
-        from src.engines.eng06_exfiltration import ExfiltrationDetector
-        from src.engines.eng07_ot_anomaly import OTIndustrialAnomalyDetector
-        from src.engines.eng09_http_threats import HTTPThreatDetector
-        from src.engines.eng11_kerberos import KerberosAttackDetector
-        from src.engines.eng13_bruteforce import BruteForceDetector
+        """num_workers==1: one ScoringEngine in-process, identical to the
+        original single-core behaviour. num_workers>1: a pool of worker
+        PROCESSES, each with its own ScoringEngine, fed by _consume() below
+        -- see src/capture/engine_pool.py for why this is correct (native
+        assembly stays single-process; only assembled records get sharded,
+        by source IP, which is what ENG-05's in-process state and Redis's
+        cross-worker sharing both need).
 
-        try:
-            r = Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
-                               socket_connect_timeout=1, socket_timeout=1)
-            r.ping()
-        except Exception:
-            # No Redis (desktop install / bare Linux host). ENG-01/02/06/13
-            # FAIL OPEN without a store and would silently detect nothing, so
-            # use the in-process store -- same commands, real TTL expiry.
-            from src.memstore import MemoryStore
-            r = MemoryStore()
-            print("[live_agent] no Redis reachable -- using the in-process state store")
+        Multi-worker mode requires a REAL Redis (not the in-process
+        MemoryStore fallback) for ENG-01/02/06/13 to stay correct across
+        worker processes -- if none is reachable this downgrades to
+        num_workers=1 rather than run with silently-inconsistent state."""
+        if self.num_workers_req > 1:
+            from src.capture.scoring import make_redis_client
+            _, redis_shared = make_redis_client()
+            if not redis_shared:
+                print(f"[live_agent] num_workers={self.num_workers_req} requested but no Redis "
+                      f"reachable -- downgrading to num_workers=1 (multi-core state would be "
+                      f"per-process-inconsistent otherwise)")
+                self.num_workers_req = 1
 
-        if _ML_OK:
-            try:
-                self._model_server = HybridModelServer()
-            except Exception as exc:
-                print(f"[live_agent] ML disabled: {exc}")
-                self._model_server = None
-
-        # Live-learning per-network baseline (no pre-trained data): learns this
-        # network's normal flows first, then alerts on conformal outliers.
-        from src.inference.online_baseline import OnlineBaseline
-        self._baseline = OnlineBaseline(
-            learn_min_flows=int(os.environ.get("LIVE_BASELINE_MIN_FLOWS", "1500")),
-            learn_min_seconds=float(os.environ.get("LIVE_BASELINE_MIN_SECONDS", "600")),
-            alpha=float(os.environ.get("LIVE_BASELINE_ALPHA", "0.001")),
-            one_way=os.environ.get("LIVE_ONE_WAY", "0") == "1",
-        )
-
-        self._engines = {
-            "eng01": VolumetricDDoSDetector(redis_client=r),
-            "eng02": C2BeaconingDetector(redis_client=r),
-            "eng03": DGADetector(model_server=self._model_server),
-            "eng04": EncryptedMalwareDetector(),
-            "eng05": ReconDetector(),
-            "eng06": ExfiltrationDetector(redis_client=r),
-            "eng07": OTIndustrialAnomalyDetector(),
-            "eng09": HTTPThreatDetector(),
-            "eng11": KerberosAttackDetector(),
-            "eng13": BruteForceDetector(redis_client=r),
-        }
+        if self.num_workers_req > 1:
+            self._pool = EngineWorkerPool(self.num_workers_req)
+            self._pool.start()
+            print(f"[live_agent] engine pool started: {self.num_workers_req} worker processes")
+        else:
+            self._scoring = ScoringEngine()
 
     # ---------------- lifecycle ----------------
     def _on_packet(self, pkt) -> None:
@@ -299,6 +257,8 @@ class LiveAgent:
             self._loop.call_soon_threadsafe(lambda: None)
         if self._loop_thread is not None:
             self._loop_thread.join(timeout=5)
+        if self._pool is not None:
+            self._pool.stop()
 
     # ---------------- detection loop ----------------
     def _run_loop(self) -> None:
@@ -321,98 +281,62 @@ class LiveAgent:
                 drained += 1
                 t_arr, pkt = item
                 for log_type, rec in self._assembler.process(pkt):
-                    await self._score_immediate(log_type, rec, t_arr)
+                    await self._dispatch_immediate(log_type, rec, t_arr)
             if drained == 0:
                 try:
                     item = await loop.run_in_executor(None, self._q.get, True, 0.3)
                     t_arr, pkt = item
                     for log_type, rec in self._assembler.process(pkt):
-                        await self._score_immediate(log_type, rec, t_arr)
+                        await self._dispatch_immediate(log_type, rec, t_arr)
                 except queue.Empty:
                     pass
+
+            if self._pool is not None:
+                self._pool.flush()
+                for alert in self._pool.drain_alerts():
+                    self._emit(alert, alert.pop("_t_arr", None))
 
             now = time.monotonic()
             if now - last_tick >= SNAPSHOT_INTERVAL_S:
                 last_tick = now
                 for _lt, rec in self._assembler.snapshot():
-                    await self._score_conn(rec, _DISPATCH_CONN_SNAPSHOT)
+                    await self._dispatch_conn("conn_snapshot", rec, _DISPATCH_CONN_SNAPSHOT)
                 expired = [r for lt, r in self._assembler.expire() if lt == "conn"]
                 for rec in expired:
-                    await self._score_conn(rec, _DISPATCH_CONN_EXPIRE)
-                await self._ml_batch_conn(expired)
-                if self._baseline is not None:
+                    await self._dispatch_conn("conn_expire", rec, _DISPATCH_CONN_EXPIRE)
+                if self._scoring is not None:
+                    # in-process mode: batch the ONNX call here, same as before.
+                    for alert in await self._scoring.ml_batch_conn(expired):
+                        self._emit(alert, None)
                     for rec in expired:
-                        try:
-                            b_alert = self._baseline.observe(rec)
-                        except Exception:
-                            b_alert = None
+                        b_alert = self._scoring.observe_baseline(rec)
                         if b_alert is not None:
-                            self._emit(b_alert.model_dump(mode="json"), None)
+                            self._emit(b_alert, None)
+                # pool mode: each worker batches its own shard's ML call and
+                # observes its own shard's baseline, draining every loop
+                # iteration above -- no extra drain needed here.
                 kstats = self._backend.kernel_stats() if hasattr(self._backend, "kernel_stats") else None
                 self._rate_view = self._rate.sample(self._assembler.stats["packets"], self._bytes, kstats)
 
         for _lt, rec in self._assembler.flush():
-            await self._score_conn(rec, _DISPATCH_CONN_EXPIRE)
+            await self._dispatch_conn("conn_flush", rec, _DISPATCH_CONN_EXPIRE)
+        if self._pool is not None:
+            for alert in self._pool.drain_alerts():
+                self._emit(alert, alert.pop("_t_arr", None))
 
-    async def _score_immediate(self, log_type: str, rec: dict, t_arr: Optional[float]) -> None:
-        engines = _DISPATCH_IMMEDIATE.get(log_type)
-        if not engines:
+    async def _dispatch_immediate(self, log_type: str, rec: dict, t_arr: Optional[float]) -> None:
+        if self._pool is not None:
+            self._pool.route_immediate(log_type, rec, t_arr)
             return
-        flow = map_record(rec, log_type)
-        for name in engines:
-            eng = self._engines.get(name)
-            if eng is None:
-                continue
-            try:
-                alert = await eng.score(flow)
-            except Exception:
-                continue
-            if alert is not None:
-                self._emit(alert.model_dump(mode="json"), t_arr)
-        if _ML_OK and self._model_server is not None:
-            fam = {"ssl": "tls", "modbus": "modbus"}.get(log_type)
-            if fam:
-                try:
-                    res = self._model_server.score_flow(flow, fam)
-                except Exception:
-                    res = None
-                if res:
-                    m = build_ml_alert(flow, fam, res, min_confidence=standalone_threshold(fam))
-                    if m:
-                        self._emit(m.model_dump(mode="json"), t_arr)
+        for alert in await self._scoring.score_immediate(log_type, rec):
+            self._emit(alert, t_arr)
 
-    async def _score_conn(self, rec: dict, engine_keys: tuple) -> None:
-        flow = map_record(rec, "conn")
-        for name in engine_keys:
-            eng = self._engines.get(name)
-            if eng is None:
-                continue
-            try:
-                alert = await eng.score(flow)
-            except Exception:
-                continue
-            if alert is not None:
-                self._emit(alert.model_dump(mode="json"), None)
-
-    async def _ml_batch_conn(self, conn_recs: list[dict]) -> None:
-        """One batched ONNX call for the `flow` family over all conn flows
-        that just expired -- never per-flow, so a flow-heavy capture stays
-        cheap."""
-        if not (conn_recs and _ML_OK and self._model_server is not None):
+    async def _dispatch_conn(self, phase: str, rec: dict, engine_keys: tuple) -> None:
+        if self._pool is not None:
+            self._pool.route_conn(phase, rec)
             return
-        flows = [map_record(r, "conn") for r in conn_recs]
-        try:
-            results = self._model_server.score_flows_batch(flows, "flow")
-        except Exception:
-            return
-        for fl, res in zip(flows, results):
-            if not res:
-                continue
-            # the flow model is a DDoS-shape detector: it may alert alone only
-            # at very high confidence (src/inference/fusion.py)
-            m = build_ml_alert(fl, "flow", res, min_confidence=standalone_threshold("flow"))
-            if m:
-                self._emit(m.model_dump(mode="json"), None)
+        for alert in await self._scoring.score_conn(rec, engine_keys):
+            self._emit(alert, None)
 
     # evidence fields (in priority order) that make two same-class alerts
     # genuinely distinct -- so 13 different DGA domains -> 13 alerts, but
@@ -468,11 +392,20 @@ class LiveAgent:
             "throughput": self._rate_view or {},
             "detection_latency": self.latency_summary(),
             "assembler": self._assembler.stats,
-            "ml_families": (self._model_server.loaded_families() if self._model_server else []),
-            "baseline": self._baseline.status() if self._baseline is not None else None,
+            "ml_families": (self._scoring.loaded_ml_families() if self._scoring else []),
+            "baseline": (self._scoring.baseline_status() if self._scoring else None),
+            "num_workers": self.num_workers_req,
+            "engine_pool_dropped": (self._pool.dropped if self._pool else 0),
             "snapshot_interval_s": SNAPSHOT_INTERVAL_S,
             **self.stats,
         }
+
+    def pending_work(self) -> int:
+        """Packet queue depth PLUS anything still queued in the engine pool
+        (if active). "packet queue empty" alone under-counts once records
+        have been routed to worker processes -- their queues drain on their
+        own schedule."""
+        return self._q.qsize() + (self._pool.pending() if self._pool else 0)
 
     def recent_alerts(self, limit: int = 100) -> list[dict]:
         return list(self._recent)[-limit:]
@@ -510,7 +443,7 @@ def _pretty(a: dict) -> None:
 
 def _cmd_run(a):
     agent = LiveAgent(a.iface or "pcap-replay", a.bpf, prefer_kernel=not a.no_kernel,
-                      buffer_mb=a.buffer_mb, promisc=not a.no_promisc,
+                      buffer_mb=a.buffer_mb, promisc=not a.no_promisc, num_workers=a.workers,
                       alert_sink=(lambda x: print(json.dumps(x))) if a.json else _pretty)
     # headless sensor mode: also POST alerts to the shared API/DB when configured
     from src.capture.forwarder import make_forwarder
@@ -590,6 +523,9 @@ def main() -> None:
     pr.add_argument("--no-kernel", action="store_true", help="force scapy L3 fallback (debug)")
     pr.add_argument("--json", action="store_true")
     pr.add_argument("--status-every", type=float, default=5.0)
+    pr.add_argument("--workers", type=int, default=DEFAULT_ENGINE_WORKERS,
+                    help="engine-scoring worker processes (multi-core); needs real Redis "
+                         "for values > 1, else auto-downgrades to 1")
     pr.set_defaults(func=_cmd_run)
 
     ps = sub.add_parser("serve", help="REST+SSE control server for the dashboard")
@@ -602,4 +538,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()  # no-op unless frozen (PyInstaller .exe) with num_workers>1
     main()

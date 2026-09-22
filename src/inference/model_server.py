@@ -48,6 +48,26 @@ import onnxruntime as ort
 from src.features.feature_extraction import build_feature_vector, FEATURE_SCHEMA_VERSION
 
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", "models"))
+
+
+def _session_options() -> Optional["ort.SessionOptions"]:
+    """onnxruntime defaults intra_op_num_threads to the machine's core
+    count PER SESSION. That's fine for one process, but src/capture/
+    engine_pool.py runs one HybridModelServer (several sessions each) per
+    worker PROCESS -- with N worker processes all defaulting to all-cores
+    threading, the CPU becomes massively oversubscribed and everything
+    (including unrelated threads in the main process, measured via a
+    collapsed packet-feed rate) slows down instead of speeding up.
+    STEALTHTAP_ONNX_INTRA_THREADS is set by ScoringEngine when it builds
+    inside a pool worker (see src/capture/scoring.py); unset in the
+    default single-process case, so behaviour there is unchanged."""
+    n = os.environ.get("STEALTHTAP_ONNX_INTRA_THREADS")
+    if not n:
+        return None
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = max(1, int(n))
+    opts.inter_op_num_threads = 1
+    return opts
 FAMILIES = ["flow", "dns", "tls", "modbus"]
 
 # Shared ML alerting threshold -- a hybrid threat_score below this does
@@ -148,11 +168,12 @@ class FamilyModels:
         xgb_path = MODELS_DIR / f"{self.family}_xgboost_v1.onnx"
         if_path = MODELS_DIR / f"{self.family}_isolation_forest_v1.onnx"
         imp_path = MODELS_DIR / f"{self.family}_feature_importance.json"
+        opts = _session_options()
         if xgb_path.exists():
-            self.xgb_session = ort.InferenceSession(str(xgb_path), providers=["CPUExecutionProvider"])
+            self.xgb_session = ort.InferenceSession(str(xgb_path), sess_options=opts, providers=["CPUExecutionProvider"])
             print(f"[model_server] loaded {xgb_path}")
         if if_path.exists():
-            self.iforest_session = ort.InferenceSession(str(if_path), providers=["CPUExecutionProvider"])
+            self.iforest_session = ort.InferenceSession(str(if_path), sess_options=opts, providers=["CPUExecutionProvider"])
             print(f"[model_server] loaded {if_path}")
         if imp_path.exists():
             try:

@@ -65,8 +65,14 @@ class BruteForceDetector(Detector):
         key = self._bucket_key(src_ip, dst_ip, dst_port, ts)
 
         try:
-            count = self.redis.incr(key)
-            self.redis.expire(key, BUCKET_TTL_SECONDS)
+            # Pipelined: incr+expire were two separate round-trips for
+            # every auth-port flow -- one Redis pipeline().execute() call
+            # does both in a single network round-trip, same pattern
+            # already used in ENG-01/02/06.
+            pipe = self.redis.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, BUCKET_TTL_SECONDS)
+            count, _ = pipe.execute()
         except Exception:
             return None  # Redis unavailable -- fail open, same pattern as other engines
 

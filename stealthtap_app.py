@@ -133,4 +133,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()  # required for a frozen .exe to spawn engine-pool workers
     main()

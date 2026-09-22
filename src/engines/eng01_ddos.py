@@ -102,9 +102,13 @@ class VolumetricDDoSDetector(Detector):
             pipe.expire(hll_key, BUCKET_TTL_SECONDS)
             pipe.incr(count_key)
             pipe.expire(count_key, BUCKET_TTL_SECONDS)
-            pipe.execute()
-
-            packet_count = int(self.redis.get(count_key) or 0)
+            # INCR's own reply (3rd command's result) IS the post-increment
+            # count -- a separate GET right after was one full extra Redis
+            # round-trip per flow for a value already in hand. Confirmed via
+            # direct redis-cli check: pipeline results are returned in
+            # command order, so results[2] is the incr reply.
+            results = pipe.execute()
+            packet_count = int(results[2])
             if packet_count < SPOOFED_MIN_PACKETS:
                 return None
             distinct_sources = self.redis.pfcount(hll_key)
@@ -137,9 +141,11 @@ class VolumetricDDoSDetector(Detector):
 
         count = 0
         try:
-            self.redis.execute_command('CMS.INCRBY', key, flow["src_ip"], 1)
-            result = self.redis.execute_command('CMS.QUERY', key, flow["src_ip"])
-            # CMS.QUERY returns a list of counts, one per queried item.
+            # CMS.INCRBY's own reply IS the post-increment count (verified
+            # directly against RedisBloom) -- a separate CMS.QUERY right
+            # after was a second full Redis round-trip per flow for a value
+            # the first call already returned.
+            result = self.redis.execute_command('CMS.INCRBY', key, flow["src_ip"], 1)
             count = int(result[0]) if result else 0
         except Exception:
             pass  # Failsafe if RedisBloom module isn't loaded properly

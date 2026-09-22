@@ -73,17 +73,28 @@ def main() -> None:
                 break
     feed_s = time.time() - t0
 
-    # wait for the processing queue to fully drain (the real end of work)
+    # wait for the processing queue to fully drain (the real end of work) --
+    # with an engine pool active, work also queues inside worker processes
+    # (see LiveAgent.pending_work()), not just the packet queue.
     stall_deadline = time.time() + 120
-    last_qsize = -1
-    while agent._q.qsize() > 0 and time.time() < stall_deadline:
+    while agent.pending_work() > 0 and time.time() < stall_deadline:
         time.sleep(0.05)
-        if agent._q.qsize() == last_qsize:  # stuck, not draining
-            pass
-        last_qsize = agent._q.qsize()
     time.sleep(0.3)  # let the last in-flight batch finish scoring
     total_s = time.time() - t0
     agent._running.clear()
+    if agent._pool is not None:
+        # final alert drain: workers may have pushed alerts after the last
+        # in-process _consume() drain pass but before we stop them.
+        deadline = time.time() + 5
+        drained = []
+        while time.time() < deadline:
+            batch = agent._pool.drain_alerts()
+            if not batch:
+                break
+            drained.extend(batch)
+        for alert in drained:
+            agent._emit(alert, alert.pop("_t_arr", None))
+        agent._pool.stop()
 
     processed = agent._assembler.stats["packets"]
     dropped = agent.stats["dropped"]
