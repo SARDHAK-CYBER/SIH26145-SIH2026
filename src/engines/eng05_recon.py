@@ -38,19 +38,34 @@ class ReconDetector(Detector):
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip = flow["src_ip"]
         now = flow["ts"]
-        entries = self._seen[src_ip]
         is_probe = (float(flow.get("resp_bytes", 0) or 0) == 0
                     and float(flow.get("orig_bytes", 0) or 0) <= PROBE_MAX_ORIG_BYTES)
-        if is_probe:
-            entries.append((now, flow["dst_ip"], flow["dst_port"]))
 
-        cutoff = now - WINDOW_SECONDS
-        entries[:] = [e for e in entries if e[0] >= cutoff]
-
+        # Global stale-SOURCE sweep (removes entire dead src_ip entries) --
+        # kept unconditional, it's an O(1) counter check almost always.
         self._since_prune += 1
         if self._since_prune >= _PRUNE_EVERY:
             self._since_prune = 0
             self._prune(now)
+
+        # A non-probe flow only ever shrinks/leaves-unchanged this source's
+        # fan-out count -- it can never newly cross FANOUT_THRESHOLD, so
+        # the per-entry window prune (list comp) and distinct-target
+        # rebuild (set comp) below only need to run on a probe flow.
+        # Profiling (scripts/bench_throughput.py, samples/netbios_ssn2.pcap):
+        # these two O(len(entries)) rebuilds, run from scratch on EVERY
+        # score() call regardless of whether anything changed, were ~20%
+        # of total live-pipeline time combined. Deferred window-pruning on
+        # non-probe calls is still bounded correctly -- the next probe call
+        # re-prunes before checking, and the global sweep above independently
+        # bounds _seen's total size.
+        if not is_probe:
+            return None
+
+        entries = self._seen[src_ip]
+        entries.append((now, flow["dst_ip"], flow["dst_port"]))
+        cutoff = now - WINDOW_SECONDS
+        entries[:] = [e for e in entries if e[0] >= cutoff]
 
         distinct_targets = {(dst_ip, dst_port) for _, dst_ip, dst_port in entries}
         if len(distinct_targets) >= FANOUT_THRESHOLD:

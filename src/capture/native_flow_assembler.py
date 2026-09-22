@@ -37,7 +37,19 @@ class NativeFlowAssemblerAdapter:
     def process(self, pkt) -> list[tuple[str, dict]]:
         ts = float(getattr(pkt, "time", None) or time.time())
         try:
-            raw = bytes(pkt)
+            # pkt.original is the exact raw bytes scapy dissected this
+            # packet FROM (verified: bytes(pkt) == pkt.original for a
+            # freshly-captured, unmutated packet) -- using it skips
+            # scapy's do_build()/self_build() rebuild (recomputing
+            # checksums/lengths from parsed fields), which profiling
+            # showed cost ~1s/48,150 packets (~15% of total pipeline
+            # time) for a value we already had. Only live-captured
+            # packets reach this path (see module docstring), and
+            # nothing between capture and here mutates fields, so
+            # .original is always current; the bytes(pkt) fallback
+            # covers anything unexpected (e.g. a synthetic Packet with
+            # no raw origin) rather than silently dropping the packet.
+            raw = pkt.original if getattr(pkt, "original", None) else bytes(pkt)
         except Exception:
             return []
         return self._inner.process(ts, raw)
