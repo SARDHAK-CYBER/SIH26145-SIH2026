@@ -48,6 +48,18 @@ from src.capture.interfaces import list_interfaces, resolve_capture_name
 from src.flow_mapping import map_record
 
 try:
+    # Native Rust flow assembler (native/stealthtap_core) -- byte-for-byte
+    # validated against FlowAssembler on real captures via
+    # scripts/validate_native_live_assembler.py (see native/README.md).
+    # Same call-site interface (process/snapshot/expire/flush/.stats), so
+    # nothing below this needs to know which one is in use.
+    from src.capture.native_flow_assembler import NativeFlowAssemblerAdapter, NATIVE_LIVE_ASSEMBLER_AVAILABLE
+except ImportError:
+    NATIVE_LIVE_ASSEMBLER_AVAILABLE = False
+
+_FORCE_PYTHON_LIVE_ASSEMBLER = os.environ.get("STEALTHTAP_FORCE_PYTHON_LIVE_ASSEMBLER") == "1"
+
+try:
     from src.inference.model_server import HybridModelServer, MIN_ML_CONFIDENCE
     from src.inference.ml_alerts import build_ml_alert
     from src.inference.fusion import standalone_threshold
@@ -136,7 +148,10 @@ class LiveAgent:
         self.promisc = promisc
         self.cooldown_s = cooldown_s
         self._q: "queue.Queue" = queue.Queue(maxsize=queue_size)
-        self._assembler = FlowAssembler()
+        if NATIVE_LIVE_ASSEMBLER_AVAILABLE and not _FORCE_PYTHON_LIVE_ASSEMBLER:
+            self._assembler = NativeFlowAssemblerAdapter()
+        else:
+            self._assembler = FlowAssembler()
         self._sinks: list[AlertCB] = [alert_sink] if alert_sink else []
         self._recent = deque(maxlen=1000)
         self._subs: list[asyncio.Queue] = []

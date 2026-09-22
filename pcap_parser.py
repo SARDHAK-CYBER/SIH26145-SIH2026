@@ -136,15 +136,24 @@ def _parse_packets(packets, flows, dns_records, ssl_records, max_packets) -> Non
         # qr == 0 -> a QUERY. Responses echo the question section too; without
         # this filter every answer was re-scored as a fresh query with the
         # resolver recorded as the originator, doubling DNS alerts.
-        if (pkt.haslayer(UDP) and pkt.haslayer(DNS) and pkt[DNS].qr == 0
+        #
+        # UDP or TCP: DNS-over-TCP (RFC 1035 4.2.2) is real, common traffic --
+        # e.g. CHAOS-class version.bind/id.server fingerprinting queries,
+        # which several real captures in this project's own eval set use --
+        # and was silently missed here (UDP-only) even though
+        # src/capture/flow_assembler.py's live path already handled it
+        # correctly. Found via scripts/validate_native_live_assembler.py.
+        dns_l4 = pkt[UDP] if pkt.haslayer(UDP) else (pkt[TCP] if pkt.haslayer(TCP) else None)
+        dns_proto = "udp" if pkt.haslayer(UDP) else "tcp"
+        if (dns_l4 is not None and pkt.haslayer(DNS) and pkt[DNS].qr == 0
                 and pkt[DNS].qdcount and pkt[DNS].qd is not None):
             qname = pkt[DNS].qd.qname.decode(errors="ignore").rstrip(".")
             qtype_name = QTYPE_NAMES.get(pkt[DNS].qd.qtype, str(pkt[DNS].qd.qtype))
             dns_records.append({
-                "uid": _flow_uid(ip.src, pkt[UDP].sport, ip.dst, pkt[UDP].dport, "udp"),
-                "ts": ts, "id.orig_h": ip.src, "id.orig_p": pkt[UDP].sport,
-                "id.resp_h": ip.dst, "id.resp_p": pkt[UDP].dport,
-                "proto": "udp", "query": qname, "qtype_name": qtype_name,
+                "uid": _flow_uid(ip.src, dns_l4.sport, ip.dst, dns_l4.dport, dns_proto),
+                "ts": ts, "id.orig_h": ip.src, "id.orig_p": dns_l4.sport,
+                "id.resp_h": ip.dst, "id.resp_p": dns_l4.dport,
+                "proto": dns_proto, "query": qname, "qtype_name": qtype_name,
             })
             continue  # DNS packets aren't also folded into the conn bucket
 

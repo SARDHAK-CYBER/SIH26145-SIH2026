@@ -16,7 +16,7 @@
 use indexmap::IndexMap;
 use sha2::{Digest, Sha256};
 
-const LINKTYPE_ETHERNET: u32 = 1;
+pub(crate) const LINKTYPE_ETHERNET: u32 = 1;
 const LINKTYPE_LINUX_SLL: u32 = 113;
 
 const TCP_SYN: u8 = 0x02;
@@ -44,11 +44,12 @@ pub struct DnsRecord {
     pub orig_p: u16,
     pub resp_h: String,
     pub resp_p: u16,
+    pub proto: &'static str,
     pub query: String,
     pub qtype_name: String,
 }
 
-fn flow_uid(a_ip: &str, a_port: u16, b_ip: &str, b_port: u16, proto: &str) -> String {
+pub(crate) fn flow_uid(a_ip: &str, a_port: u16, b_ip: &str, b_port: u16, proto: &str) -> String {
     // Byte-for-byte the same input string pcap_parser.py hashes, so both
     // parsers produce IDENTICAL uids for the same flow -- the strongest
     // single-value equivalence check between the two implementations.
@@ -64,7 +65,7 @@ fn port_rank(port: u16) -> u8 {
 
 /// True if the packet's SENDER should be recorded as the flow originator --
 /// mirrors src/flow_orientation.py::sender_is_originator exactly.
-fn sender_is_originator(proto: &str, sport: u16, dport: u16, tcp_flags: Option<u8>) -> bool {
+pub(crate) fn sender_is_originator(proto: &str, sport: u16, dport: u16, tcp_flags: Option<u8>) -> bool {
     if proto == "tcp" {
         if let Some(flags) = tcp_flags {
             let syn = flags & TCP_SYN != 0;
@@ -78,22 +79,22 @@ fn sender_is_originator(proto: &str, sport: u16, dport: u16, tcp_flags: Option<u
     true
 }
 
-fn ipv4_to_string(b: &[u8]) -> String {
+pub(crate) fn ipv4_to_string(b: &[u8]) -> String {
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
 }
 
-struct L4<'a> {
-    proto: &'static str,
-    sport: u16,
-    dport: u16,
-    tcp_flags: Option<u8>,
-    payload: &'a [u8],
+pub(crate) struct L4<'a> {
+    pub(crate) proto: &'static str,
+    pub(crate) sport: u16,
+    pub(crate) dport: u16,
+    pub(crate) tcp_flags: Option<u8>,
+    pub(crate) payload: &'a [u8],
 }
 
 /// Strips the link-layer header, returning (ethertype, l3_payload). None
 /// for anything not IPv4 over Ethernet or Linux-cooked-capture -- the same
 /// scope as pcap_parser.py (`pkt.haslayer(IP)`, IPv4 only).
-fn strip_link_layer(linktype: u32, data: &[u8]) -> Option<&[u8]> {
+pub(crate) fn strip_link_layer(linktype: u32, data: &[u8]) -> Option<&[u8]> {
     match linktype {
         LINKTYPE_ETHERNET => {
             if data.len() < 14 { return None; }
@@ -124,7 +125,7 @@ fn strip_link_layer(linktype: u32, data: &[u8]) -> Option<&[u8]> {
     }
 }
 
-fn parse_l4(proto_num: u8, payload: &[u8]) -> Option<L4<'_>> {
+pub(crate) fn parse_l4(proto_num: u8, payload: &[u8]) -> Option<L4<'_>> {
     match proto_num {
         6 => {  // TCP
             if payload.len() < 20 { return None; }
@@ -153,7 +154,7 @@ fn parse_l4(proto_num: u8, payload: &[u8]) -> Option<L4<'_>> {
 /// queries). No compression-pointer chasing: the first name in a packet has
 /// nothing earlier to point to in practice, and a name that doesn't parse
 /// cleanly is skipped, never crashes the capture.
-fn parse_dns_query(payload: &[u8]) -> Option<(String, u16)> {
+pub(crate) fn parse_dns_query(payload: &[u8]) -> Option<(String, u16)> {
     if payload.len() < 12 { return None; }
     let flags = u16::from_be_bytes([payload[2], payload[3]]);
     let qr = (flags >> 15) & 1;
@@ -180,7 +181,19 @@ fn parse_dns_query(payload: &[u8]) -> Option<(String, u16)> {
     Some((labels.join("."), qtype))
 }
 
-fn qtype_name(qtype: u16) -> String {
+/// DNS-over-TCP (RFC 1035 4.2.2): a 2-byte big-endian length prefix before
+/// the DNS message. Best-effort, single-message-per-segment (matches this
+/// codebase's existing "skip cleanly on anything more complex" policy) --
+/// covers the common real case, e.g. CHAOS-class version.bind/id.server
+/// fingerprinting queries, which is what real captures in this project's
+/// own eval set actually send this way.
+pub(crate) fn parse_dns_query_tcp(payload: &[u8]) -> Option<(String, u16)> {
+    if payload.len() < 2 { return None; }
+    let _len = u16::from_be_bytes([payload[0], payload[1]]) as usize;
+    parse_dns_query(&payload[2..])
+}
+
+pub(crate) fn qtype_name(qtype: u16) -> String {
     match qtype {
         1 => "A", 16 => "TXT", 28 => "AAAA", 10 => "NULL", 5 => "CNAME",
         _ => return qtype.to_string(),
@@ -228,23 +241,31 @@ pub fn parse_packets(linktype: u32, packets: impl Iterator<Item = (f64, Vec<u8>)
 
         let Some(l4) = parse_l4(proto_num, l4_payload) else { continue };
 
-        // DNS query, UDP port 53 (unicast DNS) or 5353 (mDNS -- scapy binds
-        // the same DNS layer there, and real capture traffic uses it
-        // heavily: e.g. "SirGabriel._dosvc._tcp.local") either side --
-        // checked before folding into `conn`, and DNS packets never also
-        // become a conn record, matching pcap_parser.py's `continue` after
+        // DNS query -- UDP port 53 (unicast DNS) or 5353 (mDNS -- scapy
+        // binds the same DNS layer there, and real capture traffic uses it
+        // heavily: e.g. "SirGabriel._dosvc._tcp.local"), or TCP port 53
+        // (DNS-over-TCP, RFC 1035 4.2.2 -- e.g. CHAOS-class
+        // version.bind/id.server fingerprinting queries, real traffic in
+        // this project's own eval set, missed before this fix). Checked
+        // before folding into `conn`, and DNS packets never also become a
+        // conn record, matching pcap_parser.py's `continue` after
         // appending a dns record.
-        if l4.proto == "udp" && ([53, 5353].contains(&l4.sport) || [53, 5353].contains(&l4.dport)) {
-            if let Some((qname, qtype)) = parse_dns_query(l4.payload) {
-                dns.push(DnsRecord {
-                    uid: flow_uid(&src_ip, l4.sport, &dst_ip, l4.dport, "udp"),
-                    ts, orig_h: src_ip.clone(), orig_p: l4.sport,
-                    resp_h: dst_ip.clone(), resp_p: l4.dport,
-                    query: qname.trim_end_matches('.').to_string(),
-                    qtype_name: qtype_name(qtype),
-                });
-                continue;
-            }
+        let dns_hit = if l4.proto == "udp" && ([53, 5353].contains(&l4.sport) || [53, 5353].contains(&l4.dport)) {
+            parse_dns_query(l4.payload)
+        } else if l4.proto == "tcp" && (l4.sport == 53 || l4.dport == 53) {
+            parse_dns_query_tcp(l4.payload)
+        } else {
+            None
+        };
+        if let Some((qname, qtype)) = dns_hit {
+            dns.push(DnsRecord {
+                uid: flow_uid(&src_ip, l4.sport, &dst_ip, l4.dport, l4.proto),
+                ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                resp_h: dst_ip.clone(), resp_p: l4.dport, proto: l4.proto,
+                query: qname.trim_end_matches('.').to_string(),
+                qtype_name: qtype_name(qtype),
+            });
+            continue;
         }
 
         // Canonical, direction-independent key so both halves of one
