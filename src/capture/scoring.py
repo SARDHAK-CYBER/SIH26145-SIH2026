@@ -45,22 +45,35 @@ DISPATCH_CONN_SNAPSHOT = ("eng01", "eng05", "eng13")
 DISPATCH_CONN_EXPIRE = ("eng01", "eng02", "eng05", "eng06", "eng13")
 
 
-def make_redis_client(require_shared: bool = False):
+def make_redis_client(explicit_only: bool = False):
     """Real Redis if reachable, else the in-process MemoryStore fallback
     (same pattern as Zeek/native-module fallbacks elsewhere in this repo).
 
-    require_shared=True (multi-worker mode) still falls back rather than
-    hard-failing -- state just stops being cross-worker-consistent, which
-    the caller is expected to have already downgraded num_workers=1 for.
-    """
+    explicit_only=True (the default single-process live-capture path)
+    does not probe localhost:6379 at all unless the user explicitly set
+    REDIS_URL -- measured directly (scripts/bench_throughput.py,
+    samples/netbios_ssn2.pcap): single-process ENG01/02/06/13 scoring
+    against real Redis on this dev machine hits ~1,580 pps; the
+    identical pipeline against MemoryStore hits ~4,766 pps. Live
+    capture's stateful-engine data (flood counters, beacon windows,
+    10-300s TTLs) is inherently session-scoped, so MemoryStore's lack of
+    cross-restart persistence costs nothing real for the default
+    single-process deployment -- Redis stays available on request
+    (REDIS_URL set) for observability, or unconditionally for
+    multi-worker mode (explicit_only=False), which genuinely needs a
+    store shared across processes to stay correct."""
     from redis import Redis
+    from src.memstore import MemoryStore
+
+    if explicit_only and not os.environ.get("REDIS_URL"):
+        return MemoryStore(), False
+
     try:
         r = Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
                            socket_connect_timeout=1, socket_timeout=1)
         r.ping()
         return r, True
     except Exception:
-        from src.memstore import MemoryStore
         return MemoryStore(), False
 
 
@@ -91,9 +104,19 @@ class ScoringEngine:
         from src.engines.eng13_bruteforce import BruteForceDetector
 
         tag = f"[live_agent worker={self.worker_id}]" if self.worker_id is not None else "[live_agent]"
-        r, self.redis_is_shared = make_redis_client()
+        # Single-process (worker_id is None): prefer the faster MemoryStore
+        # unless the user explicitly opted into Redis (REDIS_URL set).
+        # Pool workers (worker_id is not None): always try real Redis --
+        # multi-worker mode needs the cross-process shared store to stay
+        # correct, and LiveAgent._build_engines() already verified one is
+        # reachable before starting the pool at all.
+        r, self.redis_is_shared = make_redis_client(explicit_only=self.worker_id is None)
         if not self.redis_is_shared:
-            print(f"{tag} no Redis reachable -- using the in-process state store")
+            if self.worker_id is None and not os.environ.get("REDIS_URL"):
+                reason = "not requested -- set REDIS_URL to opt in"
+            else:
+                reason = "unreachable"
+            print(f"{tag} using the in-process state store (Redis {reason})")
 
         if self.worker_id is not None:
             # Cap each worker's ONNX thread pool so N processes don't each
