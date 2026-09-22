@@ -41,6 +41,7 @@ DISPATCH_IMMEDIATE = {
     "modbus": ("eng07",), "dnp3": ("eng07",),
     "http": ("eng09",), "kerberos": ("eng11",),
 }
+IMMEDIATE_ML_FAMILY = {"ssl": "tls", "modbus": "modbus"}
 DISPATCH_CONN_SNAPSHOT = ("eng01", "eng05", "eng13")
 DISPATCH_CONN_EXPIRE = ("eng01", "eng02", "eng05", "eng06", "eng13")
 
@@ -162,33 +163,58 @@ class ScoringEngine:
     def baseline_status(self) -> Optional[dict]:
         return self._baseline.status() if self._baseline is not None else None
 
-    async def score_immediate(self, log_type: str, rec: dict) -> list[dict]:
-        engines = DISPATCH_IMMEDIATE.get(log_type)
-        out: list[dict] = []
-        if not engines:
-            return out
+    def ml_family_for(self, log_type: str) -> Optional[str]:
+        return IMMEDIATE_ML_FAMILY.get(log_type)
+
+    async def score_immediate_rules(self, log_type: str, rec: dict) -> tuple[dict, list[dict]]:
+        """Runs the cheap, non-ML rule engines for one immediate record.
+        Returns (flow, alerts) -- the mapped flow is handed back so the
+        caller can buffer it for BATCHED ML scoring (ml_batch_immediate)
+        without re-mapping the same record twice."""
         flow = map_record(rec, log_type)
-        for name in engines:
-            eng = self._engines.get(name)
-            if eng is None:
-                continue
-            try:
-                alert = await eng.score(flow)
-            except Exception:
-                continue
-            if alert is not None:
-                out.append(alert.model_dump(mode="json"))
-        if _ML_OK and self._model_server is not None:
-            fam = {"ssl": "tls", "modbus": "modbus"}.get(log_type)
-            if fam:
+        out: list[dict] = []
+        engines = DISPATCH_IMMEDIATE.get(log_type)
+        if engines:
+            for name in engines:
+                eng = self._engines.get(name)
+                if eng is None:
+                    continue
                 try:
-                    res = self._model_server.score_flow(flow, fam)
+                    alert = await eng.score(flow)
                 except Exception:
-                    res = None
-                if res:
-                    m = build_ml_alert(flow, fam, res, min_confidence=standalone_threshold(fam))
-                    if m:
-                        out.append(m.model_dump(mode="json"))
+                    continue
+                if alert is not None:
+                    out.append(alert.model_dump(mode="json"))
+        return flow, out
+
+    async def ml_batch_immediate(self, family: str, flows: list[dict]) -> list[Optional[dict]]:
+        """Batched equivalent of scoring one ssl/modbus flow's ML family
+        at a time -- ONE ONNX call for the whole buffer instead of one
+        per record. Same pattern as ml_batch_conn below; model_server.py's
+        own docstring already measured a 10.3x speedup from exactly this
+        change (a 39,969-record Modbus capture: 30-40s unbatched). Before
+        this, DNS/SSL/Modbus records hit score_flow() one at a time in
+        the immediate-dispatch path -- ml_batch_conn's batching never
+        covered them.
+
+        Returns one entry per input flow, in order (None where nothing
+        fired), so the caller can zip it against its own per-record
+        bookkeeping (e.g. detection-latency t_arr) -- unlike ml_batch_conn,
+        which doesn't need that since conn-expire alerts were never
+        latency-tracked to begin with."""
+        out: list[Optional[dict]] = [None] * len(flows)
+        if not (flows and _ML_OK and self._model_server is not None):
+            return out
+        try:
+            results = self._model_server.score_flows_batch(flows, family)
+        except Exception:
+            return out
+        for i, (fl, res) in enumerate(zip(flows, results)):
+            if not res:
+                continue
+            m = build_ml_alert(fl, family, res, min_confidence=standalone_threshold(family))
+            if m:
+                out[i] = m.model_dump(mode="json")
         return out
 
     async def score_conn(self, rec: dict, engine_keys: tuple) -> list[dict]:

@@ -154,6 +154,7 @@ class LiveAgent:
                       "kernel_buffer_set": None}
         self._scoring: Optional[ScoringEngine] = None   # num_workers == 1: in-process
         self._pool: Optional[EngineWorkerPool] = None    # num_workers  > 1: multi-core
+        self._ml_buf: dict[str, list] = {}    # family -> [(flow, t_arr), ...], batched by _flush_ml_immediate
 
     # ---------------- engine wiring ----------------
     def _build_engines(self):
@@ -291,6 +292,7 @@ class LiveAgent:
                 except queue.Empty:
                     pass
 
+            await self._flush_ml_immediate()
             if self._pool is not None:
                 self._pool.flush()
                 for alert in self._pool.drain_alerts():
@@ -320,6 +322,7 @@ class LiveAgent:
 
         for _lt, rec in self._assembler.flush():
             await self._dispatch_conn("conn_flush", rec, _DISPATCH_CONN_EXPIRE)
+        await self._flush_ml_immediate()
         if self._pool is not None:
             for alert in self._pool.drain_alerts():
                 self._emit(alert, alert.pop("_t_arr", None))
@@ -328,8 +331,31 @@ class LiveAgent:
         if self._pool is not None:
             self._pool.route_immediate(log_type, rec, t_arr)
             return
-        for alert in await self._scoring.score_immediate(log_type, rec):
+        flow, alerts = await self._scoring.score_immediate_rules(log_type, rec)
+        for alert in alerts:
             self._emit(alert, t_arr)
+        fam = self._scoring.ml_family_for(log_type)
+        if fam:
+            self._ml_buf.setdefault(fam, []).append((flow, t_arr))
+
+    async def _flush_ml_immediate(self) -> None:
+        """Batched ONNX call per ML family, covering everything buffered
+        since the last flush -- one InferenceSession.run() for the whole
+        buffer instead of one per DNS/SSL/Modbus record. Called once per
+        drain-loop pass (below), so added latency is bounded to about one
+        pass, same tradeoff the existing SNAPSHOT_INTERVAL_S batching
+        already makes for conn/flow scoring."""
+        if self._scoring is None or not self._ml_buf:
+            return
+        for fam, items in self._ml_buf.items():
+            if not items:
+                continue
+            flows = [f for f, _ in items]
+            results = await self._scoring.ml_batch_immediate(fam, flows)
+            for (_flow, t_arr), alert in zip(items, results):
+                if alert is not None:
+                    self._emit(alert, t_arr)
+            items.clear()
 
     async def _dispatch_conn(self, phase: str, rec: dict, engine_keys: tuple) -> None:
         if self._pool is not None:

@@ -63,13 +63,26 @@ def _worker_main(worker_id: int, in_q: "mp.Queue", out_q: "mp.Queue", stop_evt) 
 
     async def _run() -> None:
         expire_batch: list[dict] = []
+        # family -> [(flow, t_arr), ...], mirrors LiveAgent._ml_buf's
+        # in-process batching so DNS/SSL/Modbus ML scoring is never
+        # called one record at a time here either -- see ScoringEngine.
+        ml_buf: dict[str, list] = {}
 
         async def _flush_ml_batch() -> None:
-            if not expire_batch:
-                return
-            for alert in await scoring.ml_batch_conn(expire_batch):
-                out_q.put(alert)
-            expire_batch.clear()
+            if expire_batch:
+                for alert in await scoring.ml_batch_conn(expire_batch):
+                    out_q.put(alert)
+                expire_batch.clear()
+            for fam, items in ml_buf.items():
+                if not items:
+                    continue
+                flows = [f for f, _ in items]
+                results = await scoring.ml_batch_immediate(fam, flows)
+                for (_flow, t_arr), alert in zip(items, results):
+                    if alert is not None:
+                        alert["_t_arr"] = t_arr
+                        out_q.put(alert)
+                items.clear()
 
         loop = asyncio.get_event_loop()
         while not stop_evt.is_set():
@@ -84,9 +97,13 @@ def _worker_main(worker_id: int, in_q: "mp.Queue", out_q: "mp.Queue", stop_evt) 
                 kind = item[0]
                 if kind == "immediate":
                     _, log_type, rec, t_arr = item
-                    for alert in await scoring.score_immediate(log_type, rec):
+                    flow, alerts = await scoring.score_immediate_rules(log_type, rec)
+                    for alert in alerts:
                         alert["_t_arr"] = t_arr
                         out_q.put(alert)
+                    fam = scoring.ml_family_for(log_type)
+                    if fam:
+                        ml_buf.setdefault(fam, []).append((flow, t_arr))
                 elif kind == "conn_snapshot":
                     _, rec = item
                     for alert in await scoring.score_conn(rec, DISPATCH_CONN_SNAPSHOT):
