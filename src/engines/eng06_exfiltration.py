@@ -29,6 +29,11 @@ from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
 
 PER_FLOW_RATIO_THRESHOLD = 20.0  # a single flow's own outbound:inbound ratio -- original, loud-exfil check
+# The ratio alone fires on trivial flows (a 654 B request with a 25 B reply
+# is a 26:1 "ratio" and was flagged as exfiltration on benign traffic). A
+# single flow must also move a meaningful amount of data outbound.
+# Sub-threshold volumes are still caught by the accumulated check below.
+MIN_SINGLE_FLOW_BYTES = 262_144
 
 # Accumulated window: deliberately much longer than any single flow,
 # since low-and-slow exfiltration is specifically designed to spread
@@ -48,18 +53,21 @@ MIN_ACCUMULATED_OUTBOUND_BYTES = 500_000  # ignore trivial cumulative volume -- 
 class ExfiltrationDetector(Detector):
     name = "ENG-06"
 
-    def __init__(self, redis_client: Optional[Redis] = None):
+    def __init__(self, redis_client: Optional[Redis] = None, key_prefix: str = ""):
         self.redis = redis_client
+        # See eng01's key_prefix docstring.
+        self.key_prefix = key_prefix
 
     def _bucket_key(self, src_ip: str, dst_ip: str, ts: float) -> str:
         bucket_id = int(ts // ACCUMULATION_WINDOW_SECONDS)
-        return f"eng06:accum:{src_ip}:{dst_ip}:{bucket_id}"
+        return f"{self.key_prefix}eng06:accum:{src_ip}:{dst_ip}:{bucket_id}"
 
     async def score(self, flow: dict) -> Optional[Alert]:
         orig_bytes = float(flow.get("orig_bytes", 0))
         resp_bytes = float(flow.get("resp_bytes", 0))
 
-        if resp_bytes > 0 and (orig_bytes / resp_bytes) >= PER_FLOW_RATIO_THRESHOLD:
+        if (resp_bytes > 0 and orig_bytes >= MIN_SINGLE_FLOW_BYTES
+                and (orig_bytes / resp_bytes) >= PER_FLOW_RATIO_THRESHOLD):
             return self._build_alert(flow, confidence=90.0, evidence={
                 "detection_type": "single_flow",
                 "orig_bytes": orig_bytes, "resp_bytes": resp_bytes,

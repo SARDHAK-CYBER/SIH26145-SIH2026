@@ -13,9 +13,22 @@ uploaded pcap).
 from __future__ import annotations
 
 import hashlib
+import os
 from typing import Any
 
-from scapy.all import rdpcap, IP, TCP, UDP, DNS, DNSQR
+from scapy.all import PcapReader, IP, TCP, UDP, DNS, DNSQR
+
+from src.flow_orientation import sender_is_originator
+
+try:
+    # Native Rust parser (native/stealthtap_core) -- byte-for-byte validated
+    # against this file's own logic on 26 real captures via
+    # scripts/validate_native_parser.py (55x-540x faster; see native/README.md).
+    # `conn`/`dns` come from it; `ssl`/`modbus` aren't ported yet, so this
+    # module's own scapy pass still fills those in below when native is used.
+    import stealthtap_core as _native
+except ImportError:
+    _native = None
 
 QTYPE_NAMES = {1: "A", 16: "TXT", 28: "AAAA", 10: "NULL", 5: "CNAME"}
 
@@ -64,22 +77,67 @@ class _Flow:
         }
 
 
-def parse_pcap(path: str) -> dict[str, list[dict[str, Any]]]:
+_FORCE_PYTHON_PARSER = os.environ.get("STEALTHTAP_FORCE_PYTHON_PARSER") == "1"
+
+
+def parse_pcap(path: str, max_packets: int | None = None) -> dict[str, list[dict[str, Any]]]:
     """Returns {'conn': [...], 'dns': [...], 'ssl': [...], 'modbus': [...]}
-    -- the same log-type buckets offline_engine.py already dispatches on."""
-    packets = rdpcap(path)
+    -- the same log-type buckets offline_engine.py already dispatches on.
+
+    Uses the native Rust parser (native/stealthtap_core) when it's built --
+    validated byte-for-byte equivalent to this function's own conn/dns
+    output on 26 real captures (scripts/validate_native_parser.py), 55x-540x
+    faster. KNOWN LIMITATION of that fast path: it doesn't extract `ssl`
+    (TLS ClientHello / JA4) records yet, so ENG-04 sees nothing on the
+    upload path when native parses the file -- disclosed, not silent,
+    and already a smaller loss than it sounds: this module's OWN `ssl`
+    extraction only ever produced a placeholder, non-real JA4 for uploads
+    (see `_placeholder_ja4`'s docstring) since real JA4 needs the live
+    path's proper ClientHello parser. Set STEALTHTAP_FORCE_PYTHON_PARSER=1
+    to always use the slower, full-fidelity scapy parser instead (e.g. if
+    upload-path SSL visibility genuinely matters more than speed for a
+    given deployment) or if the native module isn't built for this platform.
+    """
+    if _native is not None and not _FORCE_PYTHON_PARSER:
+        try:
+            result = _native.parse_pcap(path, max_packets)
+            result["modbus"] = []  # not yet implemented on either path -- Zeek's ICSNPP path covers OT uploads
+            return result
+        except Exception as exc:  # native failed on this file -- fall back rather than error the upload
+            print(f"[pcap_parser] native parser failed ({exc}); falling back to the Python parser")
 
     flows: dict[frozenset, _Flow] = {}
     dns_records: list[dict] = []
     ssl_records: list[dict] = []
 
+    with PcapReader(path) as packets:
+        _parse_packets(packets, flows, dns_records, ssl_records, max_packets)
+
+    return {
+        "conn": [f.to_dict() for f in flows.values()],
+        "dns": dns_records,
+        "ssl": ssl_records,
+        "modbus": [],  # Modbus-over-pcap parsing not yet implemented -- OT
+                       # PCAPs should still go through Zeek's ICSNPP path
+    }
+
+
+def _parse_packets(packets, flows, dns_records, ssl_records, max_packets) -> None:
+    seen = 0
     for pkt in packets:
+        seen += 1
+        if max_packets is not None and seen > max_packets:
+            break
         if not pkt.haslayer(IP):
             continue
         ip = pkt[IP]
         ts = float(pkt.time)
 
-        if pkt.haslayer(UDP) and pkt.haslayer(DNS) and pkt[DNS].qdcount and pkt[DNS].qd is not None:
+        # qr == 0 -> a QUERY. Responses echo the question section too; without
+        # this filter every answer was re-scored as a fresh query with the
+        # resolver recorded as the originator, doubling DNS alerts.
+        if (pkt.haslayer(UDP) and pkt.haslayer(DNS) and pkt[DNS].qr == 0
+                and pkt[DNS].qdcount and pkt[DNS].qd is not None):
             qname = pkt[DNS].qd.qname.decode(errors="ignore").rstrip(".")
             qtype_name = QTYPE_NAMES.get(pkt[DNS].qd.qtype, str(pkt[DNS].qd.qtype))
             dns_records.append({
@@ -101,10 +159,14 @@ def parse_pcap(path: str) -> dict[str, list[dict[str, Any]]]:
         # conversation land in the SAME flow record.
         key = frozenset([(ip.src, l4.sport), (ip.dst, l4.dport)]) | {proto}
         if key not in flows:
-            # Whichever endpoint we see FIRST for this key becomes "orig" --
-            # for TCP this is almost always the SYN sender, since that's
-            # necessarily the first packet of the conversation.
-            flows[key] = _Flow(ip.src, l4.sport, ip.dst, l4.dport, proto, ts)
+            # SYN / port-rank based, NOT "whoever spoke first" -- a capture
+            # that starts mid-connection sees the server first (see
+            # src/flow_orientation.py).
+            flags = int(l4.flags) if proto == "tcp" else None
+            if sender_is_originator(proto, l4.sport, l4.dport, flags):
+                flows[key] = _Flow(ip.src, l4.sport, ip.dst, l4.dport, proto, ts)
+            else:
+                flows[key] = _Flow(ip.dst, l4.dport, ip.src, l4.sport, proto, ts)
         flows[key].add(ip.src, l4.sport, len(bytes(l4.payload)), ts)
 
         if proto == "tcp":
@@ -116,11 +178,3 @@ def parse_pcap(path: str) -> dict[str, list[dict[str, Any]]]:
                     "id.resp_h": ip.dst, "id.resp_p": l4.dport, "proto": "tcp",
                     "ja4": _placeholder_ja4(raw),
                 })
-
-    return {
-        "conn": [f.to_dict() for f in flows.values()],
-        "dns": dns_records,
-        "ssl": ssl_records,
-        "modbus": [],  # Modbus-over-pcap parsing not yet implemented -- OT
-                       # PCAPs should still go through Zeek's ICSNPP path
-    }

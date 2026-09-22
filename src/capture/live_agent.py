@@ -50,6 +50,7 @@ from src.flow_mapping import map_record
 try:
     from src.inference.model_server import HybridModelServer, MIN_ML_CONFIDENCE
     from src.inference.ml_alerts import build_ml_alert
+    from src.inference.fusion import standalone_threshold
     _ML_OK = True
 except Exception as _exc:  # onnxruntime missing etc.
     _ML_OK = False
@@ -153,6 +154,7 @@ class LiveAgent:
                       "kernel_buffer_set": None}
         self._engines = None
         self._model_server = None
+        self._baseline = None
 
     # ---------------- engine wiring ----------------
     def _build_engines(self):
@@ -173,7 +175,12 @@ class LiveAgent:
                                socket_connect_timeout=1, socket_timeout=1)
             r.ping()
         except Exception:
-            r = None  # engines fail open; LiveAgent's own cooldown de-dupes
+            # No Redis (desktop install / bare Linux host). ENG-01/02/06/13
+            # FAIL OPEN without a store and would silently detect nothing, so
+            # use the in-process store -- same commands, real TTL expiry.
+            from src.memstore import MemoryStore
+            r = MemoryStore()
+            print("[live_agent] no Redis reachable -- using the in-process state store")
 
         if _ML_OK:
             try:
@@ -181,6 +188,16 @@ class LiveAgent:
             except Exception as exc:
                 print(f"[live_agent] ML disabled: {exc}")
                 self._model_server = None
+
+        # Live-learning per-network baseline (no pre-trained data): learns this
+        # network's normal flows first, then alerts on conformal outliers.
+        from src.inference.online_baseline import OnlineBaseline
+        self._baseline = OnlineBaseline(
+            learn_min_flows=int(os.environ.get("LIVE_BASELINE_MIN_FLOWS", "1500")),
+            learn_min_seconds=float(os.environ.get("LIVE_BASELINE_MIN_SECONDS", "600")),
+            alpha=float(os.environ.get("LIVE_BASELINE_ALPHA", "0.001")),
+            one_way=os.environ.get("LIVE_ONE_WAY", "0") == "1",
+        )
 
         self._engines = {
             "eng01": VolumetricDDoSDetector(redis_client=r),
@@ -308,6 +325,14 @@ class LiveAgent:
                 for rec in expired:
                     await self._score_conn(rec, _DISPATCH_CONN_EXPIRE)
                 await self._ml_batch_conn(expired)
+                if self._baseline is not None:
+                    for rec in expired:
+                        try:
+                            b_alert = self._baseline.observe(rec)
+                        except Exception:
+                            b_alert = None
+                        if b_alert is not None:
+                            self._emit(b_alert.model_dump(mode="json"), None)
                 kstats = self._backend.kernel_stats() if hasattr(self._backend, "kernel_stats") else None
                 self._rate_view = self._rate.sample(self._assembler.stats["packets"], self._bytes, kstats)
 
@@ -337,7 +362,7 @@ class LiveAgent:
                 except Exception:
                     res = None
                 if res:
-                    m = build_ml_alert(flow, fam, res, min_confidence=MIN_ML_CONFIDENCE)
+                    m = build_ml_alert(flow, fam, res, min_confidence=standalone_threshold(fam))
                     if m:
                         self._emit(m.model_dump(mode="json"), t_arr)
 
@@ -368,7 +393,9 @@ class LiveAgent:
         for fl, res in zip(flows, results):
             if not res:
                 continue
-            m = build_ml_alert(fl, "flow", res, min_confidence=MIN_ML_CONFIDENCE)
+            # the flow model is a DDoS-shape detector: it may alert alone only
+            # at very high confidence (src/inference/fusion.py)
+            m = build_ml_alert(fl, "flow", res, min_confidence=standalone_threshold("flow"))
             if m:
                 self._emit(m.model_dump(mode="json"), None)
 
@@ -427,6 +454,7 @@ class LiveAgent:
             "detection_latency": self.latency_summary(),
             "assembler": self._assembler.stats,
             "ml_families": (self._model_server.loaded_families() if self._model_server else []),
+            "baseline": self._baseline.status() if self._baseline is not None else None,
             "snapshot_interval_s": SNAPSHOT_INTERVAL_S,
             **self.stats,
         }

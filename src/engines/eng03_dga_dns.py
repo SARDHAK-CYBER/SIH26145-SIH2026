@@ -70,6 +70,26 @@ def _candidate_labels(query: str) -> list[str]:
     return parts[:-1]
 
 
+_SECOND_LEVEL_SUFFIXES = {"co", "com", "org", "net", "gov", "edu", "ac", "or", "ne", "go"}
+
+
+def registrable_domain(query: str) -> str:
+    """eTLD+1 approximation: 'a-ring-fallback.msedge.net' -> 'msedge.net',
+    'x.bbc.co.uk' -> 'bbc.co.uk'. The trained DGA model's benign and
+    malicious training rows are registrable domains (Alexa/Tranco names vs
+    DGA output); scoring a full FQDN with CDN/telemetry sub-labels is a
+    train/serve skew that scored `a-ring-fallback.msedge.net` at 0.66 and
+    `stream-production.avcdn.net` at 0.90 while their registrable domains
+    score 0.09 and 0.22. Real DGA samples score identically either way
+    (kqx3vwzptlmnbrx9.com 0.996)."""
+    parts = [p for p in (query or "").strip().rstrip(".").lower().split(".") if p]
+    if len(parts) <= 2:
+        return ".".join(parts)
+    if len(parts[-1]) == 2 and parts[-2] in _SECOND_LEVEL_SUFFIXES and len(parts) >= 3:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
+
+
 def _clamp01(x: float) -> float:
     return 0.0 if x < 0.0 else 1.0 if x > 1.0 else x
 
@@ -166,7 +186,8 @@ class DGADetector(Detector):
         if self.model_server is not None:
             try:
                 from src.inference.model_server import MIN_ML_CONFIDENCE
-                result = self.model_server.score_flow(flow, "dns")
+                result = self.model_server.score_flow(
+                    {**flow, "dns_query": registrable_domain(query)}, "dns")
             except Exception:
                 result = None
             if result and result.get("threat_score", 0.0) >= MIN_ML_CONFIDENCE:

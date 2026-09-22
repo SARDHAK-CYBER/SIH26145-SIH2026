@@ -44,6 +44,10 @@ class Alert(BaseModel):
         # and social engineering signatures genuinely outside the
         # original six.
         "NETWORK_INTRUSION_ATTEMPT",
+        # Live-learning per-network baseline (src/inference/online_baseline.py):
+        # a flow that is statistically unusual FOR THIS NETWORK, without a
+        # more specific attack class.
+        "BEHAVIORAL_ANOMALY",
     ]
     flow_identifier: FlowIdentifier
     mitre_attack: MitreAttack
@@ -54,7 +58,7 @@ class Alert(BaseModel):
     # detection path (see MODEL_CONTRACT.md). All optional with safe
     # defaults, so existing rule-based engines (eng01-eng08) need no
     # changes at all -- they simply never populate these.
-    detection_mode: Literal["rule", "xgboost", "isolation_forest"] = "rule"
+    detection_mode: Literal["rule", "xgboost", "isolation_forest", "baseline"] = "rule"
     model_scores: Optional[Dict[str, float]] = None
     top_contributing_features: Optional[List[Dict[str, Any]]] = None
 

@@ -6,6 +6,15 @@ from src.engines.base import Detector
 
 WINDOW_SECONDS = 300.0
 FANOUT_THRESHOLD = 25
+# A scan is defined by targets that DON'T answer with data: SYN probes to
+# closed/filtered ports get a RST or nothing, never an application
+# response. A normal desktop also touches 25+ distinct (ip, port) pairs in
+# five minutes (CDNs, telemetry, DNS, mDNS) -- but every one of those
+# carries a response. Counting only "probe-shaped" flows (no responder
+# payload, at most a tiny originator payload) removed the false positives
+# measured on benign captures (RECONNAISSANCE fired on a normal PC at
+# distinct_targets=25) while leaving real scans untouched.
+PROBE_MAX_ORIG_BYTES = 512
 # In the live path this detector runs for the lifetime of the process,
 # so its per-source history must not grow without bound. Every
 # _PRUNE_EVERY scores, drop any source whose entire history has aged out
@@ -30,7 +39,10 @@ class ReconDetector(Detector):
         src_ip = flow["src_ip"]
         now = flow["ts"]
         entries = self._seen[src_ip]
-        entries.append((now, flow["dst_ip"], flow["dst_port"]))
+        is_probe = (float(flow.get("resp_bytes", 0) or 0) == 0
+                    and float(flow.get("orig_bytes", 0) or 0) <= PROBE_MAX_ORIG_BYTES)
+        if is_probe:
+            entries.append((now, flow["dst_ip"], flow["dst_port"]))
 
         cutoff = now - WINDOW_SECONDS
         entries[:] = [e for e in entries if e[0] >= cutoff]

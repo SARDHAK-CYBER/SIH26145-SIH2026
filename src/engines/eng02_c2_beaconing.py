@@ -52,11 +52,17 @@ MAX_INTERVAL_SECONDS = 3600.0  # slower than an hour is out of scope for this ch
 class C2BeaconingDetector(Detector):
     name = "ENG-02"
 
-    def __init__(self, redis_client: Optional[Redis] = None):
+    def __init__(self, redis_client: Optional[Redis] = None, key_prefix: str = ""):
         self.redis = redis_client
+        # See eng01's key_prefix docstring: empty for live capture/streaming
+        # (which wants beacon history shared for up to an hour of real
+        # traffic); a fresh per-upload prefix from pcap_analysis.py for the
+        # one-shot analysis path, so unrelated uploads sharing a src/dst
+        # pair never inherit each other's inter-arrival timestamp history.
+        self.key_prefix = key_prefix
 
     def _key(self, src_ip: str, dst_ip: str) -> str:
-        return f"eng02:beacon_ts:{src_ip}:{dst_ip}"
+        return f"{self.key_prefix}eng02:beacon_ts:{src_ip}:{dst_ip}"
 
     async def score(self, flow: dict) -> Optional[Alert]:
         if self.redis is None:

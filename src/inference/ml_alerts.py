@@ -22,7 +22,10 @@ from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 ML_THREAT_MAPPING: dict[str, tuple[str, str, str, str]] = {
     "dns": ("DGA_DOMAIN", "Command and Control", "T1568.002", "Domain Generation Algorithms"),
     "tls": ("ENCRYPTED_MALWARE", "Defense Evasion", "T1027", "Obfuscated Files or Information"),
-    "flow": ("RECONNAISSANCE", "Discovery", "T1046", "Network Service Discovery"),
+    # The flow model is trained on DDoS captures (SYN flood, amplification,
+    # ICMP/UDP floods) -- it knows nothing about scans. It was mapped to
+    # RECONNAISSANCE, so a benign flow it disliked was reported as a port scan.
+    "flow": ("VOLUMETRIC_DDOS", "Impact", "T1498", "Network Denial of Service"),
     "modbus": ("ICS_UNAUTHORIZED_CONTROL_COMMAND", "Impair Process Control", "T0855", "Unauthorized Command Message"),
 }
 

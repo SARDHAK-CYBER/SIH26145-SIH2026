@@ -18,6 +18,7 @@ import time
 from typing import Any, Iterator, Optional
 
 from src.capture.ja4 import ja4_from_client_hello
+from src.flow_orientation import sender_is_originator
 
 QTYPE_NAMES = {1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR", 15: "MX",
                16: "TXT", 28: "AAAA", 33: "SRV", 10: "NULL", 43: "DS", 48: "DNSKEY"}
@@ -139,7 +140,11 @@ class FlowAssembler:
         key = frozenset(((src_ip, sport), (dst_ip, dport))) | {proto}
         flow = self._flows.get(key)
         if flow is None:
-            flow = _Flow(src_ip, sport, dst_ip, dport, proto, ts)
+            flags = int(l4.flags) if proto == "tcp" else None
+            if sender_is_originator(proto, sport, dport, flags):
+                flow = _Flow(src_ip, sport, dst_ip, dport, proto, ts)
+            else:  # mid-stream capture saw the server first (src/flow_orientation.py)
+                flow = _Flow(dst_ip, dport, src_ip, sport, proto, ts)
             self._flows[key] = flow
             self.stats["flows_seen"] += 1
         flow.add(src_ip, sport, len(payload), ts)

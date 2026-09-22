@@ -1,0 +1,25 @@
+[package]
+name = "stealthtap_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "stealthtap_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+sha2 = "0.10"
+# Preserves first-seen (insertion) order under iteration -- std HashMap
+# deliberately randomizes iteration order per-process, which does not match
+# Python's dict (insertion-ordered by language guarantee since 3.7) that
+# pcap_parser.py relies on. That mismatch is not cosmetic: several detection
+# engines are stateful and processing-order-sensitive (see the comment on
+# `conn` below) -- measured directly against eval_real_traffic.py.
+indexmap = "2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "unwind"   # a malformed packet must never crash the whole process -- see src/parse.rs

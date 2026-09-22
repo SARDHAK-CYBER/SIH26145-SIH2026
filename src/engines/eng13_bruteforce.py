@@ -44,12 +44,14 @@ ATTEMPT_THRESHOLD = 10
 class BruteForceDetector(Detector):
     name = "ENG-13"
 
-    def __init__(self, redis_client: Optional[Redis] = None):
+    def __init__(self, redis_client: Optional[Redis] = None, key_prefix: str = ""):
         self.redis = redis_client
+        # See eng01's key_prefix docstring.
+        self.key_prefix = key_prefix
 
     def _bucket_key(self, src_ip: str, dst_ip: str, dst_port: int, ts: float) -> str:
         bucket_id = int(ts // WINDOW_SECONDS)
-        return f"eng13:auth_attempts:{src_ip}:{dst_ip}:{dst_port}:{bucket_id}"
+        return f"{self.key_prefix}eng13:auth_attempts:{src_ip}:{dst_ip}:{dst_port}:{bucket_id}"
 
     async def score(self, flow: dict) -> Optional[Alert]:
         if self.redis is None:
@@ -74,7 +76,7 @@ class BruteForceDetector(Detector):
         # Dedup: one alert per (source, destination, port, window), not one
         # per subsequent connection attempt -- same reasoning as ENG-01's
         # flood dedup fix (a real user test caught that exact problem there).
-        dedup_key = f"eng13:alerted:{src_ip}:{dst_ip}:{dst_port}:{int(ts // WINDOW_SECONDS)}"
+        dedup_key = f"{self.key_prefix}eng13:alerted:{src_ip}:{dst_ip}:{dst_port}:{int(ts // WINDOW_SECONDS)}"
         try:
             if not self.redis.set(dedup_key, "1", nx=True, ex=BUCKET_TTL_SECONDS):
                 return None

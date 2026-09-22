@@ -52,10 +52,16 @@ from src.engines.eng11_kerberos import KerberosAttackDetector
 from src.engines.eng12_bzar_notices import parse_bzar_notices
 from src.inference.model_server import HybridModelServer, MIN_ML_CONFIDENCE
 from src.inference.ml_alerts import build_ml_alert, ML_THREAT_MAPPING
+from src.inference.fusion import effective_threshold
 from src.flow_mapping import map_record
 from pcap_parser import parse_pcap
 
 router = APIRouter()
+
+# Desktop/standalone build: no zeek-batch / suricata-batch containers exist,
+# so don't spend a 60-90 s timeout (or create /incoming on the host) waiting
+# for them -- go straight to the in-process parser.
+STANDALONE = os.environ.get("STEALTHTAP_STANDALONE") == "1"
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200MB cap
 ZEEK_INCOMING_DIR = Path(os.environ.get("ZEEK_INCOMING_DIR", "/incoming"))
@@ -83,6 +89,8 @@ async def _parse_via_zeek(pcap_bytes: bytes) -> Optional[dict[str, list[dict]]]:
     incoming/ volume, polls outgoing/ for its result, and returns None
     (triggering fallback to the scapy parser) if zeek-batch doesn't
     respond within ZEEK_TIMEOUT_SECONDS or errors."""
+    if STANDALONE:
+        return None
     job_id = str(uuid.uuid4())
     incoming_path = ZEEK_INCOMING_DIR / f"{job_id}.pcap"
     outgoing_path = ZEEK_OUTGOING_DIR / job_id
@@ -161,6 +169,8 @@ async def _run_suricata(pcap_bytes: bytes) -> list[dict]:
     Suricata alerts for this analysis, not a failed request. Runs
     concurrently with _parse_via_zeek (see analyze_pcap) since the two
     services are fully independent."""
+    if STANDALONE:
+        return []
     job_id = str(uuid.uuid4())
     incoming_path = SURICATA_INCOMING_DIR / f"{job_id}.pcap"
     outgoing_path = SURICATA_OUTGOING_DIR / job_id
@@ -207,9 +217,10 @@ async def _run_suricata(pcap_bytes: bytes) -> list[dict]:
         return []
 
 
-def _build_ml_alert(flow: dict, family: str, result: dict) -> Optional[Alert]:
-    """Thin wrapper over the shared builder, pinning MIN_ML_CONFIDENCE."""
-    return build_ml_alert(flow, family, result, min_confidence=MIN_ML_CONFIDENCE)
+def _build_ml_alert(flow: dict, family: str, result: dict, corroborated: bool = False) -> Optional[Alert]:
+    """Thin wrapper over the shared builder; the score an ML verdict needs
+    depends on the family and on rule corroboration (src/inference/fusion.py)."""
+    return build_ml_alert(flow, family, result, min_confidence=effective_threshold(family, corroborated))
 
 
 async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[HybridModelServer],
@@ -225,10 +236,24 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
         # Fallback for direct callers/tests; the API passes its pooled
         # client from app.state so we don't reconnect per request.
         redis_client = Redis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"))
+
+    # eng01/eng02/eng06/eng13 key their Redis state by (src_ip[, dst_ip][,
+    # dst_port]) and a bucket derived from the FLOW'S OWN embedded
+    # timestamp -- correct for live capture, where that state is meant to
+    # persist across the whole run. For a one-shot pcap upload it is
+    # exactly the wrong default: two uploads whose packets happen to share
+    # a 10s-60s timestamp bucket (trivially true re-analyzing the same
+    # file, or any two pcaps from the same capture session) would
+    # otherwise silently inherit each other's flood/beacon/exfil/
+    # brute-force counters -- producing alert categories that have
+    # nothing to do with THIS pcap and aren't reproducible run-to-run.
+    # A fresh prefix per call isolates every upload's state completely;
+    # the engines' own TTLs (30s-3600s) then garbage-collect it.
+    state_prefix = f"upload:{uuid.uuid4().hex[:12]}:"
     rule_engines = {
-        "eng01": VolumetricDDoSDetector(redis_client=redis_client),
-        "eng13": BruteForceDetector(redis_client=redis_client),
-        "eng02": C2BeaconingDetector(redis_client=redis_client),
+        "eng01": VolumetricDDoSDetector(redis_client=redis_client, key_prefix=state_prefix),
+        "eng13": BruteForceDetector(redis_client=redis_client, key_prefix=state_prefix),
+        "eng02": C2BeaconingDetector(redis_client=redis_client, key_prefix=state_prefix),
         # ENG-03 now owns the unified DNS/DGA decision -- rule-based
         # tunnelling + trained-model DGA (falls back to a deterministic
         # lexical heuristic when no dns model is loaded). This retires
@@ -236,7 +261,7 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
         "eng03": DGADetector(model_server=model_server),
         "eng04": EncryptedMalwareDetector(),
         "eng05": ReconDetector(),
-        "eng06": ExfiltrationDetector(redis_client=redis_client),
+        "eng06": ExfiltrationDetector(redis_client=redis_client, key_prefix=state_prefix),
         "eng07": OTIndustrialAnomalyDetector(),
         "eng09": HTTPThreatDetector(),
         "eng11": KerberosAttackDetector(),
@@ -263,6 +288,7 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
     def _run_rule(name: str, flow: dict) -> None:
         coverage[name]["records_processed"] += 1
 
+    flow_ml_flows: list[dict] = []  # scored in ONE batch after the rule engines (below)
     for rec in parsed.get("conn", []):
         flow = map_record(rec, "conn")
         for name in ("eng01", "eng02", "eng05", "eng06", "eng13"):
@@ -271,7 +297,26 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
             if alert:
                 coverage[name]["alerts_fired"] += 1
                 alerts.append(alert.model_dump(mode="json"))
-        _maybe_ml_score(flow, "flow")
+        flow_ml_flows.append(flow)
+
+    # Flow-family ML: one batched ONNX call (was one call per flow, ~3.5 ms
+    # each), and an alert policy that lets the weak flow model raise an
+    # alert alone only at very high confidence -- otherwise only when a
+    # rule engine flagged the same flow (src/inference/fusion.py).
+    coverage["ml_flow"]["records_processed"] += len(flow_ml_flows)
+    if model_server is not None and flow_ml_flows:
+        rule_uids = {a["alert_id"] for a in alerts if a.get("detection_mode") == "rule"}
+        try:
+            flow_results = model_server.score_flows_batch(flow_ml_flows, "flow")
+        except Exception:
+            flow_results = [None] * len(flow_ml_flows)
+        for fl, res in zip(flow_ml_flows, flow_results):
+            if res is None:
+                continue
+            ml_alert = _build_ml_alert(fl, "flow", res, corroborated=fl.get("flow_uid") in rule_uids)
+            if ml_alert:
+                coverage["ml_flow"]["alerts_fired"] += 1
+                alerts.append(ml_alert.model_dump(mode="json"))
 
     for rec in parsed.get("dns", []):
         flow = map_record(rec, "dns")

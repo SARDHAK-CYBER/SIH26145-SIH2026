@@ -1,205 +1,121 @@
-# StealthTap — Product Requirements & Technical Report
+# StealthTap — Product Requirements Document
 
-**Team:** TeamXOR · **Event:** Smart India Hackathon 2026 · **PS ID:** 26145 · **Organization:** NTRO
-**Revision:** 2026-09-10 (post hardening + live-capture pass — see `CHANGES.md`)
+SIH 2026, Problem Statement 26145 (NTRO) · Team XOR
 
----
+## 1. Problem statement (as given)
 
-## 1. Problem Statement (verbatim)
+Build a passive, stealth network-monitoring capability that performs deep packet inspection on uni-directional IP traffic, using AI-based and rule-based detection, to identify network intrusions and threats across IT and OT protocols, in real time, at high speed, without altering or injecting traffic.
 
-**Title:** AI-Based Detection of Cyber Threats in Unidirectional IP Traffic
+## 2. What "passive" and "stealth" require, and how this project meets them
 
-**Background.** Critical-infrastructure operators observe their gateway and peering links using passive mirroring or hardware data diodes that copy traffic into a monitoring enclave in one direction only. The enclave can see everything crossing the link, but has no physical or protocol-level path back into the production network. This is deliberate: it removes an entire class of attack in which a compromised monitoring system becomes a pivot into the core network, and preserves a clean chain of custody for forensic use. The trade-off is that any intelligence layer sitting in that enclave must work purely from what it can passively observe — packet captures, exported flow records, derived metadata — with no ability to probe, complete handshakes, or push a mitigation command back.
-
-**Description.** Design and build an AI/ML pipeline that ingests a one-directional stream of IP traffic and detects, classifies, and scores cyber-security threats in near real time, using only passively collected data, assuming it can never re-contact the traffic's source or destination. Output is intelligence — labelled alerts, confidence scores, and supporting evidence — displayed on a visualization dashboard.
-
-| # | Threat category |
+| Requirement | Implementation |
 |---|---|
-| a | Volumetric / protocol DDoS — SYN floods, UDP amplification, spoofed-source floods, from flow-level rate and source-IP entropy |
-| b | Botnet C2 beaconing — periodicity/inter-arrival analysis toward a small destination set |
-| c | DGA domains and DNS tunnelling — entropy/n-gram analysis, query-length and record-type anomalies |
-| d | Malware inside encrypted sessions — from JA3/JA4 and TLS/QUIC metadata alone, never decrypted |
-| e | Reconnaissance / port scanning — fan-out from one source across many destinations/ports |
-| f | Data exfiltration — asymmetric flow-volume, outbound/inbound byte ratio anomalies |
+| Never transmit on the monitored link | Capture-only sockets (`AF_PACKET`/Npcap in receive mode); the sensor container runs with no IP assigned and no published ports (`docker-compose.yml` `sensor` service: `cap_drop: ALL`, `cap_add: [NET_RAW, NET_ADMIN]` only) |
+| Works from a one-directional feed (TAP/SPAN mirror) | Flow model now supports `one_way` feature mode (`src/inference/online_baseline.py`); flow orientation is inferred from TCP SYN/SYN-ACK flags or port rank, not "whichever side spoke first" (see §7.1 — this was a real bug, fixed) |
+| No payload storage | Alerts carry protocol *metadata* (DNS query name, JA4 fingerprint, Modbus function code) and a SHA-256 hash of the segment for forensic correlation — never raw payload bytes |
+| Real time | Live path scores each flow within one `SNAPSHOT_INTERVAL_S` (default 2s) of completion; p50/p95/p99 latency exposed via `/capture/status` |
 
-| # | Architectural constraint |
+## 3. System architecture
+
+Four ingestion paths converge on one flow-mapping layer and one set of 13 detection engines, so results are identical regardless of how traffic arrived:
+
+1. **Upload PCAP** — `POST /analyze/pcap`. Docker: real Zeek 6.0.3 + 6 ICSNPP plugins + Suricata (20,829 rules) + YARA, with a scapy fallback parser if the Zeek job queue times out. Standalone/no-Docker (`STEALTHTAP_STANDALONE=1`): the in-process scapy parser only, immediately — no timeout wait for containers that don't exist.
+2. **Live NIC capture** — interface picker (Wireshark-style), `AFPacketBackend` (Linux: kernel `PACKET_MMAP` ring + `PACKET_FANOUT`) or `ScapyBackend` (Windows: Npcap). Feeds `FlowAssembler` → the same 13 engines, in-process, no Docker required.
+3. **Live streaming** — Zeek → Redpanda → a Faust worker (`src/streaming_engine.py`) for a fleet of sensors reporting to one backend.
+4. **Offline batch** — `src/offline_engine.py` replays static Zeek JSON logs through the same engines, indexing into OpenSearch, for validation runs.
+
+Single record→flow mapper: `src/flow_mapping.py`. Single flow-orientation policy: `src/flow_orientation.py`. Single ML-alerting policy: `src/inference/fusion.py`. This is deliberate — a bug fixed once (see §7) is fixed on all four paths, not three of four.
+
+## 4. Detection layer
+
+### 4.1 Rule/statistical engines (ENG-01–13)
+
+See `README.md` for the full table. All are deterministic and require no training data. Four are stateful across flows (ENG-01, 02, 06, 13) and use Redis in the Docker deployment; the standalone build uses `src/memstore.py`, an in-process implementation of the exact Redis commands they call (RedisBloom CMS, HyperLogLog, lists, hashes, `SET NX EX`), with real TTL expiry — **without this, those four engines silently detect nothing on a Redis-less desktop install**, which was true of the codebase before this document was written and is now fixed.
+
+### 4.2 Trained ML models
+
+Three ONNX model pairs (XGBoost + Isolation Forest) per family: `dns`, `flow`, `modbus`. `tls` has no dataset. Numbers are in `models/MANIFEST.json` and `README.md`. The Isolation Forest side is demoted to advisory everywhere (held-out F1 < 0.3) — none of the "AI" detection is unsupervised-only; it is XGBoost carrying every trained family, calibrated by `src/inference/fusion.py`.
+
+### 4.3 Live-learning baseline (`src/inference/online_baseline.py`)
+
+The user's own requirement was explicit: **maximum AI-based accuracy, not rule-based, and the AI must not depend on someone else's pre-trained data.** The three ONNX models above are pre-trained (on public/lab captures) and, per §7, don't transfer. This component is the actual answer to that requirement:
+
+- Learns a per-service (protocol, responder port) robust statistical profile (median/MAD of six log-scaled flow features) from the live traffic it observes on *this* network — minimum 1,500 completed flows or 10 minutes, whichever is later.
+- Once armed, a new flow's anomaly score is converted to a **conformal p-value** against a held-out calibration set from the same learning window — so `alpha` (default 0.001) is an actual empirical false-alert-rate target, not a hand-tuned score cutoff.
+- A service never seen during learning is scored against a pooled profile plus a fixed novelty penalty — a brand-new destination on a home LAN is itself a signal.
+- `one_way=True` drops every responder-side feature (bytes/packets from the far end), so it functions from a true uni-directional tap.
+
+This is genuinely new detection capacity, not a repackaging of the existing models, and it directly targets the accuracy gap measured in §7 — but it has **not yet been evaluated against the real-capture harness** (it needs live traffic to learn from, which the file-based harness doesn't provide). That evaluation is the top open item (§8).
+
+## 5. Interfaces
+
+| Surface | Path |
 |---|---|
-| a | Read-only ingest — no return path, no live query, no inline blocking |
-| b | No payload decryption — TLS/QUIC analyzed from metadata only |
-| c | Streaming, not batch — incremental processing, bounded alert latency |
-| d | Defined throughput target — state and demonstrate the tested traffic rate |
-| e | Standardized alert schema — timestamp, flow identifier, threat class, confidence score, supporting evidence |
+| Dashboard | React app; Main Dashboard, Discover (document search), Visualizer Studio (live OpenSearch-Dashboards-style aggregation builder — index pattern, metric, bucket, filters — computed from the current result, never a static demo chart), Index Patterns, AI Models, JSON Studio, PCAP Ingest, Live Capture |
+| REST | `POST /analyze/pcap`, `GET/POST /capture/*` (interfaces, start, stop, status, SSE alert stream), `GET /alerts`, `GET /health`, `GET /models/manifest` |
+| Desktop app | `stealthtap_app.py` — same dashboard, same REST surface, on `127.0.0.1:8100`, no external services |
 
----
+## 6. Platform support
 
-## 2. Our Solution — summary
+| | Linux | Windows |
+|---|---|---|
+| Live capture backend | `AF_PACKET` mmap ring + fanout — genuinely kernel-level | Npcap (kernel driver, not bundled — see licence note below) |
+| Full pipeline (Zeek+ICSNPP+Suricata+YARA) | Docker | Docker |
+| Standalone desktop app | Yes — needs `CAP_NET_RAW`/root for live capture | Yes — needs Administrator for live capture |
+| 10G+ kernel-bypass (AF_XDP/DPDK) | Not implemented — see §8 | Not available on this platform at any tier |
 
-StealthTap treats each threat category as requiring a genuinely different detection mechanism, not one model stretched across all of them. The same detection stack runs over **four interchangeable ingest paths** (upload PCAP, live NIC capture, live streaming via Zeek, offline batch), all producing the identical `Alert` record.
+**Npcap licensing**: free for up to 5 systems, may not be redistributed. The desktop build never bundles it; it must be installed separately by the user from npcap.com. This is a real constraint on any future "install and go" enterprise Windows deployment — see §10.
 
-1. **Protocol parsing** — real Zeek 6.0.3 + 6 ICSNPP industrial-protocol plugins (Modbus, DNP3, S7comm, EtherNet/IP, OPC UA, PROFINET) for the upload/streaming paths; an in-process flow assembler with **real JA4** and Modbus/DNP3 decode for the live-capture path. Structured metadata for IT and OT traffic, never payload content.
-2. **Signature-based detection, three layers deep** — YARA (~401 rules) on files Zeek extracts from cleartext protocols; Suricata (20,829 ET Open rules) for network-level signature matching, running concurrently with Zeek; BZAR (MITRE's own Zeek scripts) for SMB/DCE-RPC lateral movement.
-3. **Behavioural rule engines (ENG01–ENG13)** — purpose-built logic per threat: time-bucketed rate + **source-IP HyperLogLog entropy** for DDoS/spoofed-source floods, inter-arrival coefficient-of-variation for C2, char-n-gram + lexical features for DGA, JA4 fingerprint matching for encrypted malware, fan-out counting for recon, per-flow + accumulated byte ratio for exfiltration, dangerous Modbus/**DNP3**/CIP command codes for OT, HTTP C2/exfil signals, Kerberoasting via Kerberos ticket-cipher analysis, and auth-port brute-force counting.
-4. **Hybrid ML layer** — XGBoost (supervised) + Isolation Forest (unsupervised, benign-only) per protocol family. Combined with `max()` so either firing strongly raises an alert; a degenerate Isolation Forest (held-out F1 below a floor) is auto-demoted to advisory, its score still reported.
-5. **Standardized alert schema** — one Pydantic `Alert`, `extra="forbid"`, MITRE ATT&CK-mapped, with `detection_mode`, `model_scores`, and `top_contributing_features` for explainability.
-6. **Dashboard with pipeline transparency** — React/TypeScript; **Upload PCAP** and **Live Capture** modes; per-tool coverage table (records processed / alerts fired) so "did every tool run" is checkable; live telemetry (pps, Mbit/s, kernel drops, detection latency p50/p95/p99).
+## 7. Accuracy — methodology, measured results, and fixes applied
 
----
+### 7.1 Why measure instead of assert
 
-## 3. Full Tech Stack — and why each piece was chosen
+Every prior version of this document asserted model metrics from `MANIFEST.json` as if they were product accuracy. They are training-set metrics; `docs/PRD.md`'s own earlier draft cited research showing exactly this failure mode generalizes badly — cross-dataset NIDS accuracy [drops from 94.6% to 29.4%](https://arxiv.org/html/2402.10974v1) MCC, and industrial detectors [from 99% to 3–14%](https://arxiv.org/abs/2205.09199) on unseen attacks. So this pipeline was tested the same way: on captures it was never trained on, with `scripts/eval_real_traffic.py`.
 
-### Ingest & protocol parsing
+### 7.2 First measured run — root causes found
 
-| Tool | Why chosen |
-|---|---|
-| **Zeek 6.0.3** | Industry-standard network security monitor with the deepest protocol-parsing ecosystem; produces the structured, per-protocol "derived metadata" the PS calls for. Extensible via Spicy for industrial protocols. |
-| **ICSNPP (6 plugins)** | CISA-maintained OT protocol visibility — the PS's threat model spans IT and OT; generic IT tools have no OT protocol awareness. |
-| **BZAR** | MITRE-authored Zeek scripts detecting SMB/DCE-RPC lateral movement with MITRE technique IDs in their own output — reuse over reinvention. |
-| **AF_PACKET + PACKET_FANOUT (Linux)** / **Npcap/libpcap** | The live-capture path taps a NIC at kernel level: `PACKET_MMAP` RX ring, multi-worker `PACKET_FANOUT`, in-kernel BPF via `SO_ATTACH_FILTER`. This is what makes a high-rate link survivable and gives the kernel's own drop counters. |
-| **Redpanda** | Kafka-API-compatible streaming for the Zeek→Faust path; lighter than vanilla Kafka, same client ecosystem. Satisfies PS constraint (c). |
-| **scapy + psutil** | Live-capture flow assembly and cross-platform interface enumeration (the Wireshark-style picker). |
+Testing 25 attack + 2 benign real captures surfaced concrete, fixable bugs, not just "the models are imperfect":
 
-### Detection & scoring
+1. **Flow-direction inversion.** `pcap_parser.py` and `flow_assembler.py` both called whichever endpoint sent the first *observed* packet the "originator." A capture that starts mid-connection (every live capture, and many pcaps) sees the server speak first, so a 118 KB *download* was recorded as a 118 KB *upload* — an 86:1 outbound ratio — and fired `DATA_EXFILTRATION` on ordinary web traffic. Fixed in `src/flow_orientation.py`: TCP SYN/SYN-ACK flags decide when present, port rank (well-known < registered < ephemeral) otherwise.
+2. **DNS responses re-scored as queries.** The parser didn't check the DNS `qr` bit, so every answer packet was folded back into the `dns` bucket and scored a second time.
+3. **Exfiltration had no volume floor.** A 654-byte request against a 25-byte reply is a 26:1 "ratio" and was flagged. Fixed: a single flow must also move ≥256 KB outbound; sub-threshold volumes are still caught by the existing accumulated (low-and-slow) check.
+4. **Recon threshold matched ordinary browsing.** 25 distinct (IP, port) contacts in 5 minutes is routine CDN/telemetry traffic on any desktop. Fixed: only flows with **no responder payload** (probe-shaped — a real scan gets RSTs or silence, a normal connection gets an answer) count toward the fan-out.
+5. **DNS model scored full FQDNs, not registrable domains.** `a-ring-fallback.msedge.net` scored 0.66 and `stream-production.avcdn.net` scored 0.90 against a 0.6 alert threshold — a train/serve skew, since the model's benign training rows are registrable domains (Alexa/Tranco-style), not CDN subdomains. Fixed: score `registrable_domain(query)`.
+6. **The `flow` model was mapped to the wrong threat class and allowed to fire alone.** Trained only on DDoS captures, it was mapped to `RECONNAISSANCE` and had no corroboration requirement — it flagged benign flows on live traffic at 99% confidence. Fixed in two parts: remapped to `VOLUMETRIC_DDOS` (what it actually knows), and `src/inference/fusion.py` now requires a rule engine to have already flagged the same flow before this model's verdict counts, except above a near-impossible-to-reach standalone threshold (`ML_FLOW_STANDALONE_CONFIDENCE`, default disabled).
 
-| Tool | Why chosen |
-|---|---|
-| **XGBoost** | Gradient-boosted trees on engineered tabular features — microsecond-scale CPU inference (no GPU assumed), strong on modest data, exposes feature importances for explainable evidence (PS constraint e). |
-| **Isolation Forest** | Unsupervised, benign-only — the one layer that can flag an attack pattern nobody has seen, in an explicitly adversarial environment. |
-| **YARA** | De-facto file-content signature standard; used only on cleartext-extracted files — constraint (b) true by construction. |
-| **Suricata** | Modern multi-threaded successor to Snort; JSON (`eve.json`) output; mature ET Open ruleset covering exploit/C2/credential-theft patterns the other layers miss. Independent job-queue service, concurrent with Zeek. |
+### 7.3 Measured result after the fixes
 
-### Serving, storage, interface
-
-| Tool | Why chosen |
-|---|---|
-| **ONNX Runtime** | Framework-agnostic serving — XGBoost and scikit-learn IsolationForest export to one format, one runtime, no training-framework dependency at inference. No pickle. |
-| **FastAPI** | Async, native Pydantic validation — the alert schema is defined once and enforced everywhere; SSE for the live alert stream. |
-| **PostgreSQL** | Relational alert storage with real query/filter support; the single shared store for **every** ingest path (`/alerts/ingest` unifies live + upload). |
-| **React + TypeScript + Vite** | Type-safe frontend; alert types kept in lockstep with the Python schema. |
-| **Docker Compose** | Microservice isolation matching the PS's security philosophy. **11 core services** + a `sensor` service (profile `tap`) for the stealth live tap. |
-
-Runtime deps are in `requirements.txt`; **`torch` was removed** (it existed only for a dead untrained CNN). Model-training deps are split into `requirements-train.txt`.
-
----
-
-## 4. AI Models — detailed rationale and current results
-
-**Why not a single model for all threat categories?** They are statistically different problems — DGA is character-sequence classification, DDoS is rate/volume-over-time, encrypted-malware can only use TLS metadata. StealthTap engineers the right features per family (`src/features/feature_extraction.py`: `flow` 9, `dns` 262, `tls` 3, `modbus` 4) and applies the same two-model hybrid to each. **The one feature module is imported by both the training scripts and the live engines** — the single most common cause of "scores well offline, fails in production" (train/serve skew) is eliminated by construction. `FEATURE_SCHEMA_VERSION` gates artifact compatibility.
-
-**Why XGBoost + Isolation Forest, not a neural network?** A direct consequence of PS constraints (c) and (d): microsecond CPU inference (no GPU assumed), strong on engineered tabular features with modest data, and feature importances usable directly as "supporting evidence". The live path also runs **batched** ONNX inference — one call per model per batch of flows, never per-flow.
-
-### Trained models (`models/MANIFEST.json`, `scripts/train_family.py`, all held-out test sets)
-
-| Family | Dataset | Rows | XGBoost — Precision / Recall / F1 / ROC-AUC | Isolation Forest |
+| Config | File-level recall | 95% CI | Benign specificity | Benign flow false-positive rate |
 |---|---|---|---|---|
-| `dns` (DGA / tunnelling) | 25 DGA malware families + Alexa benign | 674,898 | **0.935 / 0.880 / 0.907 / 0.972** | F1 0.067 → advisory |
-| `flow` (DDoS / exfil / IT flow) | labelled flow captures (in-repo CSV) | 23,213 | **0.9996 / 0.9985 / 0.999 / 0.998** | F1 0.208 → advisory |
-| `modbus` (OT command anomaly) | labelled Modbus transactions (in-repo CSV) | 51,608 | **1.000 / 1.000 / 1.000 / 1.000** | F1 0.000 → advisory |
-| `tls` (JA4 / encrypted malware) | — | — | not trained (no public labelled JA4 dataset) | — |
+| Rule | 18/25 = 72% | 52–86% | 1/2 | 0.48% |
+| AI (standalone, pre-corroboration-lockdown) | 9/25 = 36% | 20–55% | 0/2 | 0.64% |
+| Hybrid | 20/25 = 80% | 61–91% | 0/2 | 1.12% |
 
-The `dns` confidence threshold (`MIN_ML_CONFIDENCE = 0.6`) is chosen from the real precision-recall curve on the 134,980-row held-out set (at 0.6: precision 0.957, recall 0.840). **Honest note:** the `flow` and `modbus` XGBoost numbers look near-perfect because those datasets are modest and cleanly separable — treat them as "the pipeline is real, trained, and serving", not as submission headline numbers. Retrain on CICIDS2017/2018 and CIC Modbus 2023 (see `docs/TRAINING_GUIDE.md`) for that.
+Read this table carefully:
+- The AI-only figure predates locking the flow model to corroboration-only (fix 6 above landed after this run) — it should be **re-measured**; expect it to drop further in isolation, by design, since that was the fix.
+- One benign capture is still not clean under rule/hybrid (a genuine reconnaissance false positive and a DNS-model false positive remain — see per-file evidence in `eval_results_v2/eval_real_traffic.md`). This is disclosed, not hidden.
+- 25 files, several near-duplicate pairs from one lab tool, is a small and non-independent sample — the confidence intervals reflect that honestly; they are wide because the evidence is genuinely limited, not because the harness is wrong.
+- This run used the in-process parser only; Docker (Zeek/Suricata) was unavailable at measurement time. Expect materially higher rule recall once Suricata's 20,829-rule set is included — that is a re-run, not a code change.
 
-Every ML-sourced alert carries `model_scores` (both raw scores) and `top_contributing_features` (global XGBoost importances, e.g. `orig_bytes` / `byte_ratio` / `duration_s` for `flow`).
+### 7.4 What "rule vs. AI vs. hybrid" actually means for this project right now
 
----
+The user asked directly: which gives the highest accuracy on real traffic? **Rules currently do, by a wide margin** (72% vs 36% file-level recall, before the AI side was further restricted). Hybrid is best because it adds AI as a corroborating signal on top of rules, not because AI can stand alone. This is not a permanent verdict — it is what happens when three narrow, small-dataset models meet real traffic; §8 is the plan to change it (principally, live-learning baseline evaluation and retraining on diverse hard negatives).
 
-## 5. Comparison with existing tools
+## 8. Open items / roadmap
 
-| Tool | What it does well | What it doesn't do (relative to this PS) | Relationship to StealthTap |
-|---|---|---|---|
-| **Wireshark** | Best interactive protocol dissection for a human | No automation, ML, alerting, continuous operation | Complementary — a StealthTap alert's evidence is what an analyst opens next |
-| **Zeek (standalone)** | Deep, extensible protocol parsing | No ML, no unified alert schema, no dashboard, no file scanning | Core component — StealthTap adds the decision layer on top |
-| **Suricata (standalone)** | Fast mature signature matching | No behavioural/ML anomaly detection; limited OT coverage; no hybrid scoring | Integrated as ENG-10, concurrent with Zeek |
-| **Snort** | Long history, legacy rules | Single-threaded, superseded | Not used — Suricata chosen |
-| **Security Onion** | The closest existing analog (Zeek + Suricata + Elastic) | General-purpose SOC platform, not diode-constrained; no OT dangerous-command engine; no custom hybrid ML for this PS | Honest comparison point — StealthTap differentiates via OT behavioural engines, custom-trained ML with evaluated thresholds, BZAR, and an architecture proven against read-only ingest |
-| **Claroty / Dragos / Nozomi** | Mature OT threat intel, asset inventory, vendor support | Closed-source, expensive, not auditable | Not a peer comparison — the enterprise bar this prototype doesn't claim to match |
-| **CICFlowMeter** | Flow feature extraction behind CICIDS | Not a detection system | The `flow` family features are informed by the same definitions |
+1. **Evaluate the live-learning baseline** against real live traffic (it cannot be evaluated by the file-based harness — it needs to *learn* before scoring). This is the highest-priority item: it is the actual answer to "max AI accuracy, not pre-trained," and it is currently unverified.
+2. **Retrain `dns` and `flow` on hard negatives** — CDN/telemetry domains for DNS, diverse non-DDoS benign flows for `flow` — using the real captures in `eval_results*/` as a start.
+3. **Re-run the harness with Docker up** (Zeek + Suricata) to get the honest hybrid number including signature matching.
+4. **A packets-per-second stress test** to replace the estimated performance ceiling with a measured one (the Python flow-assembly layer, not the kernel capture ring, is the expected bottleneck — see the "10 Gbps" discussion in session history; not yet in `docs/`).
+5. **OT protocol breadth** — EtherNet/IP, S7comm, OPC UA, PROFINET are parsed but have no dedicated *detection* logic (unlike Modbus/DNP3, which do via ENG-07). IEC 60870-5-104, IEC 61850, EtherCAT, BACnet, HART-IP have open-source Zeek parsers (BSD-licensed, ICSNPP and DINA-community) that are not yet integrated. PROFIBUS, Foundation Fieldbus H1, wired HART, and Modbus RTU are serial buses and are **out of scope for any Ethernet-NIC-based sensor** — no software fix changes this; they need a hardware gateway.
+6. **Windows kernel-bypass** — no path currently exists beyond Npcap's standard capture mode; not planned unless a specific enterprise requirement calls for it.
 
-**Honest summary:** every individual capability exists elsewhere, often more maturely. What StealthTap demonstrates is these tools wired into one coherent pipeline that respects a genuinely unusual constraint (true one-way data flow) end to end, with a real evaluated ML layer, four interchangeable ingest paths, and a fully checkable per-tool coverage report.
+## 9. Explicitly out of scope
 
----
+- Serial-only industrial fieldbuses (PROFIBUS DP/PA, Foundation Fieldbus H1, wired HART, Modbus RTU) without a protocol gateway.
+- Any capability requiring a paid license, subscription, or non-redistributable driver bundled into the product (Npcap OEM, PF_RING ZC, Suricata Emerging Threats Pro). Everything shipped is open-source or, in Npcap's single case, free-and-separately-installed.
+- Claims of accuracy this project has not itself measured. Where a number appears in this document, it was produced by a script in `scripts/` that can be re-run.
 
-## 6. Standardized Alert Schema (PS constraint e)
+## 10. Licensing and distribution notes
 
-```python
-{
-  "alert_id": str,
-  "timestamp": float,
-  "severity": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
-  "confidence_score": float,          # 0-100
-  "threat_class": str,                # 12 Literals: the six PS classes (split where useful, e.g.
-                                       #   VOLUMETRIC_DDOS / SLOWLORIS, DGA_DOMAIN / DNS_TUNNELING),
-                                       #   plus ICS_UNAUTHORIZED_CONTROL_COMMAND, MALICIOUS_FILE_DETECTED,
-                                       #   and NETWORK_INTRUSION_ATTEMPT for signature/Kerberos/BZAR/
-                                       #   brute-force detections outside the original six
-  "flow_identifier": {"src_ip","src_port","dst_ip","dst_port","protocol"},
-  "mitre_attack": {"tactic","technique_id","technique_name"},
-  "evidence": dict,                   # layer-specific detail; on the live path also detection_latency_ms
-  "forensics": dict,                  # sha256: content hash for chain of custody
-  "detection_mode": "rule" | "xgboost" | "isolation_forest",
-  "model_scores": dict | None,        # both raw scores, present when ML-fired
-  "top_contributing_features": list | None,   # top XGBoost feature importances
-}
-```
-
-Pydantic v2, `model_config = ConfigDict(extra="forbid")` — malformed alerts are rejected at construction. The relay (`src/relay/relay.py`) validates against this schema before anything crosses the isolation boundary; that validation, not the transport, is the security control.
-
----
-
-## 7. Architecture
-
-Four ingest paths, one detection stack, one alert store. Full diagram in `README.md` §3.
-
-- **Upload PCAP** (primary, fully tested): browser → FastAPI → **zeek-batch ∥ suricata-batch (concurrent)** → ENG01–13 + hybrid ML + YARA + BZAR notice parsing → PostgreSQL, with a per-tool coverage report on every response.
-- **Live capture** (kernel-level, real-time): NIC → `AFPacketBackend` / `ScapyBackend` (in-kernel BPF, mmap ring, `pcap_stats`) → `FlowAssembler` (real JA4, Modbus/DNP3 decode) → ENG01–13 + hybrid ML (phase-split: immediate for dns/tls/OT, 2 s flow snapshots, on completion) → per-(class,src,dst) cooldown → SSE + `POST /alerts/ingest` → PostgreSQL (same table).
-- **Live streaming** (air-gapped capture): Zeek (zero-IP `capture` namespace, `scripts/setup_netns.sh`) → `log_shipper.py` (tails JSON logs off a shared volume) → Redpanda → `streaming_engine.py` (Faust, engine parity with the upload path) → `relay.py` (one-way Unix socket, schema-validated) → OpenSearch. Code-complete; not yet load-tested.
-- **Offline batch**: static Zeek logs → `offline_engine.py` → OpenSearch.
-
-**Read-only ingest (constraint a)** is enforced at OS level: `scripts/setup_netns.sh` puts the capture NIC in an IP-less namespace with ARP off and no route; the `sensor` container drops all capabilities except `NET_RAW`/`NET_ADMIN`, publishes no ports, and runs read-only. Capture is receive-only; nothing is ever transmitted back toward the monitored link.
-
----
-
-## 8. Evaluation methodology
-
-Per the PS's requirement for a documented training/validation approach:
-
-- **`dns` family (DGA)**: 674,898-row real dataset (25 DGA malware families + Alexa benign), 80/20 stratified split, held-out evaluation. Real P/R/F1/ROC-AUC (§4). Threshold from the real precision-recall curve, not a guess.
-- **`flow` + `modbus` families**: trained via `scripts/train_family.py` on the in-repo labelled CSVs using the shared `feature_extraction.build_feature_vector` (train/serve parity), 80/20 stratified, held-out metrics recorded in `MANIFEST.json`. Datasets are modest and separable — pipeline-real, not submission-grade.
-- **Rule engines**: verified against real, independently-sourced traffic (ITI/ICS-Security-Tools' Modbus captures; StopDDoS spoofed-flood pcaps; THC-Hydra brute-force pcaps). Ground truth from packet-level inspection. A Modbus field-name mismatch that silently zeroed OT detection was found and fixed (and consolidated so it can't recur on any path).
-- **YARA**: 401 rules verified to compile and load; functional test against EICAR and a real Laudanum webshell signature.
-- **JA4**: the live-path JA4 is computed per the FoxIO spec from the ClientHello and unit-tested (`tests/test_capture.py`) for structure and determinism; matched against FoxIO's published fingerprints for Cobalt Strike / Sliver / SoftEther with correct severity tiering.
-- **Suricata**: 20,829 of 20,845 rules load with zero errors; functional detection confirmed against constructed traffic and end-to-end through `_run_suricata()`.
-- **Kerberoasting (ENG-11)**: logic cross-confirmed against Zeek's `KRB::Info` docs and MITRE's attack description (MITRE's "TGS-REP etype 23" = Zeek's `rc4-hmac`).
-- **BZAR (ENG-12)**: builds and loads cleanly in Zeek 6.0.3; parser tested against BZAR's real message format. Not yet exercised against a genuine SMB lateral-movement pcap — open item.
-- **Detection latency & throughput (PS constraint d)** — **now measured on the live path.** `GET /capture/status` reports, live: current/peak pps and Mbit/s, the **kernel** ring drop counter (`pcap_stats` / `PACKET_STATISTICS`) as the ground-truth "can't keep up" signal, the userspace-queue drop count, and detection-latency **p50 / p95 / p99 / max** (packet arrival → alert emission) for immediately-detectable classes. Measured on a real Wi-Fi capture through this pipeline: 195 pps / peak 370, kernel-drop 0, **latency 157 ms p50 / 328 ms p95 / 328 ms p99**. `python -m src.capture.live_agent run --pcap <big.pcap> --realtime` reproduces the measurement at wire speed.
-- **Automated tests**: `python -m pytest tests/` — engine, feature-extraction, schema, mapping, JA4, DNP3, forwarder, and phase-split checks; no Docker/Redis/DB required.
-
----
-
-## 9. Current Status & Honest Gaps
-
-| Area | Status |
-|---|---|
-| DDoS (incl. spoofed-source via HLL entropy), recon, exfiltration, OT, HTTP, brute-force rule engines | **Working, verified against real traffic** |
-| C2 beaconing (inter-arrival CV) | Implemented; verified against synthetic traffic |
-| DGA / DNS tunnelling | **Unified in ENG-03**: rule-based tunnelling + trained `dns` XGBoost for DGA + deterministic lexical fallback; mDNS/LLMNR/`.local` filtered. The old untrained CNN is removed. |
-| DGA ML (`dns`) | Trained full-scale (674,898 rows), curve-derived threshold |
-| `flow` + `modbus` ML | **Trained** on the in-repo CSVs, real held-out metrics; model server loads 3 of 4 families |
-| `tls` ML | Not trained (no public labelled JA4 dataset) — ENG-04 runs rule-based with **real JA4** on the live path |
-| Encrypted malware (JA4) — live path | **Working** — real JA4 from the ClientHello vs. FoxIO threat intel (19 malicious + 5 dual-use) |
-| Encrypted malware (JA4) — upload path | **Disabled** — `FoxIO-LLC/ja4` is not a valid zkg shortname; the `zeek-batch` build is non-fatal and skips it. Set the `JA4_ZKG_SOURCE` build arg to a reachable source to enable. |
-| OT: Modbus + **DNP3** + EtherNet/IP CIP | **Working end to end** — dangerous function/service codes, byte-level verified; DNP3 OPERATE/DIRECT_OPERATE/COLD_RESTART → CRITICAL |
-| Kerberoasting (ENG-11), BZAR (ENG-12) | Working / builds & parses; not yet against a real attack pcap |
-| Suricata (20,829 ET Open rules) | **Working, fully verified end-to-end** |
-| YARA | 401 real rules, verified |
-| Zeek + 6 OT protocol plugins | Working for uploads; IEC 61850 deferred (immature ecosystem) |
-| Live capture (kernel-level, dashboard-driven) | **Working** — real NIC capture, real JA4, DNP3, phase-split scoring, latency/throughput telemetry |
-| Stealth `sensor` service | Built — host network, `NET_RAW`/`NET_ADMIN` only, no ports, read-only, forwards to the shared DB |
-| Live streaming path (Zeek→Redpanda→Faust) | Engine parity with the upload path; **not yet load-tested** end to end |
-| Detection latency / throughput (PS constraint d) | **Measured on the live path** (p50/p95/p99 + pps/Mbit/s + kernel drops), reported live |
-| Standardized alert schema (PS constraint e) | **Met** — one Pydantic `Alert`, `extra="forbid"`, MITRE-mapped, explainability fields, shared by all four paths |
-| Dashboard | **Working** — Upload PCAP + Live Capture modes; interface picker (live only); live telemetry + SSE alert stream; per-tool coverage; raw JSON evidence |
-| Read-only ingest (PS constraint a) | **Strong** — `setup_netns.sh` rewritten (was a broken relay.py copy); IP-less capture ns; sensor container hardened; receive-only capture |
-
-**Closing the remaining gaps**, in priority order: (1) enable upload-path JA4 by pointing `JA4_ZKG_SOURCE` at a reachable Zeek JA4 package; (2) retrain `flow`/`modbus` and add `tls` on real public datasets (CICIDS2017/2018, CIC Modbus 2023, self-generated JA4); (3) load-test the live streaming path; (4) source a real SMB lateral-movement / Kerberoasting pcap for ENG-11/ENG-12; (5) grow YARA/Suricata/JA4 coverage as those ecosystems mature.
-
-Full change history: **`CHANGES.md`**. Deployment of the live tap: **`docs/LIVE_CAPTURE_DEPLOYMENT.md`**. Model contract: **`docs/MODEL_CONTRACT.md`**.
+Zeek (BSD), Suricata (GPLv2 — redistributing it requires offering source for that component), YARA (BSD), ICSNPP (BSD-3), XGBoost/scikit-learn/ONNX Runtime (Apache-2.0/BSD), React (MIT), FastAPI (MIT). Npcap is free but not open-source, capped at 5 systems for non-Nmap/Wireshark use, and not redistributable without its paid OEM licence — this project never bundles it. An enterprise Windows rollout beyond 5 seats would need that OEM licence; this is disclosed, not worked around.

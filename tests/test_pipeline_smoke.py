@@ -279,3 +279,185 @@ def test_eng03_uses_trained_dns_model_when_available():
     assert a is not None and a.threat_class == "DGA_DOMAIN"
     assert a.detection_mode in ("xgboost", "isolation_forest")
     assert a.model_scores and "xgboost" in a.model_scores
+
+
+# --------------------------------------------------------------------------
+# Redis-state isolation between separate pcap-upload analyses
+#
+# eng01/eng02/eng06/eng13 key their Redis-backed sliding-window state by
+# (src_ip[, dst_ip][, dst_port]) and a bucket derived from the FLOW'S OWN
+# embedded timestamp -- correct for live capture, which wants that state
+# to persist across a whole run. Confirmed against the live stack
+# (2026-09): re-uploading the SAME pcap three times through
+# POST /analyze/pcap produced three DIFFERENT alert counts/compositions
+# (VOLUMETRIC_DDOS and NETWORK_INTRUSION_ATTEMPT flickering in and out)
+# because those four engines' Redis keys collided across the separate
+# uploads. src/api/pcap_analysis.py now constructs each of them with a
+# fresh key_prefix per call -- these tests pin the mechanism that fix
+# depends on so it can't silently regress.
+# --------------------------------------------------------------------------
+def test_stateful_engine_keys_are_isolated_by_prefix():
+    from src.engines.eng01_ddos import VolumetricDDoSDetector
+    from src.engines.eng02_c2_beaconing import C2BeaconingDetector
+    from src.engines.eng06_exfiltration import ExfiltrationDetector
+    from src.engines.eng13_bruteforce import BruteForceDetector
+
+    ts, src_ip, dst_ip, dst_port = 1000.0, "10.0.0.1", "10.0.0.2", 22
+    prefix_a, prefix_b = "upload:aaa:", "upload:bbb:"
+
+    ddos_a = VolumetricDDoSDetector(redis_client=None, key_prefix=prefix_a)
+    ddos_b = VolumetricDDoSDetector(redis_client=None, key_prefix=prefix_b)
+    assert ddos_a._bucket_key(ts) != ddos_b._bucket_key(ts)
+    assert ddos_a._bucket_key(ts).startswith(prefix_a)
+
+    c2_a = C2BeaconingDetector(redis_client=None, key_prefix=prefix_a)
+    c2_b = C2BeaconingDetector(redis_client=None, key_prefix=prefix_b)
+    assert c2_a._key(src_ip, dst_ip) != c2_b._key(src_ip, dst_ip)
+
+    exfil_a = ExfiltrationDetector(redis_client=None, key_prefix=prefix_a)
+    exfil_b = ExfiltrationDetector(redis_client=None, key_prefix=prefix_b)
+    assert exfil_a._bucket_key(src_ip, dst_ip, ts) != exfil_b._bucket_key(src_ip, dst_ip, ts)
+
+    bf_a = BruteForceDetector(redis_client=None, key_prefix=prefix_a)
+    bf_b = BruteForceDetector(redis_client=None, key_prefix=prefix_b)
+    assert bf_a._bucket_key(src_ip, dst_ip, dst_port, ts) != bf_b._bucket_key(src_ip, dst_ip, dst_port, ts)
+
+
+def test_stateful_engine_key_prefix_defaults_to_empty():
+    """The live-capture/streaming path constructs these engines with no
+    key_prefix at all -- it WANTS state shared across the whole run.
+    Pin the default so it can't silently start scoping (or fail to scope)
+    without a deliberate change to every call site."""
+    from src.engines.eng01_ddos import VolumetricDDoSDetector
+    from src.engines.eng02_c2_beaconing import C2BeaconingDetector
+
+    det = VolumetricDDoSDetector(redis_client=None)
+    assert det.key_prefix == ""
+    assert det._bucket_key(1000.0) == "eng01:src_ip_cms:100"
+
+    det2 = C2BeaconingDetector(redis_client=None)
+    assert det2.key_prefix == ""
+    assert det2._key("1.2.3.4", "5.6.7.8") == "eng02:beacon_ts:1.2.3.4:5.6.7.8"
+
+
+def test_pcap_analysis_uses_fresh_state_prefix_per_call(monkeypatch):
+    """_run_engines must construct a NEW, unpredictable prefix on every
+    call -- two calls (two uploads) must never end up sharing one."""
+    import re
+    from src.api import pcap_analysis
+
+    seen_prefixes: list[str] = []
+    real_ctor = pcap_analysis.VolumetricDDoSDetector
+
+    class _Spy(real_ctor):  # type: ignore[misc,valid-type]
+        def __init__(self, *a, **kw):
+            seen_prefixes.append(kw.get("key_prefix", ""))
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(pcap_analysis, "VolumetricDDoSDetector", _Spy)
+
+    empty_parsed = {"conn": [], "dns": [], "ssl": [], "modbus": [], "cip": [], "dnp3": [], "http": [], "kerberos": [], "notice": []}
+    _run(pcap_analysis._run_engines(empty_parsed, None, redis_client=None))
+    _run(pcap_analysis._run_engines(empty_parsed, None, redis_client=None))
+
+    assert len(seen_prefixes) == 2
+    assert seen_prefixes[0] != seen_prefixes[1]
+    assert all(re.match(r"^upload:[0-9a-f]{12}:$", p) for p in seen_prefixes)
+
+
+# --------------------------------------------------------------------------
+# Accuracy fixes found by scripts/eval_real_traffic.py on real captures
+# --------------------------------------------------------------------------
+def test_orientation_syn_and_midstream():
+    from src.flow_orientation import sender_is_originator as so
+    assert so("tcp", 54000, 443, 0x02) is True          # SYN -> client
+    assert so("tcp", 443, 54000, 0x12) is False         # SYN+ACK -> server
+    # capture began mid-connection: server->client data packet seen first
+    assert so("tcp", 443, 15860, 0x18) is False
+    assert so("tcp", 15860, 443, 0x18) is True
+    assert so("udp", 53, 61636) is False                # DNS reply first
+    assert so("udp", 61636, 53) is True
+    assert so("tcp", 50000, 50001, 0x10) is True        # equal rank -> as seen
+
+
+def test_pcap_parser_orients_midstream_flow_and_skips_dns_responses(tmp_path):
+    scapy = pytest.importorskip("scapy.all")
+    from scapy.all import Ether, IP, TCP, UDP, DNS, DNSQR, DNSRR, wrpcap
+    pkts = [
+        # mid-stream: server (443) sends first -> must NOT be the originator
+        Ether() / IP(src="93.184.216.34", dst="192.168.0.5") / TCP(sport=443, dport=51000, flags="PA") / (b"x" * 900),
+        Ether() / IP(src="192.168.0.5", dst="93.184.216.34") / TCP(sport=51000, dport=443, flags="A"),
+        # DNS query + its response: only the query may become a dns record
+        Ether() / IP(src="192.168.0.5", dst="192.168.0.1") / UDP(sport=40000, dport=53) / DNS(rd=1, qd=DNSQR(qname="example.com")),
+        Ether() / IP(src="192.168.0.1", dst="192.168.0.5") / UDP(sport=53, dport=40000)
+        / DNS(qr=1, qd=DNSQR(qname="example.com"), an=DNSRR(rrname="example.com", rdata="93.184.216.34")),
+    ]
+    p = tmp_path / "t.pcap"
+    wrpcap(str(p), pkts)
+    from pcap_parser import parse_pcap
+    parsed = parse_pcap(str(p))
+    tcp = [c for c in parsed["conn"] if c["proto"] == "tcp"][0]
+    assert tcp["id.orig_h"] == "192.168.0.5" and tcp["id.resp_h"] == "93.184.216.34"
+    assert tcp["resp_bytes"] == 900 and tcp["orig_bytes"] == 0
+    assert len(parsed["dns"]) == 1 and parsed["dns"][0]["id.orig_h"] == "192.168.0.5"
+
+
+def test_eng05_answered_flows_do_not_count_as_a_scan():
+    from src.engines.eng05_recon import ReconDetector
+    det = ReconDetector()
+    for i in range(60):          # a busy desktop: 60 distinct CDN endpoints, every one ANSWERED
+        f = map_record({"uid": f"B{i}", "ts": 1.0 + i, "id.orig_h": "192.168.0.5", "id.resp_h": f"20.0.0.{i}",
+                        "id.orig_p": 50000 + i, "id.resp_p": 443, "proto": "tcp",
+                        "orig_bytes": 700, "resp_bytes": 5000}, "conn")
+        assert _run(det.score(f)) is None
+    det2 = ReconDetector()       # a real scan: 60 unanswered SYN probes
+    hit = None
+    for i in range(60):
+        f = map_record({"uid": f"S{i}", "ts": 1.0 + i * 0.01, "id.orig_h": "10.0.0.9", "id.resp_h": "10.0.0.50",
+                        "id.orig_p": 40000, "id.resp_p": 1000 + i, "proto": "tcp",
+                        "orig_bytes": 0, "resp_bytes": 0}, "conn")
+        hit = _run(det2.score(f)) or hit
+    assert hit is not None and hit.threat_class == "RECONNAISSANCE"
+
+
+def test_eng06_small_flows_are_not_exfiltration():
+    from src.engines.eng06_exfiltration import ExfiltrationDetector
+    det = ExfiltrationDetector(redis_client=None)
+    small = map_record({"uid": "E2", "ts": 1.0, "id.orig_h": "10.0.0.9", "id.resp_h": "9.9.9.9",
+                        "id.orig_p": 5000, "id.resp_p": 80, "proto": "tcp",
+                        "orig_bytes": 654, "resp_bytes": 25}, "conn")   # 26:1 but 654 bytes
+    assert _run(det.score(small)) is None
+
+
+def test_registrable_domain():
+    from src.engines.eng03_dga_dns import registrable_domain as rd
+    assert rd("a-ring-fallback.msedge.net") == "msedge.net"
+    assert rd("stream-production.avcdn.net") == "avcdn.net"
+    assert rd("www.bbc.co.uk") == "bbc.co.uk"
+    assert rd("kqx3vwzptlmnbrx9.com") == "kqx3vwzptlmnbrx9.com"
+    assert rd("localhost") == "localhost"
+
+
+def test_eng03_cdn_subdomain_not_dga_but_real_dga_still_fires():
+    ms = _model_server_or_skip()
+    if "dns" not in ms.loaded_families():
+        pytest.skip("dns model not trained")
+    from src.engines.eng03_dga_dns import DGADetector
+    det = DGADetector(model_server=ms)
+    def q(name):
+        return map_record({"uid": "D", "ts": 1.0, "id.orig_h": "10.0.0.5", "id.resp_h": "8.8.8.8",
+                           "id.orig_p": 33333, "id.resp_p": 53, "query": name, "qtype_name": "A"}, "dns")
+    assert _run(det.score(q("a-ring-fallback.msedge.net"))) is None
+    assert _run(det.score(q("stream-production.avcdn.net"))) is None
+    a = _run(det.score(q("kqx3vwzptlmnbrx9.com")))
+    assert a is not None and a.threat_class == "DGA_DOMAIN"
+
+
+def test_fusion_policy_and_flow_mapping():
+    from src.inference.fusion import standalone_threshold, effective_threshold
+    from src.inference.model_server import MIN_ML_CONFIDENCE
+    from src.inference.ml_alerts import ML_THREAT_MAPPING
+    assert standalone_threshold("flow") >= 0.95 > MIN_ML_CONFIDENCE
+    assert effective_threshold("flow", corroborated=True) == MIN_ML_CONFIDENCE
+    assert effective_threshold("modbus", corroborated=False) == MIN_ML_CONFIDENCE
+    assert ML_THREAT_MAPPING["flow"][0] == "VOLUMETRIC_DDOS"   # DDoS-trained model must not claim "scan"

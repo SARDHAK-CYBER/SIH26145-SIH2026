@@ -49,17 +49,28 @@ class VolumetricDDoSDetector(Detector):
         slowloris_max_bytes: int = 50,
         window_seconds: float = WINDOW_SECONDS,
         flood_threshold: int = FLOOD_FLOW_THRESHOLD,
+        key_prefix: str = "",
     ):
         self.redis = redis_client
         self.slowloris_duration_s = slowloris_duration_s
         self.slowloris_max_bytes = slowloris_max_bytes
         self.window_seconds = window_seconds
         self.flood_threshold = flood_threshold
+        # Empty by default -- live capture/streaming WANTS this counter
+        # state shared across the whole run, keyed only by (src_ip,
+        # timestamp-bucket). A one-shot pcap-upload analysis must NOT
+        # share it: two uploads whose packets' own embedded timestamps
+        # land in the same 10s bucket (trivially true for the same file
+        # re-analyzed, or any two pcaps from the same lab/testing
+        # session) would otherwise silently accumulate each other's
+        # flood counters. src/api/pcap_analysis.py passes a fresh
+        # per-request prefix for exactly this reason.
+        self.key_prefix = key_prefix
         self._initialized_buckets: set[str] = set()
 
     def _bucket_key(self, ts: float) -> str:
         bucket_id = int(ts // self.window_seconds)
-        return f"eng01:src_ip_cms:{bucket_id}"
+        return f"{self.key_prefix}eng01:src_ip_cms:{bucket_id}"
 
     def _ensure_cms(self, key: str) -> None:
         if key in self._initialized_buckets:
@@ -82,8 +93,8 @@ class VolumetricDDoSDetector(Detector):
         client IPs repeat constantly, nowhere near this ratio)."""
         bucket_id = int(flow["ts"] // self.window_seconds)
         dst = flow["dst_ip"]
-        hll_key = f"eng01:dst_src_hll:{dst}:{bucket_id}"
-        count_key = f"eng01:dst_pkt_count:{dst}:{bucket_id}"
+        hll_key = f"{self.key_prefix}eng01:dst_src_hll:{dst}:{bucket_id}"
+        count_key = f"{self.key_prefix}eng01:dst_pkt_count:{dst}:{bucket_id}"
 
         try:
             pipe = self.redis.pipeline()
@@ -103,7 +114,7 @@ class VolumetricDDoSDetector(Detector):
                 # Same deduplication reasoning as the single-source flood
                 # check above -- one alert per (destination, window), not
                 # one per packet in an ongoing flood.
-                dedup_key = f"eng01:spoofed_alerted:{dst}:{bucket_id}"
+                dedup_key = f"{self.key_prefix}eng01:spoofed_alerted:{dst}:{bucket_id}"
                 try:
                     if not self.redis.set(dedup_key, "1", nx=True, ex=BUCKET_TTL_SECONDS):
                         return None  # already alerted this destination/window
@@ -151,6 +162,7 @@ class VolumetricDDoSDetector(Detector):
             # events. One alert per (source, window) is what a SOC actually
             # wants; the underlying count still climbs in evidence for
             # forensic value, but only the FIRST crossing fires a new alert.
+            # `key` is already _bucket_key()'s output, which includes key_prefix.
             dedup_key = f"eng01:flood_alerted:{flow['src_ip']}:{key}"
             already_alerted = False
             try:

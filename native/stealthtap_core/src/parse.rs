@@ -1,0 +1,299 @@
+//! IPv4/TCP/UDP header extraction, flow orientation, flow assembly, and DNS
+//! query extraction -- a byte-level Rust port of the validated logic in
+//! pcap_parser.py and src/flow_orientation.py. Every design decision here
+//! (SYN/SYN-ACK orientation, port-rank fallback, the flow UID formula, the
+//! DNS qr==0 filter) mirrors that Python code exactly and on purpose: it is
+//! the reference specification, fixed against real captures this session,
+//! not something to reinvent.
+//!
+//! Panics are never allowed to escape a single packet: `parse_one` returns
+//! Option and every slice access is bounds-checked, so one malformed or
+//! truncated packet degrades to "skip it" (matching the Python parser's
+//! `if not pkt.haslayer(IP): continue`), not "crash the whole capture."
+//! That matters specifically because this parses untrusted, potentially
+//! adversarial input straight off the wire.
+
+use indexmap::IndexMap;
+use sha2::{Digest, Sha256};
+
+const LINKTYPE_ETHERNET: u32 = 1;
+const LINKTYPE_LINUX_SLL: u32 = 113;
+
+const TCP_SYN: u8 = 0x02;
+const TCP_ACK: u8 = 0x10;
+
+#[derive(Clone, Debug)]
+pub struct ConnRecord {
+    pub uid: String,
+    pub ts: f64,
+    pub orig_h: String,
+    pub orig_p: u16,
+    pub resp_h: String,
+    pub resp_p: u16,
+    pub proto: &'static str,
+    pub duration: f64,
+    pub orig_bytes: u64,
+    pub resp_bytes: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct DnsRecord {
+    pub uid: String,
+    pub ts: f64,
+    pub orig_h: String,
+    pub orig_p: u16,
+    pub resp_h: String,
+    pub resp_p: u16,
+    pub query: String,
+    pub qtype_name: String,
+}
+
+fn flow_uid(a_ip: &str, a_port: u16, b_ip: &str, b_port: u16, proto: &str) -> String {
+    // Byte-for-byte the same input string pcap_parser.py hashes, so both
+    // parsers produce IDENTICAL uids for the same flow -- the strongest
+    // single-value equivalence check between the two implementations.
+    let raw = format!("{a_ip}:{a_port}-{b_ip}:{b_port}-{proto}");
+    let digest = Sha256::digest(raw.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    hex[..16].to_string()
+}
+
+fn port_rank(port: u16) -> u8 {
+    if port < 1024 { 0 } else if port < 32768 { 1 } else { 2 }
+}
+
+/// True if the packet's SENDER should be recorded as the flow originator --
+/// mirrors src/flow_orientation.py::sender_is_originator exactly.
+fn sender_is_originator(proto: &str, sport: u16, dport: u16, tcp_flags: Option<u8>) -> bool {
+    if proto == "tcp" {
+        if let Some(flags) = tcp_flags {
+            let syn = flags & TCP_SYN != 0;
+            let ack = flags & TCP_ACK != 0;
+            if syn && !ack { return true; }
+            if syn && ack { return false; }
+        }
+    }
+    let (rs, rd) = (port_rank(sport), port_rank(dport));
+    if rs != rd { return rs > rd; }
+    true
+}
+
+fn ipv4_to_string(b: &[u8]) -> String {
+    format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
+}
+
+struct L4<'a> {
+    proto: &'static str,
+    sport: u16,
+    dport: u16,
+    tcp_flags: Option<u8>,
+    payload: &'a [u8],
+}
+
+/// Strips the link-layer header, returning (ethertype, l3_payload). None
+/// for anything not IPv4 over Ethernet or Linux-cooked-capture -- the same
+/// scope as pcap_parser.py (`pkt.haslayer(IP)`, IPv4 only).
+fn strip_link_layer(linktype: u32, data: &[u8]) -> Option<&[u8]> {
+    match linktype {
+        LINKTYPE_ETHERNET => {
+            if data.len() < 14 { return None; }
+            let mut off = 12usize;
+            let mut ethertype = u16::from_be_bytes([data[off], data[off + 1]]);
+            off += 2;
+            // 802.1Q VLAN tag(s) -- skip each one, matching what real
+            // Ethernet-on-a-switch traffic (a VLAN trunk mirror) looks like.
+            while ethertype == 0x8100 || ethertype == 0x88a8 {
+                if data.len() < off + 4 { return None; }
+                ethertype = u16::from_be_bytes([data[off + 2], data[off + 3]]);
+                off += 4;
+            }
+            if ethertype != 0x0800 { return None; }  // IPv4 only, matches pcap_parser.py's scope
+            data.get(off..)
+        }
+        LINKTYPE_LINUX_SLL => {
+            // "Linux cooked capture v1": 16-byte header, protocol in the
+            // last 2 bytes (same values as an Ethertype). Real captures on
+            // this project's own test set use this linktype (e.g. any-
+            // interface tcpdump captures) -- confirmed against 0day.pcap.
+            if data.len() < 16 { return None; }
+            let proto = u16::from_be_bytes([data[14], data[15]]);
+            if proto != 0x0800 { return None; }
+            data.get(16..)
+        }
+        _ => None,
+    }
+}
+
+fn parse_l4(proto_num: u8, payload: &[u8]) -> Option<L4<'_>> {
+    match proto_num {
+        6 => {  // TCP
+            if payload.len() < 20 { return None; }
+            let sport = u16::from_be_bytes([payload[0], payload[1]]);
+            let dport = u16::from_be_bytes([payload[2], payload[3]]);
+            let data_off = ((payload[12] >> 4) as usize) * 4;
+            if data_off < 20 || payload.len() < data_off { return None; }
+            let flags = payload[13];
+            Some(L4 { proto: "tcp", sport, dport, tcp_flags: Some(flags), payload: &payload[data_off..] })
+        }
+        17 => {  // UDP
+            if payload.len() < 8 { return None; }
+            let sport = u16::from_be_bytes([payload[0], payload[1]]);
+            let dport = u16::from_be_bytes([payload[2], payload[3]]);
+            let len = u16::from_be_bytes([payload[4], payload[5]]) as usize;
+            let body_start = 8usize;
+            let body_end = len.max(body_start).min(payload.len());
+            Some(L4 { proto: "udp", sport, dport, tcp_flags: None, payload: &payload[body_start..body_end] })
+        }
+        _ => None,
+    }
+}
+
+/// Best-effort DNS QUESTION-section parse for the FIRST question only (qr==0
+/// filter matches pcap_parser.py exactly -- responses are never re-scored as
+/// queries). No compression-pointer chasing: the first name in a packet has
+/// nothing earlier to point to in practice, and a name that doesn't parse
+/// cleanly is skipped, never crashes the capture.
+fn parse_dns_query(payload: &[u8]) -> Option<(String, u16)> {
+    if payload.len() < 12 { return None; }
+    let flags = u16::from_be_bytes([payload[2], payload[3]]);
+    let qr = (flags >> 15) & 1;
+    if qr != 0 { return None; }  // a response, not a query
+    let qdcount = u16::from_be_bytes([payload[4], payload[5]]);
+    if qdcount == 0 { return None; }
+
+    let mut pos = 12usize;
+    let mut labels: Vec<String> = Vec::new();
+    loop {
+        if pos >= payload.len() { return None; }
+        let len = payload[pos] as usize;
+        if len == 0 { pos += 1; break; }
+        if len & 0xc0 != 0 { return None; }  // compression pointer -- not chased, bail cleanly
+        pos += 1;
+        if pos + len > payload.len() { return None; }
+        let label = std::str::from_utf8(&payload[pos..pos + len]).ok()?.to_string();
+        labels.push(label);
+        pos += len;
+        if labels.len() > 64 { return None; }  // sane bound against a hostile packet
+    }
+    if pos + 2 > payload.len() { return None; }
+    let qtype = u16::from_be_bytes([payload[pos], payload[pos + 1]]);
+    Some((labels.join("."), qtype))
+}
+
+fn qtype_name(qtype: u16) -> String {
+    match qtype {
+        1 => "A", 16 => "TXT", 28 => "AAAA", 10 => "NULL", 5 => "CNAME",
+        _ => return qtype.to_string(),
+    }.to_string()
+}
+
+struct FlowState {
+    orig_ip: String,
+    orig_port: u16,
+    resp_ip: String,
+    resp_port: u16,
+    proto: &'static str,
+    first_ts: f64,
+    last_ts: f64,
+    orig_bytes: u64,
+    resp_bytes: u64,
+    uid: String,
+}
+
+pub struct ParseResult {
+    pub conn: Vec<ConnRecord>,
+    pub dns: Vec<DnsRecord>,
+}
+
+pub fn parse_packets(linktype: u32, packets: impl Iterator<Item = (f64, Vec<u8>)>, max_packets: Option<usize>) -> ParseResult {
+    // IndexMap, not HashMap: iteration order below must be INSERTION order
+    // (first-packet-seen order, scanning the file top to bottom), matching
+    // pcap_parser.py's plain dict exactly -- see the Cargo.toml comment.
+    let mut flows: IndexMap<(String, u16, String, u16, &'static str), FlowState> = IndexMap::new();
+    let mut dns: Vec<DnsRecord> = Vec::new();
+    let mut n = 0usize;
+
+    for (ts, data) in packets {
+        n += 1;
+        if let Some(cap) = max_packets { if n > cap { break; } }
+
+        let Some(l3) = strip_link_layer(linktype, &data) else { continue };
+        if l3.len() < 20 { continue; }
+        let ihl = ((l3[0] & 0x0f) as usize) * 4;
+        if ihl < 20 || l3.len() < ihl { continue; }
+        let proto_num = l3[9];
+        let src_ip = ipv4_to_string(&l3[12..16]);
+        let dst_ip = ipv4_to_string(&l3[16..20]);
+        let l4_payload = &l3[ihl..];
+
+        let Some(l4) = parse_l4(proto_num, l4_payload) else { continue };
+
+        // DNS query, UDP port 53 (unicast DNS) or 5353 (mDNS -- scapy binds
+        // the same DNS layer there, and real capture traffic uses it
+        // heavily: e.g. "SirGabriel._dosvc._tcp.local") either side --
+        // checked before folding into `conn`, and DNS packets never also
+        // become a conn record, matching pcap_parser.py's `continue` after
+        // appending a dns record.
+        if l4.proto == "udp" && ([53, 5353].contains(&l4.sport) || [53, 5353].contains(&l4.dport)) {
+            if let Some((qname, qtype)) = parse_dns_query(l4.payload) {
+                dns.push(DnsRecord {
+                    uid: flow_uid(&src_ip, l4.sport, &dst_ip, l4.dport, "udp"),
+                    ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                    resp_h: dst_ip.clone(), resp_p: l4.dport,
+                    query: qname.trim_end_matches('.').to_string(),
+                    qtype_name: qtype_name(qtype),
+                });
+                continue;
+            }
+        }
+
+        // Canonical, direction-independent key so both halves of one
+        // conversation land in the SAME flow record.
+        let key = if (src_ip.as_str(), l4.sport) <= (dst_ip.as_str(), l4.dport) {
+            (src_ip.clone(), l4.sport, dst_ip.clone(), l4.dport, l4.proto)
+        } else {
+            (dst_ip.clone(), l4.dport, src_ip.clone(), l4.sport, l4.proto)
+        };
+
+        let payload_len = l4.payload.len() as u64;
+        let entry = flows.entry(key).or_insert_with(|| {
+            let (orig_ip, orig_port, resp_ip, resp_port) =
+                if sender_is_originator(l4.proto, l4.sport, l4.dport, l4.tcp_flags) {
+                    (src_ip.clone(), l4.sport, dst_ip.clone(), l4.dport)
+                } else {
+                    (dst_ip.clone(), l4.dport, src_ip.clone(), l4.sport)
+                };
+            let uid = flow_uid(&orig_ip, orig_port, &resp_ip, resp_port, l4.proto);
+            FlowState { orig_ip, orig_port, resp_ip, resp_port, proto: l4.proto,
+                       first_ts: ts, last_ts: ts, orig_bytes: 0, resp_bytes: 0, uid }
+        });
+        entry.last_ts = entry.last_ts.max(ts);
+        if src_ip == entry.orig_ip && l4.sport == entry.orig_port {
+            entry.orig_bytes += payload_len;
+        } else {
+            entry.resp_bytes += payload_len;
+        }
+    }
+
+    // `flows.into_values()` on an IndexMap yields values in FIRST-INSERTION
+    // order -- i.e. the order each flow's first packet was encountered
+    // scanning the file -- the same order pcap_parser.py's plain dict
+    // naturally gives it (a Python dict has been insertion-ordered by
+    // language guarantee since 3.7). std::HashMap deliberately randomizes
+    // iteration order per process; several detection engines are stateful
+    // and processing-order-sensitive (e.g. ENG-01's flood counter dedups
+    // "first crossing per window," which depends on the order flows are
+    // scored in), so relying on HashMap order here would be a real,
+    // if usually-silent, source of run-to-run nondeterminism. IndexMap
+    // removes that risk outright -- confirmed byte-for-byte identical
+    // conn ordering against pcap_parser.py on real captures via
+    // scripts/validate_native_parser.py.
+    let conn: Vec<ConnRecord> = flows.into_values().map(|f| ConnRecord {
+        uid: f.uid, ts: f.first_ts, orig_h: f.orig_ip, orig_p: f.orig_port,
+        resp_h: f.resp_ip, resp_p: f.resp_port, proto: f.proto,
+        duration: (f.last_ts - f.first_ts).max(0.0),
+        orig_bytes: f.orig_bytes, resp_bytes: f.resp_bytes,
+    }).collect();
+
+    ParseResult { conn, dns }
+}
