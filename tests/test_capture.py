@@ -183,14 +183,14 @@ def test_live_agent_phase_split_and_dedup():
                  "duration": 4.0, "orig_bytes": 5_000_000, "resp_bytes": 100,
                  "segment_hash": "sha256:x"}
     # snapshot phase -> exfil engine not in the set -> no DATA_EXFILTRATION
-    _run(ag._score_conn(exfil_rec, _DISPATCH_CONN_SNAPSHOT))
+    _run(ag._dispatch_conn("conn_snapshot", exfil_rec, _DISPATCH_CONN_SNAPSHOT))
     assert not any(a["threat_class"] == "DATA_EXFILTRATION" for a in got)
     # expire phase -> fires once
-    _run(ag._score_conn(exfil_rec, _DISPATCH_CONN_EXPIRE))
+    _run(ag._dispatch_conn("conn_expire", exfil_rec, _DISPATCH_CONN_EXPIRE))
     exfil = [a for a in got if a["threat_class"] == "DATA_EXFILTRATION"]
     assert len(exfil) == 1
     # a second expire of the same flow within the cooldown -> still 1
-    _run(ag._score_conn(exfil_rec, _DISPATCH_CONN_EXPIRE))
+    _run(ag._dispatch_conn("conn_expire", exfil_rec, _DISPATCH_CONN_EXPIRE))
     assert len([a for a in got if a["threat_class"] == "DATA_EXFILTRATION"]) == 1
 
 
