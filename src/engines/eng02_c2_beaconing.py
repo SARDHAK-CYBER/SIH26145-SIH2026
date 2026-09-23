@@ -31,10 +31,21 @@ correctly.
 """
 from __future__ import annotations
 import math
+import os
 from typing import Optional
 from redis import Redis
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
+
+try:
+    # Native fast-path -- see native/stealthtap_core/src/eng02.rs and
+    # eng01_ddos.py's identical pattern for the full rationale.
+    import stealthtap_core
+    _NATIVE_ENG02_AVAILABLE = hasattr(stealthtap_core, "NativeEng02")
+except ImportError:
+    _NATIVE_ENG02_AVAILABLE = False
+
+_FORCE_PYTHON_ENG02 = os.environ.get("STEALTHTAP_FORCE_PYTHON_ENG02") == "1"
 
 MAX_TRACKED_TIMESTAMPS = 50   # bound the per-destination history so this never grows unbounded
 TIMESTAMP_TTL_SECONDS = 3600  # stop tracking a destination pair after an hour of silence
@@ -60,15 +71,25 @@ class C2BeaconingDetector(Detector):
         # one-shot analysis path, so unrelated uploads sharing a src/dst
         # pair never inherit each other's inter-arrival timestamp history.
         self.key_prefix = key_prefix
+        self._native = None
+        if _NATIVE_ENG02_AVAILABLE and not _FORCE_PYTHON_ENG02:
+            self._native = stealthtap_core.NativeEng02()
 
     def _key(self, src_ip: str, dst_ip: str) -> str:
         return f"{self.key_prefix}eng02:beacon_ts:{src_ip}:{dst_ip}"
 
     async def score(self, flow: dict) -> Optional[Alert]:
-        if self.redis is None:
-            return None
         src_ip, dst_ip = flow.get("src_ip", ""), flow.get("dst_ip", "")
         ts = float(flow.get("ts", 0.0))
+
+        if self._native is not None:
+            hit = self._native.check(src_ip, dst_ip, ts)
+            if hit is None:
+                return None
+            return self._build_alert(flow, confidence=hit["confidence"], evidence=hit["evidence"])
+
+        if self.redis is None:
+            return None
         key = self._key(src_ip, dst_ip)
 
         try:

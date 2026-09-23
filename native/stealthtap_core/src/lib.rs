@@ -10,6 +10,8 @@
 //! wrong answer) -- see native/README.md.
 
 mod eng01;
+mod eng02;
+mod eng13;
 mod ja4;
 mod live;
 mod parse;
@@ -19,6 +21,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use eng01::NativeEng01;
+use eng02::NativeEng02;
+use eng13::NativeEng13;
 use live::Immediate;
 
 #[pyfunction]
@@ -223,5 +227,7 @@ fn stealthtap_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_pcap, m)?)?;
     m.add_class::<LiveFlowAssembler>()?;
     m.add_class::<NativeEng01>()?;
+    m.add_class::<NativeEng02>()?;
+    m.add_class::<NativeEng13>()?;
     Ok(())
 }

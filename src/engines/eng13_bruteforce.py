@@ -22,10 +22,21 @@ the slow case. Threshold (10 attempts / 60s) is set with real margin below
 BOTH measured real attack rates above, not guessed.
 """
 from __future__ import annotations
+import os
 from typing import Optional
 from redis import Redis
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
+
+try:
+    # Native fast-path -- see native/stealthtap_core/src/eng13.rs and
+    # eng01_ddos.py's identical pattern for the full rationale.
+    import stealthtap_core
+    _NATIVE_ENG13_AVAILABLE = hasattr(stealthtap_core, "NativeEng13")
+except ImportError:
+    _NATIVE_ENG13_AVAILABLE = False
+
+_FORCE_PYTHON_ENG13 = os.environ.get("STEALTHTAP_FORCE_PYTHON_ENG13") == "1"
 
 # Standard authentication-service ports -- brute-forcing only makes sense
 # against a service that actually authenticates.
@@ -48,20 +59,29 @@ class BruteForceDetector(Detector):
         self.redis = redis_client
         # See eng01's key_prefix docstring.
         self.key_prefix = key_prefix
+        self._native = None
+        if _NATIVE_ENG13_AVAILABLE and not _FORCE_PYTHON_ENG13:
+            self._native = stealthtap_core.NativeEng13()
 
     def _bucket_key(self, src_ip: str, dst_ip: str, dst_port: int, ts: float) -> str:
         bucket_id = int(ts // WINDOW_SECONDS)
         return f"{self.key_prefix}eng13:auth_attempts:{src_ip}:{dst_ip}:{dst_port}:{bucket_id}"
 
     async def score(self, flow: dict) -> Optional[Alert]:
-        if self.redis is None:
-            return None
         dst_port = int(flow.get("dst_port", 0))
-        if dst_port not in AUTH_PORTS:
-            return None
-
         src_ip, dst_ip = flow.get("src_ip", ""), flow.get("dst_ip", "")
         ts = float(flow.get("ts", 0.0))
+
+        if self._native is not None:
+            hit = self._native.check(src_ip, dst_ip, dst_port, ts)
+            if hit is None:
+                return None
+            return self._build_alert(flow, src_ip, dst_ip, dst_port, ts, hit["confidence"], hit["evidence"])
+
+        if self.redis is None:
+            return None
+        if dst_port not in AUTH_PORTS:
+            return None
         key = self._bucket_key(src_ip, dst_ip, dst_port, ts)
 
         try:
@@ -90,9 +110,19 @@ class BruteForceDetector(Detector):
             pass
 
         confidence = min(97.0, 70.0 + (count - ATTEMPT_THRESHOLD) * 0.5)
+        evidence = {
+            "connection_attempts": count,
+            "window_seconds": WINDOW_SECONDS,
+            "target_port": dst_port,
+            "threshold": ATTEMPT_THRESHOLD,
+        }
+        return self._build_alert(flow, src_ip, dst_ip, dst_port, ts, round(confidence, 1), evidence)
+
+    def _build_alert(self, flow: dict, src_ip: str, dst_ip: str, dst_port: int, ts: float,
+                     confidence: float, evidence: dict) -> Alert:
         return Alert(
             alert_id=flow.get("flow_uid", "unknown"), timestamp=ts,
-            severity="HIGH", confidence_score=round(confidence, 1),
+            severity="HIGH", confidence_score=confidence,
             threat_class="NETWORK_INTRUSION_ATTEMPT",
             flow_identifier=FlowIdentifier(
                 src_ip=src_ip, src_port=int(flow.get("src_port", 0)),
@@ -102,11 +132,6 @@ class BruteForceDetector(Detector):
                 tactic="Credential Access", technique_id="T1110",
                 technique_name="Brute Force",
             ),
-            evidence={
-                "connection_attempts": count,
-                "window_seconds": WINDOW_SECONDS,
-                "target_port": dst_port,
-                "threshold": ATTEMPT_THRESHOLD,
-            },
+            evidence=evidence,
             forensics={"raw_segment_hash_sha256": flow.get("segment_hash", "")},
         )
