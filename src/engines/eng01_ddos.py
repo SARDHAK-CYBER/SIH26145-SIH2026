@@ -4,6 +4,21 @@ from redis import Redis
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
 
+try:
+    # Native fast-path: the exact same thresholds/formulas below, moved
+    # into an in-process Rust counter so the per-flow cost that
+    # profiling identified (Redis/MemoryStore round-trips, Python dict/
+    # set overhead) drops out entirely -- see native/stealthtap_core/
+    # src/eng01.rs and scripts/validate_native_eng01.py. Same graceful-
+    # fallback pattern as every other native module in this codebase.
+    import stealthtap_core
+    _NATIVE_ENG01_AVAILABLE = hasattr(stealthtap_core, "NativeEng01")
+except ImportError:
+    _NATIVE_ENG01_AVAILABLE = False
+
+import os
+_FORCE_PYTHON_ENG01 = os.environ.get("STEALTHTAP_FORCE_PYTHON_ENG01") == "1"
+
 # Sliding-window granularity for the volumetric check. A plain Redis CMS has
 # no built-in decay, so we bucket by time window instead: one CMS per
 # `window_seconds` slice, keyed by bucket id and given a short TTL so old
@@ -82,6 +97,21 @@ class VolumetricDDoSDetector(Detector):
         self.key_prefix = key_prefix
         self._initialized_buckets: set[str] = set()
 
+        # Native fast-path: only safe when the caller uses this engine's
+        # default thresholds (the Rust side hardcodes them, see
+        # native/stealthtap_core/src/eng01.rs) -- every real call site
+        # in this codebase does (verified: grep for VolumetricDDoSDetector
+        # construction finds none overriding window_seconds/
+        # flood_threshold/slowloris_*). key_prefix doesn't need special
+        # native handling: a fresh NativeEng01() per Detector instance is
+        # already isolated by construction, which is what key_prefix
+        # exists to guarantee for the Redis path.
+        self._native = None
+        if (_NATIVE_ENG01_AVAILABLE and not _FORCE_PYTHON_ENG01
+                and window_seconds == WINDOW_SECONDS and flood_threshold == FLOOD_FLOW_THRESHOLD
+                and slowloris_duration_s == 120.0 and slowloris_max_bytes == 50):
+            self._native = stealthtap_core.NativeEng01()
+
     def _bucket_key(self, ts: float) -> str:
         bucket_id = int(ts // self.window_seconds)
         return f"{self.key_prefix}eng01:src_ip_cms:{bucket_id}"
@@ -154,6 +184,16 @@ class VolumetricDDoSDetector(Detector):
         return None
 
     async def score(self, flow: dict) -> Optional[Alert]:
+        if self._native is not None:
+            hit = self._native.check(
+                flow["src_ip"], flow["dst_ip"], flow["ts"],
+                float(flow.get("duration_s", 0) or 0),
+                float(flow.get("orig_bytes", 0) or 0) + float(flow.get("resp_bytes", 0) or 0),
+            )
+            if hit is None:
+                return None
+            return self._build_alert(flow, hit["threat_class"], hit["confidence"], evidence=hit["evidence"])
+
         key = self._bucket_key(flow["ts"])
         self._ensure_cms(key)
         dst_hll_key = self._src_dst_hll_key(flow["src_ip"], flow["ts"])

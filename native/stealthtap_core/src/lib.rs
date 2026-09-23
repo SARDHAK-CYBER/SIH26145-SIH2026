@@ -9,6 +9,7 @@
 //! files are not yet supported (returns a clear error, not a silent
 //! wrong answer) -- see native/README.md.
 
+mod eng01;
 mod ja4;
 mod live;
 mod parse;
@@ -17,6 +18,7 @@ mod pcap;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
+use eng01::NativeEng01;
 use live::Immediate;
 
 #[pyfunction]
@@ -220,5 +222,6 @@ impl LiveFlowAssembler {
 fn stealthtap_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_pcap, m)?)?;
     m.add_class::<LiveFlowAssembler>()?;
+    m.add_class::<NativeEng01>()?;
     Ok(())
 }
