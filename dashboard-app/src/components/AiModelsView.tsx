@@ -58,11 +58,18 @@ export const AiModelsView: React.FC = () => {
     { id: 'ENG-05', name: 'Reconnaissance', threat_class: 'RECONNAISSANCE', algorithm: 'Distinct-destination fan-out, memory-bounded', protocol: 'TCP/UDP/ICMP', status: 'active' },
     { id: 'ENG-06', name: 'Data Exfiltration', threat_class: 'DATA_EXFILTRATION', algorithm: 'Per-flow + accumulated outbound:inbound byte ratio', protocol: 'TCP/UDP', status: 'active' },
     { id: 'ENG-07', name: 'OT Industrial Anomaly', threat_class: 'ICS_UNAUTHORIZED_CONTROL_COMMAND', algorithm: 'Dangerous Modbus / DNP3 / EtherNet-IP CIP command codes', protocol: 'Modbus · DNP3 · CIP', status: 'active' },
-    { id: 'ENG-08', name: 'YARA File Scanner', threat_class: 'MALICIOUS_FILE_DETECTED', algorithm: '~401 rules on Zeek-extracted cleartext files', protocol: 'HTTP/FTP/SMB', status: 'active' },
+    // ENG-08/10/12 need the full Docker Zeek+Suricata+YARA stack (file
+    // extraction, the separate Suricata process, Zeek's BZAR script
+    // package) -- they cannot run in standalone/desktop mode. This
+    // array is only shown if the live /api/pipeline/status call fails,
+    // so it defaults to the same "standby" these engines correctly
+    // report from a running backend, rather than the "active" every
+    // engine used to claim regardless of whether it could run.
+    { id: 'ENG-08', name: 'YARA File Scanner', threat_class: 'MALICIOUS_FILE_DETECTED', algorithm: '~401 rules on Zeek-extracted cleartext files', protocol: 'HTTP/FTP/SMB', status: 'standby' },
     { id: 'ENG-09', name: 'HTTP C2 / Exfil', threat_class: 'DATA_EXFILTRATION', algorithm: 'Library-default UA + URI entropy + large POST bodies', protocol: 'HTTP', status: 'active' },
-    { id: 'ENG-10', name: 'Suricata Signatures', threat_class: 'NETWORK_INTRUSION_ATTEMPT', algorithm: '20,829 Emerging Threats Open rules (eve.json bridge)', protocol: 'All', status: 'active' },
+    { id: 'ENG-10', name: 'Suricata Signatures', threat_class: 'NETWORK_INTRUSION_ATTEMPT', algorithm: '20,829 Emerging Threats Open rules (eve.json bridge)', protocol: 'All', status: 'standby' },
     { id: 'ENG-11', name: 'Kerberoasting', threat_class: 'NETWORK_INTRUSION_ATTEMPT', algorithm: 'TGS request + RC4 (rc4-hmac) cipher for a service account', protocol: 'Kerberos', status: 'active' },
-    { id: 'ENG-12', name: 'SMB Lateral Movement', threat_class: 'NETWORK_INTRUSION_ATTEMPT', algorithm: 'MITRE BZAR notice parsing, technique IDs from BZAR output', protocol: 'SMB/DCE-RPC', status: 'active' },
+    { id: 'ENG-12', name: 'SMB Lateral Movement', threat_class: 'NETWORK_INTRUSION_ATTEMPT', algorithm: 'MITRE BZAR notice parsing, technique IDs from BZAR output', protocol: 'SMB/DCE-RPC', status: 'standby' },
     { id: 'ENG-13', name: 'Credential Brute Force', threat_class: 'NETWORK_INTRUSION_ATTEMPT', algorithm: 'Connection attempts per (src, dst, auth-port) over a wide window', protocol: 'FTP/SSH/RDP/…', status: 'active' },
   ];
 

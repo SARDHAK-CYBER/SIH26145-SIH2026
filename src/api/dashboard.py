@@ -216,7 +216,22 @@ async def pipeline_status(request: Request):
                                 "status": "active" if cap_ok else "standby",
                                 "details": "AF_PACKET mmap ring + FANOUT / libpcap-Npcap"}
 
-    engines = [{"id": i, "name": n, "threat_class": tc, "algorithm": alg, "protocol": p, "status": "active"}
+    # ENG-08/10/12 depend on the full Docker Zeek+Suricata+YARA stack
+    # (file extraction, the separate Suricata process, Zeek's BZAR
+    # script package respectively) -- none run in standalone/desktop
+    # mode. Every OTHER engine is pure Python and genuinely runs
+    # regardless of Docker. Previously this hardcoded "active" for all
+    # 13 unconditionally, which is what made Suricata/YARA look
+    # available in the standalone app when they structurally can't run
+    # there -- status now reflects the same real checks already done
+    # for `services` above, not an assumption.
+    _DOCKER_ONLY_STATUS = {
+        "ENG-08": services["yara"]["status"],
+        "ENG-10": services["suricata_batch"]["status"],
+        "ENG-12": services["zeek_batch"]["status"],  # BZAR notices come from Zeek's notice.log
+    }
+    engines = [{"id": i, "name": n, "threat_class": tc, "algorithm": alg, "protocol": p,
+                "status": _DOCKER_ONLY_STATUS.get(i, "active")}
                for (i, n, tc, alg, p) in _ENGINES]
     return {"services": services, "engines": engines}
 
