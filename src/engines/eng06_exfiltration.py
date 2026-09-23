@@ -23,10 +23,23 @@ State is per (src_ip, dst_ip) pair, tracked in Redis so it survives
 across the whole sequence of flows to a destination, not just one.
 """
 from __future__ import annotations
+import os
 from typing import Optional
 from redis import Redis
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
+
+try:
+    # Native fast-path for the ACCUMULATED check only -- the per-flow
+    # check just below is already stateless. See
+    # native/stealthtap_core/src/eng06.rs and eng01_ddos.py's identical
+    # pattern for the full rationale.
+    import stealthtap_core
+    _NATIVE_ENG06_AVAILABLE = hasattr(stealthtap_core, "NativeEng06")
+except ImportError:
+    _NATIVE_ENG06_AVAILABLE = False
+
+_FORCE_PYTHON_ENG06 = os.environ.get("STEALTHTAP_FORCE_PYTHON_ENG06") == "1"
 
 PER_FLOW_RATIO_THRESHOLD = 20.0  # a single flow's own outbound:inbound ratio -- original, loud-exfil check
 # The ratio alone fires on trivial flows (a 654 B request with a 25 B reply
@@ -57,6 +70,9 @@ class ExfiltrationDetector(Detector):
         self.redis = redis_client
         # See eng01's key_prefix docstring.
         self.key_prefix = key_prefix
+        self._native = None
+        if _NATIVE_ENG06_AVAILABLE and not _FORCE_PYTHON_ENG06:
+            self._native = stealthtap_core.NativeEng06()
 
     def _bucket_key(self, src_ip: str, dst_ip: str, ts: float) -> str:
         bucket_id = int(ts // ACCUMULATION_WINDOW_SECONDS)
@@ -81,10 +97,14 @@ class ExfiltrationDetector(Detector):
         return None
 
     async def _check_accumulated(self, flow: dict, orig_bytes: float, resp_bytes: float) -> Optional[dict]:
-        if self.redis is None:
-            return None
         src_ip, dst_ip = flow.get("src_ip", ""), flow.get("dst_ip", "")
         ts = float(flow.get("ts", 0.0))
+
+        if self._native is not None:
+            return self._native.check_accumulated(src_ip, dst_ip, ts, int(orig_bytes), int(resp_bytes))
+
+        if self.redis is None:
+            return None
         key = self._bucket_key(src_ip, dst_ip, ts)
 
         try:

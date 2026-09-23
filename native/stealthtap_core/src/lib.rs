@@ -11,6 +11,7 @@
 
 mod eng01;
 mod eng02;
+mod eng06;
 mod eng13;
 mod ja4;
 mod live;
@@ -22,6 +23,7 @@ use pyo3::types::{PyDict, PyList};
 
 use eng01::NativeEng01;
 use eng02::NativeEng02;
+use eng06::NativeEng06;
 use eng13::NativeEng13;
 use live::Immediate;
 
@@ -228,6 +230,7 @@ fn stealthtap_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LiveFlowAssembler>()?;
     m.add_class::<NativeEng01>()?;
     m.add_class::<NativeEng02>()?;
+    m.add_class::<NativeEng06>()?;
     m.add_class::<NativeEng13>()?;
     Ok(())
 }
