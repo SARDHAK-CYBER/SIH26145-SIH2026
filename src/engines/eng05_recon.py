@@ -1,8 +1,21 @@
 from __future__ import annotations
+import os
 from collections import defaultdict
 from typing import Optional
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
+
+try:
+    # Native fast-path -- see native/stealthtap_core/src/eng05.rs and
+    # eng01_ddos.py's identical pattern for the full rationale. This
+    # engine never had a Redis dependency (pure in-process state
+    # already), so the native swap is purely about per-flow CPU cost.
+    import stealthtap_core
+    _NATIVE_ENG05_AVAILABLE = hasattr(stealthtap_core, "NativeEng05")
+except ImportError:
+    _NATIVE_ENG05_AVAILABLE = False
+
+_FORCE_PYTHON_ENG05 = os.environ.get("STEALTHTAP_FORCE_PYTHON_ENG05") == "1"
 
 WINDOW_SECONDS = 300.0
 FANOUT_THRESHOLD = 25
@@ -33,6 +46,9 @@ class ReconDetector(Detector):
     def __init__(self):
         self._seen: dict[str, list[tuple[float, str, int]]] = defaultdict(list)
         self._since_prune = 0
+        self._native = None
+        if _NATIVE_ENG05_AVAILABLE and not _FORCE_PYTHON_ENG05:
+            self._native = stealthtap_core.NativeEng05()
 
     def _prune(self, now: float) -> None:
         cutoff = now - WINDOW_SECONDS
@@ -44,6 +60,16 @@ class ReconDetector(Detector):
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip = flow["src_ip"]
         now = flow["ts"]
+
+        if self._native is not None:
+            hit = self._native.check(
+                src_ip, flow["dst_ip"], int(flow.get("dst_port", 0) or 0), now,
+                float(flow.get("orig_bytes", 0) or 0), float(flow.get("resp_bytes", 0) or 0),
+            )
+            if hit is None:
+                return None
+            return self._build_alert(flow, hit["distinct_targets"], hit["confidence"])
+
         if int(flow.get("dst_port", 0) or 0) in _EXCLUDED_FANOUT_PORTS:
             return None
         is_probe = (float(flow.get("resp_bytes", 0) or 0) == 0
