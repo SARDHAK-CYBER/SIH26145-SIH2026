@@ -72,12 +72,42 @@ Real bugs found and fixed during validation, not assumed away:
   fixing Redis round-trip latency (default to in-process `MemoryStore`,
   see `src/capture/scoring.py`), batching immediate ML scoring, and two
   profile-guided fixes (skip a redundant scapy rebuild; defer an
-  engine's redundant per-call state rebuild). Still ~50–80x short of
-  1-5 Gbps through the full Python detection stack — that gap is
-  architectural (13 engines run sequentially in interpreted Python on
-  every flow), not something further tuning closes. See
-  `docs/PRD.md` §11 for the throughput methodology and the
-  fast-path/slow-path architecture that would actually close it.
+  engine's redundant per-call state rebuild) → ~6,300 pps wall-clock /
+  ~20,400 pps-equivalent isolated (CPU-time profile) after native
+  fast-paths for the five CPU/state-heavy engines (below). Still
+  ~20–80x short of 1-5 Gbps through the full detection stack — the
+  dominant remaining cost is now genuine ONNX inference time, not
+  per-engine Python overhead. See `docs/PRD.md` §11 for the full
+  throughput methodology.
+
+## Native engine fast-paths (`eng01.rs`, `eng02.rs`, `eng05.rs`, `eng06.rs`, `eng13.rs`)
+
+The fast-path/slow-path split: exact ports of the five engines
+profiling identified as CPU/state-heavy (ENG-01 flood/Slowloris/
+spoofed-flood, ENG-02 beaconing, ENG-05 recon, ENG-06 accumulated
+exfiltration, ENG-13 bruteforce) — same thresholds and formulas as
+their Python originals, moved from per-flow Redis round-trips (01/02/
+06/13) or per-flow Python dict/set rebuilds (05) into in-process,
+EXACT (not approximate) Rust counters. Python still builds the final
+`Alert` — only the counting/threshold check that runs on every flow
+moved. Graceful fallback to the original Redis/MemoryStore or
+in-process Python path if the native module isn't built
+(`STEALTHTAP_FORCE_PYTHON_ENG01`/`02`/`05`/`06`/`13=1` to force it).
+
+The remaining engines (03/04/07/09/11) weren't ported: they're already
+cheap — stateless, exact-match against a small threat-intel list, or
+bounded by real ONNX inference cost that native code wouldn't reduce.
+
+Validated per-engine: `scripts/validate_native_eng01.py` through
+`..._eng13.py` replay every real sample capture through both the
+Python reference and the native path and compare every alert exactly.
+All five: byte-for-byte equivalent on every real capture, plus
+synthetic tests for firing conditions the samples didn't exercise.
+
+Measured: ENG-01 alone, isolated — 76,022 flows/sec (Python+
+MemoryStore) → 633,615 flows/sec (native), **8.3x**. Full pipeline,
+same profiler before/after all five: **6.66s → 2.36s** on the same
+48,150-packet capture — **2.83x** from this round alone.
 
 ## Multi-core engine pool (`src/capture/engine_pool.py`)
 
@@ -89,13 +119,14 @@ distinction matters for flow-assembly correctness) across worker
 correlation state needs. Requires a real Redis for `num_workers > 1`
 (cross-process shared state); auto-downgrades to 1 otherwise.
 
-**Not yet a net throughput win**, and this is disclosed rather than
-glossed over: splitting Redis-bound work across processes doesn't
-parallelize a single-threaded server, it adds process/IPC overhead on
-top of the same serialized command stream. Worth revisiting once the
-engine layer's own per-flow cost is lower (see the fast-path/slow-path
-item above) — multi-core scaling helps once there's genuine CPU-bound
-work per flow to parallelize, not before.
+**Not yet a net throughput win as of the last measurement**, and this
+is disclosed rather than glossed over: splitting Redis-bound work
+across processes doesn't parallelize a single-threaded server, it adds
+process/IPC overhead on top of the same serialized command stream.
+That measurement predates the native engine fast-paths above, which
+remove the Redis-round-trip cost from the default path entirely —
+worth re-measuring now that the engines it would parallelize are
+genuinely CPU-bound instead; not yet done.
 
 ## Building
 

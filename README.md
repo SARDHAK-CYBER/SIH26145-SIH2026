@@ -38,14 +38,17 @@ Same rule as accuracy: measured, not asserted.
 | Layer | Measured throughput | Meets the 1-5 Gbps target? |
 |---|---|---|
 | Native Rust parser/assembler alone (parsing + flow assembly, no detection) | 393,856 pps (`samples/netbios_ssn2.pcap`) — comfortably 1-5+ Gbps at realistic packet sizes | Yes |
-| Full pipeline: native assembly + all 13 engines + 3 ONNX models, one core | ~4,800-7,000 pps (up from ~1,580 pps before this round of fixes) | **No** — roughly 50-80x short |
+| Full pipeline: native assembly + all 13 engines + 3 ONNX models, one core | ~6,300-20,000 pps depending on measurement method (up from ~1,580 pps at the start of this work) — see methodology note below | **No** — roughly 20-80x short |
 
-**Why the gap:** parsing is compiled, typed, zero-copy Rust; detection is 13 engines of interpreted Python running sequentially on every flow. That's an architectural ceiling, not a bug — profiling (not guessed at) found and fixed three real, measurable costs along the way:
-- Stateful engines (flood/beacon/exfil/bruteforce counters) were paying Redis network round-trip latency on every flow, even on localhost — switched the default backend to an in-process store (`src/capture/scoring.py`); **measured 3x** on identical detection code, only the backend changed.
+**Why the gap:** parsing is compiled, typed, zero-copy Rust; detection is 13 engines, most still interpreted Python, running sequentially on every flow. That's an architectural ceiling, not a bug — profiling (not guessed at) found and fixed several real, measurable costs:
+- Stateful engines (flood/beacon/exfil/bruteforce counters) were paying Redis network round-trip latency on every flow, even on localhost — switched the default backend to an in-process store; **measured 3x** on identical detection code, only the backend changed.
 - DNS/SSL/Modbus ML scoring was calling ONNX one record at a time; batched it, matching the pattern already used for connection-flow scoring.
-- Two profile-guided fixes: the live path was needlessly re-serializing an already-parsed packet before handing it to the native assembler (~15% of pipeline time), and one engine (`ENG-05`, recon) was rebuilding a full history set on every flow instead of only when a new probe was added (~20%).
+- Two profile-guided fixes: a needless packet re-serialization before handing it to the native assembler (~15% of pipeline time), and one engine (`ENG-05`) rebuilding a full history set on every flow instead of only when a new probe was added (~20%).
+- **The fast-path/slow-path split is now real, not just proposed**: `native/stealthtap_core/src/eng01.rs`, `eng02.rs`, `eng05.rs`, `eng06.rs`, `eng13.rs` are validated native ports of the five most CPU/state-heavy engines — same thresholds and formulas as their Python originals (byte-for-byte equivalence proven per-engine, see `scripts/validate_native_eng*.py`), Python now only builds the final `Alert` on a real positive. Combined effect on the full pipeline, measured with the same CPU-time profiler before/after: **6.66s → 2.36s on the same 48,150-packet capture, a 2.83x reduction this round alone**.
 
-**What would close the remaining gap**: a fast-path/slow-path split — native triage on every flow, full Python engine scoring only on flows actually flagged — not yet built. See `docs/PRD.md` §11 for the full methodology and every number behind this table.
+Methodology note: this dev machine showed real, substantial throughput swings (not code regressions) purely from other concurrent load on the box — running the full Docker analysis stack alongside a wall-clock benchmark cut measured pps by 5-10x with zero code changes. Where that matters, prefer the CPU-time-profiled number (isolated from system scheduling noise) over a single wall-clock run.
+
+**What would close the remaining gap**: the remaining ~7 engines (ENG-03/04/07/09/11 and the Suricata/YARA/BZAR Docker-only engines) are either already cheap (stateless or exact-match), Docker-only (can't run in the hot path regardless), or lower-volume in practice — diminishing returns from porting them individually. The larger remaining lever is the ONNX inference cost itself (now the single biggest remaining line item) and further architectural work on how many flows reach Python at all. See `docs/PRD.md` §11 for the full methodology and every number behind this table.
 
 ## Detection pipeline
 
