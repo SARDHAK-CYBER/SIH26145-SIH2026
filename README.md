@@ -2,11 +2,11 @@
 
 Passive AI-DPI network threat detection — SIH 2026, Problem Statement 26145 (NTRO), Team XOR.
 
-StealthTap inspects network traffic (uploaded PCAPs, live capture on a chosen interface, or streamed Zeek logs) and raises typed security alerts using 13 rule/statistical engines, three trained ML models, and an unsupervised per-network behavioural baseline — without ever storing packet payload.
+StealthTap inspects network traffic (uploaded PCAPs, live capture on a chosen interface, or streamed Zeek logs) and raises typed security alerts using 13 rule/statistical engines, three trained ML models, and an unsupervised per-network behavioural baseline — without ever storing packet payload. Packet parsing and flow assembly (both the upload and live paths) run on a validated native Rust core (`native/stealthtap_core`); detection logic stays in Python, unchanged, with an automatic fallback to the pure-Python parser if the native module isn't built.
 
 **Runs two ways:**
 - **Docker stack** — full pipeline: real Zeek 6.0.3 + 6 ICSNPP OT plugins, Suricata (20,829 ET Open rules), YARA, Postgres, Redis, React dashboard.
-- **Standalone desktop app** (`stealthtap_app.py`, packaged with PyInstaller) — one executable, no Docker/Redis/Postgres, for Windows and Linux. Select a network interface like Wireshark and watch alerts live.
+- **Standalone desktop app** (`stealthtap_app.py`, meant to be packaged with PyInstaller — see the packaging caveat below) — no Docker/Redis/Postgres, for Windows and Linux. Select a network interface like Wireshark and watch alerts live.
 
 ## Honest accuracy — read before deploying
 
@@ -31,13 +31,30 @@ Latest measured result (25 real attack captures — Hydra brute force, BlackEner
 
 See `docs/PRD.md` for the full methodology, root-cause fixes already applied (flow-direction inference, exfiltration volume floor, recon-vs-normal-browsing distinction, DGA registrable-domain scoring), and what's still open.
 
+## Honest throughput — read before deploying at high speed
+
+Same rule as accuracy: measured, not asserted.
+
+| Layer | Measured throughput | Meets the 1-5 Gbps target? |
+|---|---|---|
+| Native Rust parser/assembler alone (parsing + flow assembly, no detection) | 393,856 pps (`samples/netbios_ssn2.pcap`) — comfortably 1-5+ Gbps at realistic packet sizes | Yes |
+| Full pipeline: native assembly + all 13 engines + 3 ONNX models, one core | ~4,800-7,000 pps (up from ~1,580 pps before this round of fixes) | **No** — roughly 50-80x short |
+
+**Why the gap:** parsing is compiled, typed, zero-copy Rust; detection is 13 engines of interpreted Python running sequentially on every flow. That's an architectural ceiling, not a bug — profiling (not guessed at) found and fixed three real, measurable costs along the way:
+- Stateful engines (flood/beacon/exfil/bruteforce counters) were paying Redis network round-trip latency on every flow, even on localhost — switched the default backend to an in-process store (`src/capture/scoring.py`); **measured 3x** on identical detection code, only the backend changed.
+- DNS/SSL/Modbus ML scoring was calling ONNX one record at a time; batched it, matching the pattern already used for connection-flow scoring.
+- Two profile-guided fixes: the live path was needlessly re-serializing an already-parsed packet before handing it to the native assembler (~15% of pipeline time), and one engine (`ENG-05`, recon) was rebuilding a full history set on every flow instead of only when a new probe was added (~20%).
+
+**What would close the remaining gap**: a fast-path/slow-path split — native triage on every flow, full Python engine scoring only on flows actually flagged — not yet built. See `docs/PRD.md` §11 for the full methodology and every number behind this table.
+
 ## Detection pipeline
 
 ```
                                     ┌─ Upload PCAP ──▶ Zeek+ICSNPP/Suricata/YARA (Docker)
-                                    │                    or in-process parser (standalone/no-Docker)
+                                    │                    or native Rust parser, Python fallback
 Ingest paths ──────────────────────┼─ Live NIC capture ▶ AF_PACKET (Linux, kernel mmap ring)
-(4, one shared engine set)         │                      / Npcap (Windows), FlowAssembler
+(4, one shared engine set)         │                      / Npcap (Windows) ▶ native Rust
+                                    │                      LiveFlowAssembler, Python fallback
                                     ├─ Live streaming ──▶ Zeek → Redpanda → Faust worker
                                     └─ Offline batch ───▶ static Zeek JSON logs
                                               │
@@ -48,6 +65,8 @@ Ingest paths ──────────────────────�
                     ▼                                                    ▼
      13 rule/statistical engines (ENG-01..13)              3 trained ONNX models
      — always run, deterministic                            (dns / flow / modbus)
+     optionally sharded across worker PROCESSES              batched, not per-record
+     (src/capture/engine_pool.py, opt-in)                    (src/capture/scoring.py)
                     │                                                    │
                     └──────────────────┬─────────────────────────────────┘
                                         ▼
@@ -125,12 +144,17 @@ pyinstaller packaging/stealthtap.spec --noconfirm      # -> dist/stealthtap(.exe
 ```
 Live capture needs elevated privileges (Administrator on Windows, root/`CAP_NET_RAW` on Linux). **Windows also needs [Npcap](https://npcap.com/) installed separately** — its free licence forbids redistribution, so it is never bundled; the app detects it at runtime.
 
+**Packaging status — disclosed, not glossed over**: this frozen build has not yet been produced or run. `packaging/stealthtap.spec` does not currently declare the native Rust module (`native/stealthtap_core`) as a binary to bundle, so a build today would most likely fall back to the slower pure-Python parser at runtime rather than fail loudly. Fix and a real build-and-run test are needed before treating the `.exe`/Linux binary as deliverable — see `native/README.md`.
+
 ## Verify it yourself
 
 ```bash
-python -m pytest tests/ -q                                          # 60+ unit/integration tests
+python -m pytest tests/ -q                                             # 69 unit/integration tests
 python scripts/analyze_local.py samples/simulated_attack_traffic.pcap  # full pipeline, no Docker
 python scripts/eval_real_traffic.py "<your pcap folder>" --out eval_results  # accuracy on real data
+python scripts/validate_native_parser.py "<your pcap folder>"          # native upload-parser vs. Python, byte-for-byte
+python scripts/validate_native_live_assembler.py "<your pcap folder>"  # native live-assembler vs. Python, byte-for-byte
+python scripts/bench_throughput.py "<some.pcap>"                       # measured live-pipeline pps/Mbit/s, not estimated
 ```
 
 ## Everything is open-source, no paid components
@@ -140,6 +164,7 @@ Zeek (BSD), Suricata (GPLv2), YARA (BSD), ICSNPP (BSD-3), XGBoost/scikit-learn/O
 ## Documentation
 
 - `docs/PRD.md` — full requirements, methodology, root-cause analysis, roadmap
+- `native/README.md` — native Rust core: scope, validation methodology, measured performance, what's still Python-only
 - `docs/LIVE_CAPTURE_DEPLOYMENT.md` — deploying the live/streaming sensor
 - `docs/MODEL_CONTRACT.md` — feature schema, train/serve parity contract
 - `CHANGES.md` — change history

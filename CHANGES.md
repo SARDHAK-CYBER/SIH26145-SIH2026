@@ -1,3 +1,68 @@
+# Native Rust core + throughput pass — 2026-09-23
+
+Priority: reach the stated 1-5 Gbps / low-latency target without losing the
+measured accuracy from the hardening pass below. Verified with
+`python -m pytest tests/` (69 tests) after every change, plus
+`scripts/validate_native_parser.py` / `scripts/validate_native_live_assembler.py`
+(byte-for-byte vs. the Python reference on real captures) before trusting
+the native core, and `scripts/eval_real_traffic.py` / `scripts/bench_throughput.py`
+for accuracy/throughput respectively. Full methodology and numbers in
+`docs/PRD.md` §11 and `native/README.md`.
+
+## Native Rust core (`native/stealthtap_core`, new)
+
+| Path | Result |
+|---|---|
+| Upload-PCAP parser | 26/26 real captures byte-for-byte identical to `pcap_parser.py`; 84.3x aggregate parse-time speedup |
+| Live-capture assembler | 21/26 identical to `flow_assembler.py` (5 skipped — non-Ethernet linktype); 393,856 pps measured in isolation |
+
+Found and fixed a real, previously-undiscovered bug along the way, not
+just parity work: DNS-over-TCP (RFC 1035 §4.2.2) was never handled
+anywhere, in the new Rust code or the original Python parsers — fixed
+in both.
+
+## Throughput fixes (full live pipeline: assembly + 13 engines + 3 ONNX models)
+
+| # | Issue | Fix | Measured effect |
+|---|---|---|---|
+| 1 | ENG-01/02/06/13 paid Redis network round-trip latency per flow, even on localhost | `src/capture/scoring.py`: default single-process live capture to the in-process `MemoryStore`, not Redis (opt in via `REDIS_URL`) | 3x, isolated via controlled comparison on identical detection code |
+| 2 | Redundant Redis round-trips inside ENG-01 (re-fetching values a prior call already returned) | Use `CMS.INCRBY`'s own reply instead of a trailing `CMS.QUERY`; same for the spoofed-flood pipeline's trailing `GET` | fewer round-trips, same values |
+| 3 | ENG-13's incr+expire were two separate round-trips | Pipelined into one | matches ENG-02/06's existing pattern |
+| 4 | DNS/SSL/Modbus ML scoring called ONNX once per record | Batched (`ScoringEngine.ml_batch_immediate`), matching the existing conn/flow batching | — |
+| 5 | Native assembler adapter rebuilt each packet via `bytes(pkt)` though it was already-parsed | Use `pkt.original` (verified byte-identical, already cached) | ~15% of pipeline time |
+| 6 | ENG-05 rebuilt a full history `set` from scratch on every flow, changed or not | Defer to probe-only flows (provably can't miss a detection — see commit for the reasoning) | ~20% of pipeline time |
+
+Net: ~1,580 pps -> ~4,800-7,000 pps on the same capture (still ~50-80x
+short of 1-5 Gbps — that gap is architectural, not more tuning; see
+`docs/PRD.md` §11.5 for what would actually close it).
+
+## Multi-core engine pool (`src/capture/engine_pool.py`, new)
+
+Built and correctness-validated (shards by source IP, matching ENG-05's
+in-process state; requires real Redis for cross-process correctness).
+**Not yet a net win** — root-caused to finding #1 above: splitting
+Redis-bound work across processes adds overhead without parallelizing
+the actual bottleneck. Opt-in, `num_workers=1` default unchanged from
+the original single-process path.
+
+## New / changed files
+
+```
+native/stealthtap_core/         NEW  -- Rust parser + live assembler + JA4, PyO3 module
+src/capture/native_flow_assembler.py  NEW -- adapter, same interface as FlowAssembler
+src/capture/scoring.py          NEW  -- engine-build + scoring logic, shared in-process/pool
+src/capture/engine_pool.py      NEW  -- multi-core engine-scoring worker pool
+scripts/validate_native_parser.py, scripts/validate_native_live_assembler.py  NEW
+scripts/bench_throughput.py     NEW  -- measured live-pipeline pps/Mbit/s
+pcap_parser.py                  native parser with Python fallback; DNS-over-TCP fix
+src/capture/live_agent.py       wired to native assembler + engine pool, num_workers option
+src/inference/model_server.py   per-worker ONNX thread cap, batched immediate scoring
+src/engines/eng01_ddos.py, eng13_bruteforce.py  Redis round-trip reduction
+src/engines/eng05_recon.py      deferred set/list rebuild
+```
+
+---
+
 # Hardening & optimization pass — 2026-09-10
 
 Every item flagged in the architecture review / `docs/PRD.md` §9, plus
