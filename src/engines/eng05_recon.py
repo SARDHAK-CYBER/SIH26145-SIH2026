@@ -15,6 +15,12 @@ FANOUT_THRESHOLD = 25
 # measured on benign captures (RECONNAISSANCE fired on a normal PC at
 # distinct_targets=25) while leaving real scans untouched.
 PROBE_MAX_ORIG_BYTES = 512
+# Legitimate services that are DESIGNED to fan out to many peers/targets
+# and can look probe-shaped doing it -- confirmed false positive on real
+# live-capture traffic: Windows Delivery Optimization (port 7680, P2P
+# Windows Update chunk sharing) hit exactly FANOUT_THRESHOLD=25 distinct
+# peers on ordinary background OS activity, no scan involved.
+_EXCLUDED_FANOUT_PORTS = {7680}
 # In the live path this detector runs for the lifetime of the process,
 # so its per-source history must not grow without bound. Every
 # _PRUNE_EVERY scores, drop any source whose entire history has aged out
@@ -38,6 +44,8 @@ class ReconDetector(Detector):
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip = flow["src_ip"]
         now = flow["ts"]
+        if int(flow.get("dst_port", 0) or 0) in _EXCLUDED_FANOUT_PORTS:
+            return None
         is_probe = (float(flow.get("resp_bytes", 0) or 0) == 0
                     and float(flow.get("orig_bytes", 0) or 0) <= PROBE_MAX_ORIG_BYTES)
 

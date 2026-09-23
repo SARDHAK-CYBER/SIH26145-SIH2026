@@ -38,6 +38,20 @@ BUCKET_TTL_SECONDS = int(WINDOW_SECONDS * 3)
 SPOOFED_MIN_PACKETS = 150       # raised from 50 -- lets the ratio settle before judging
 SPOOFED_UNIQUENESS_RATIO = 0.85  # raised from 0.7 -- real margin above measured legitimate-traffic ceiling (~0.67)
 
+# The plain per-source flow-rate flood check (below) originally fired on
+# raw flow COUNT alone, with no awareness of where those flows went.
+# Confirmed false positive on real live-capture traffic: ordinary heavy
+# browsing (HTTP/2 multiplexing, ads, trackers, background app sync)
+# produced 329-389 flows/10s from one source -- comfortably over
+# FLOOD_FLOW_THRESHOLD -- spread across many different destinations. A
+# real flood SOURCE concentrates on few victims; a busy legitimate
+# client's flows spread across many. The real attack example in
+# samples/simulated_attack_traffic.pcap (200 flows/10s, ALL to one
+# destination) has a concentration ratio of 200 -- comfortably above
+# this floor even with real margin, so this doesn't touch true-positive
+# detection of an actual flood.
+MIN_FLOOD_CONCENTRATION_RATIO = 8.0   # avg flows per distinct destination required to fire
+
 
 class VolumetricDDoSDetector(Detector):
     name = "ENG-01"
@@ -71,6 +85,10 @@ class VolumetricDDoSDetector(Detector):
     def _bucket_key(self, ts: float) -> str:
         bucket_id = int(ts // self.window_seconds)
         return f"{self.key_prefix}eng01:src_ip_cms:{bucket_id}"
+
+    def _src_dst_hll_key(self, src_ip: str, ts: float) -> str:
+        bucket_id = int(ts // self.window_seconds)
+        return f"{self.key_prefix}eng01:src_dst_hll:{src_ip}:{bucket_id}"
 
     def _ensure_cms(self, key: str) -> None:
         if key in self._initialized_buckets:
@@ -138,15 +156,23 @@ class VolumetricDDoSDetector(Detector):
     async def score(self, flow: dict) -> Optional[Alert]:
         key = self._bucket_key(flow["ts"])
         self._ensure_cms(key)
+        dst_hll_key = self._src_dst_hll_key(flow["src_ip"], flow["ts"])
 
         count = 0
         try:
-            # CMS.INCRBY's own reply IS the post-increment count (verified
-            # directly against RedisBloom) -- a separate CMS.QUERY right
-            # after was a second full Redis round-trip per flow for a value
-            # the first call already returned.
-            result = self.redis.execute_command('CMS.INCRBY', key, flow["src_ip"], 1)
-            count = int(result[0]) if result else 0
+            # Pipelined: CMS.INCRBY (per-source flow-rate counter) and
+            # PFADD (this source's distinct-destination set, used below
+            # for the concentration check) in ONE round-trip. CMS.INCRBY's
+            # own reply IS the post-increment count (verified directly
+            # against RedisBloom) -- a separate CMS.QUERY right after was
+            # a second full round-trip for a value the first call already
+            # returned.
+            pipe = self.redis.pipeline()
+            pipe.execute_command('CMS.INCRBY', key, flow["src_ip"], 1)
+            pipe.pfadd(dst_hll_key, flow["dst_ip"])
+            pipe.expire(dst_hll_key, BUCKET_TTL_SECONDS)
+            results = pipe.execute()
+            count = int(results[0][0]) if results[0] else 0
         except Exception:
             pass  # Failsafe if RedisBloom module isn't loaded properly
 
@@ -160,32 +186,51 @@ class VolumetricDDoSDetector(Detector):
             )
 
         if count >= self.flood_threshold:
-            # Deduplication, added after a real test upload showed WHY this
-            # matters: without it, a single sustained flood between one
-            # source/destination pair produces one alert PER FLOW once the
-            # threshold is crossed -- a real user test hit 11,275 alerts
-            # from what should have been a small number of distinct flood
-            # events. One alert per (source, window) is what a SOC actually
-            # wants; the underlying count still climbs in evidence for
-            # forensic value, but only the FIRST crossing fires a new alert.
-            # `key` is already _bucket_key()'s output, which includes key_prefix.
-            dedup_key = f"eng01:flood_alerted:{flow['src_ip']}:{key}"
-            already_alerted = False
+            # Concentration check BEFORE touching the dedup key: a high
+            # flow-rate source spread across many destinations (busy
+            # legitimate client -- heavy browsing, background sync) must
+            # not consume the dedup slot, or a genuinely concentrated
+            # flood arriving later in the SAME window would be silently
+            # suppressed by an already-set dedup key from an earlier,
+            # non-firing, low-concentration flow. Confirmed false
+            # positive on real traffic: see MIN_FLOOD_CONCENTRATION_RATIO.
+            distinct_dests = 1
             try:
-                already_alerted = not self.redis.set(dedup_key, "1", nx=True, ex=BUCKET_TTL_SECONDS)
+                distinct_dests = max(1, int(self.redis.pfcount(dst_hll_key)))
             except Exception:
-                pass  # Redis unavailable -- fail open (better a duplicate alert than a missed one)
+                pass  # fail open -- treat as maximally concentrated rather than suppress
+            concentration = count / distinct_dests
 
-            if not already_alerted:
-                confidence = min(99.0, 60.0 + (count - self.flood_threshold) * 0.5)
-                return self._build_alert(
-                    flow, "VOLUMETRIC_DDOS", confidence,
-                    evidence={
-                        "src_ip_flow_count": count,
-                        "window_seconds": self.window_seconds,
-                        "threshold": self.flood_threshold,
-                    },
-                )
+            if concentration >= MIN_FLOOD_CONCENTRATION_RATIO:
+                # Deduplication, added after a real test upload showed WHY
+                # this matters: without it, a single sustained flood
+                # between one source/destination pair produces one alert
+                # PER FLOW once the threshold is crossed -- a real user
+                # test hit 11,275 alerts from what should have been a
+                # small number of distinct flood events. One alert per
+                # (source, window) is what a SOC actually wants; the
+                # underlying count still climbs in evidence for forensic
+                # value, but only the FIRST crossing fires a new alert.
+                # `key` is already _bucket_key()'s output, which includes key_prefix.
+                dedup_key = f"eng01:flood_alerted:{flow['src_ip']}:{key}"
+                already_alerted = False
+                try:
+                    already_alerted = not self.redis.set(dedup_key, "1", nx=True, ex=BUCKET_TTL_SECONDS)
+                except Exception:
+                    pass  # Redis unavailable -- fail open (better a duplicate alert than a missed one)
+
+                if not already_alerted:
+                    confidence = min(99.0, 60.0 + (count - self.flood_threshold) * 0.5)
+                    return self._build_alert(
+                        flow, "VOLUMETRIC_DDOS", confidence,
+                        evidence={
+                            "src_ip_flow_count": count,
+                            "distinct_destinations": distinct_dests,
+                            "concentration_ratio": round(concentration, 1),
+                            "window_seconds": self.window_seconds,
+                            "threshold": self.flood_threshold,
+                        },
+                    )
 
         spoofed_evidence = self._check_spoofed_flood(flow)
         if spoofed_evidence:

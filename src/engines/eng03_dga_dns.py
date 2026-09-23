@@ -90,6 +90,26 @@ def registrable_domain(query: str) -> str:
     return ".".join(parts[-2:])
 
 
+# Registrable domains of major cloud/CDN/telemetry infrastructure that
+# score DGA-like to the trained model even AFTER the registrable-domain
+# fix above (a short, brand-name-shaped SaaS domain still has moderate
+# entropy and no real dictionary words -- the model wasn't trained to
+# distinguish that from an actual DGA output). Two of these
+# (msedge.net, avcdn.net) were already documented false positives in
+# docs/PRD.md before the registrable-domain fix; mozgcp.net (Mozilla's
+# GCP infrastructure, seen scoring 71.6% on real live-capture telemetry
+# traffic) confirmed the fix doesn't fully close this class. This is a
+# stopgap, not a fix for the model itself -- see docs/PRD.md §8 item 3
+# (retrain on hard negatives) for the real fix. Exact-match on the
+# registrable domain only, so it can't be widened by an attacker
+# registering an unrelated look-alike TLD.
+_KNOWN_INFRA_REGISTRABLE_DOMAINS = {
+    "msedge.net", "avcdn.net", "mozgcp.net", "akamaiedge.net", "akamaitechnologies.com",
+    "cloudfront.net", "googleusercontent.com", "gvt1.com", "gvt2.com",
+    "azureedge.net", "windows.net", "fastly.net", "cloudflare.net",
+}
+
+
 def _clamp01(x: float) -> float:
     return 0.0 if x < 0.0 else 1.0 if x > 1.0 else x
 
@@ -182,12 +202,16 @@ class DGADetector(Detector):
         if q_len <= HEURISTIC_MIN_LENGTH:
             return None
 
+        reg_domain = registrable_domain(query)
+        if reg_domain in _KNOWN_INFRA_REGISTRABLE_DOMAINS:
+            return None
+
         # 2a. DGA -- trained model path
         if self.model_server is not None:
             try:
                 from src.inference.model_server import MIN_ML_CONFIDENCE
                 result = self.model_server.score_flow(
-                    {**flow, "dns_query": registrable_domain(query)}, "dns")
+                    {**flow, "dns_query": reg_domain}, "dns")
             except Exception:
                 result = None
             if result and result.get("threat_score", 0.0) >= MIN_ML_CONFIDENCE:
