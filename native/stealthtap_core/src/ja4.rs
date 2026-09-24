@@ -72,7 +72,21 @@ pub fn ja4_from_client_hello(payload: &[u8]) -> Option<String> {
             let etype = u16_at(body, p)?;
             let esize = u16_at(body, p + 2)? as usize;
             p += 4;
-            if p + esize > body.len() { break; }
+            // A ClientHello whose extensions section runs past what this
+            // packet actually has (split across TCP segments -- this
+            // function only ever sees one packet's payload, no reassembly)
+            // must fail closed, not return a fingerprint computed from a
+            // partial extension list. Found via live-traffic testing: on
+            // the SAME real packets, this silently returned a WRONG JA4 in
+            // 2 of 3 real TLS sessions where ja4.py (correct: any
+            // out-of-bounds read raises and the wrapper returns None)
+            // returned None. ENG-04 does an EXACT match against real
+            // threat-intel JA4 hashes -- a wrong-but-plausible-looking
+            // fingerprint is worse than no fingerprint, since it fails
+            // silently instead of visibly (no `ssl` record at all, which
+            // is what the flow's OTHER packets or a later retransmit can
+            // still produce correctly).
+            if p + esize > body.len() { return None; }
             let edata = &body[p..p + esize];
             p += esize;
             if is_grease(etype) { continue; }
