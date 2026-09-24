@@ -16,7 +16,7 @@ use indexmap::IndexMap;
 use sha2::{Digest, Sha256};
 
 use crate::ja4::ja4_from_client_hello;
-use crate::parse::{flow_uid, ipv4_to_string, parse_dns_query, parse_l4, qtype_name,
+use crate::parse::{flow_uid, parse_dns_query, parse_ip_header, parse_l4, qtype_name,
                    sender_is_originator, strip_link_layer, LINKTYPE_ETHERNET};
 
 /// Default idle timeout -- matches flow_assembler.py's FLOW_IDLE_TIMEOUT_S;
@@ -231,13 +231,10 @@ impl LiveFlowAssembler {
             self.stats.non_ip += 1;
             return out;
         };
-        if l3.len() < 20 { self.stats.non_ip += 1; return out; }
-        let ihl = ((l3[0] & 0x0f) as usize) * 4;
-        if ihl < 20 || l3.len() < ihl { self.stats.non_ip += 1; return out; }
-        let proto_num = l3[9];
-        let src_ip = ipv4_to_string(&l3[12..16]);
-        let dst_ip = ipv4_to_string(&l3[16..20]);
-        let l4_payload = &l3[ihl..];
+        let Some((src_ip, dst_ip, proto_num, l4_payload)) = parse_ip_header(l3) else {
+            self.stats.non_ip += 1;
+            return out;
+        };
 
         let Some(l4) = parse_l4(proto_num, l4_payload) else { return out };
 

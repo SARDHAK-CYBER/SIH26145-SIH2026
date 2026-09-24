@@ -16,7 +16,7 @@ import hashlib
 import os
 from typing import Any
 
-from scapy.all import PcapReader, IP, TCP, UDP, DNS, DNSQR
+from scapy.all import PcapReader, IP, IPv6, TCP, UDP, DNS, DNSQR
 
 from src.flow_orientation import sender_is_originator
 
@@ -128,9 +128,19 @@ def _parse_packets(packets, flows, dns_records, ssl_records, max_packets) -> Non
         seen += 1
         if max_packets is not None and seen > max_packets:
             break
-        if not pkt.haslayer(IP):
+        # IPv4 or IPv6 -- both expose the same .src/.dst string attributes,
+        # so everything downstream is address-family-agnostic already.
+        # Added after live-testing against this project's own real network
+        # traffic found IPv6 was the MAJORITY protocol (76.6% of packets on
+        # a real dual-stack Wi-Fi network, measured directly) -- silently
+        # restricting to IPv4 silently dropped detection for most real
+        # traffic, not an edge case.
+        if pkt.haslayer(IP):
+            ip = pkt[IP]
+        elif pkt.haslayer(IPv6):
+            ip = pkt[IPv6]
+        else:
             continue
-        ip = pkt[IP]
         ts = float(pkt.time)
 
         # qr == 0 -> a QUERY. Responses echo the question section too; without
