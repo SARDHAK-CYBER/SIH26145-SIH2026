@@ -131,14 +131,30 @@ distinction matters for flow-assembly correctness) across worker
 correlation state needs. Requires a real Redis for `num_workers > 1`
 (cross-process shared state); auto-downgrades to 1 otherwise.
 
-**Not yet a net throughput win as of the last measurement**, and this
-is disclosed rather than glossed over: splitting Redis-bound work
-across processes doesn't parallelize a single-threaded server, it adds
-process/IPC overhead on top of the same serialized command stream.
-That measurement predates the native engine fast-paths above, which
-remove the Redis-round-trip cost from the default path entirely —
-worth re-measuring now that the engines it would parallelize are
-genuinely CPU-bound instead; not yet done.
+**Re-measured after the native engine fast-paths above, and it's worse,
+not better** (`scripts/bench_throughput.py samples/netbios_ssn2.pcap`,
+real Redis reachable, same capture used throughout this project's
+throughput numbers): 1 worker (no pool) 6,163 pps → 2 workers 1,165
+pps (5.3x SLOWER) → 4 workers 1,607 pps (3.8x slower). Two compounding
+reasons, not one:
+
+1. IPC/pickling overhead across process boundaries for every batch of
+   assembled records (`_BATCH_MAX` already exists to amortize this and
+   still isn't enough).
+2. **The pool actively undoes this round's own biggest win.** Pool
+   workers require a real Redis for ENG-01/02/06/13 (cross-process
+   correctness — src/capture/scoring.py's `ScoringEngine._build()`) —
+   exactly the round-trip switching the single-process default to
+   in-process `MemoryStore` eliminated. Pool mode forces it back on
+   for 4 of the 5 native-ported engines, so it's fighting its own
+   prerequisite improvement, not building on it.
+
+Splitting Redis-bound work across processes was already established as
+not parallelizing a single-threaded server, just adding process/IPC
+overhead on the same serialized command stream — re-measuring confirms
+that's still true, with a second compounding reason on top now.
+**Not recommended**: `num_workers=1` (the default) is the fastest
+configuration measured for this pipeline.
 
 ## Building
 
