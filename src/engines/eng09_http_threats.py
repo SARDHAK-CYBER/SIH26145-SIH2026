@@ -49,13 +49,17 @@ class HTTPThreatDetector(Detector):
         uri = flow.get("http_uri", "") or ""
         user_agent = (flow.get("http_user_agent", "") or "").lower()
         request_body_len = int(flow.get("http_request_body_len", 0) or 0)
+        response_body_len = int(flow.get("http_response_body_len", 0) or 0)
 
-        evidence: dict = {}
+        # Always carried on any alert this engine fires -- answers "what
+        # data was transferred" for the flagged transaction in both
+        # directions, not just whichever field tripped the specific rule
+        # below.
+        evidence: dict = {"request_body_len": request_body_len, "response_body_len": response_body_len}
         reasons: list[str] = []
 
         if request_body_len > LARGE_POST_BYTES_THRESHOLD and method == "POST":
             reasons.append("large_post_body")
-            evidence["request_body_len"] = request_body_len
 
         suspicious_ua = any(marker in user_agent for marker in SUSPICIOUS_UA_MARKERS) or user_agent == ""
         uri_entropy = shannon_entropy(uri) if len(uri) >= MIN_URI_LENGTH_FOR_ENTROPY else 0.0

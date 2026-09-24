@@ -10,6 +10,31 @@ from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 
 DEFAULT_MAX_SCAN_BYTES = 50 * 1024 * 1024  # 50MB
 
+# Magic-byte signatures for the file categories this project's own YARA
+# rule set targets (rules/{malware,packers,maldocs,exploit_kits,webshells}/)
+# -- content-sniffed, not guessed from a filename, since Zeek's file
+# extraction names files generically (extract-<ts>-<uid>, no extension).
+# Answers "what kind of data was transferred", not just its size. No new
+# dependency: python-magic needs the libmagic C library, a real Windows
+# portability cost for a handful of well-known, stable signatures.
+_MAGIC_SIGNATURES: list[tuple[bytes, str]] = [
+    (b"MZ", "pe_executable"),                    # Windows PE (.exe/.dll)
+    (b"\x7fELF", "elf_executable"),               # Linux ELF
+    (b"%PDF-", "pdf"),
+    (b"PK\x03\x04", "zip_or_office_ooxml"),       # .zip, .docx/.xlsx/.pptx, .jar
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "ole_legacy_office"),  # .doc/.xls/.ppt
+    (b"\x1f\x8b", "gzip"),
+    (b"Rar!\x1a\x07", "rar"),
+    (b"#!", "script_shebang"),
+]
+
+
+def sniff_file_type(header: bytes) -> str:
+    for magic, label in _MAGIC_SIGNATURES:
+        if header.startswith(magic):
+            return label
+    return "unknown"
+
 
 class YaraFileScanner:
     """
@@ -60,6 +85,8 @@ class YaraFileScanner:
         file_hash = self._sha256(filepath)
         flow_context = flow_context or {}
         matched_rules = [m.rule for m in matches]
+        with open(filepath, "rb") as f:
+            file_type = sniff_file_type(f.read(8))
 
         return Alert(
             alert_id=f"yara_{file_hash[:12]}",
@@ -81,6 +108,7 @@ class YaraFileScanner:
             ),
             evidence={
                 "filename": filepath.name,
+                "file_type": file_type,
                 "matched_rules": matched_rules,
                 "file_size_bytes": size,
             },
