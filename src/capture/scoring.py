@@ -170,6 +170,14 @@ class ScoringEngine:
     def baseline_status(self) -> Optional[dict]:
         return self._baseline.status() if self._baseline is not None else None
 
+    def warm_start_baseline(self, conn_records: list[dict]) -> None:
+        """See OnlineBaseline.warm_start -- seeds the ~10-minute learning
+        window from an already-completed batch of flows (e.g. a short
+        historical pcap of this same network) instead of only ever
+        learning one flow at a time as live traffic trickles in."""
+        if self._baseline is not None:
+            self._baseline.warm_start(conn_records)
+
     def ml_family_for(self, log_type: str) -> Optional[str]:
         return IMMEDIATE_ML_FAMILY.get(log_type)
 

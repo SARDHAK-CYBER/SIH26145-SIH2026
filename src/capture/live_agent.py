@@ -123,10 +123,18 @@ class LiveAgent:
     def __init__(self, iface: str, bpf: Optional[str] = None, *,
                  prefer_kernel: bool = True, buffer_mb: int = 64, promisc: bool = True,
                  queue_size: int = 200_000, alert_sink: Optional[AlertCB] = None,
-                 cooldown_s: float = ALERT_COOLDOWN_S, num_workers: int = DEFAULT_ENGINE_WORKERS):
+                 cooldown_s: float = ALERT_COOLDOWN_S, num_workers: int = DEFAULT_ENGINE_WORKERS,
+                 warm_start_pcap: Optional[str] = None):
         self.iface_req = iface
         self.iface = resolve_capture_name(iface)
         self.bpf = bpf
+        # Optional: a short historical pcap of THIS network, parsed once at
+        # start and fed to the online behavioural baseline (see
+        # src/inference/online_baseline.py's warm_start) so a fresh
+        # deployment doesn't sit in "learning" phase for a fixed ~10
+        # minutes with no anomaly detection at all. Single-process
+        # (num_workers==1) only -- see _build_engines.
+        self.warm_start_pcap = warm_start_pcap
         self.prefer_kernel = prefer_kernel
         self.buffer_mb = buffer_mb
         self.promisc = promisc
@@ -183,8 +191,25 @@ class LiveAgent:
             self._pool = EngineWorkerPool(self.num_workers_req)
             self._pool.start()
             print(f"[live_agent] engine pool started: {self.num_workers_req} worker processes")
+            if self.warm_start_pcap:
+                print("[live_agent] warm_start_pcap is not supported with num_workers>1 "
+                      "(each pool worker learns its own baseline independently) -- ignored")
         else:
             self._scoring = ScoringEngine()
+            if self.warm_start_pcap:
+                self._warm_start_baseline_from_pcap(self.warm_start_pcap)
+
+    def _warm_start_baseline_from_pcap(self, path: str) -> None:
+        try:
+            from pcap_parser import parse_pcap
+            result = parse_pcap(path)
+            conn_records = result.get("conn", [])
+            self._scoring.warm_start_baseline(conn_records)
+            status = self._scoring.baseline_status()
+            print(f"[live_agent] baseline warm-started from {path!r}: "
+                  f"{len(conn_records)} flows -> phase={status.get('phase') if status else '?'}")
+        except Exception as exc:
+            print(f"[live_agent] baseline warm-start from {path!r} failed (continuing without it): {exc}")
 
     # ---------------- lifecycle ----------------
     def _on_packet(self, pkt) -> None:

@@ -40,6 +40,14 @@ class StartRequest(BaseModel):
     prefer_kernel: bool = True
     buffer_mb: int = 64
     promisc: bool = True
+    # Optional: path to a short historical pcap of THIS network (already on
+    # the server -- e.g. one previously uploaded via /analyze/pcap) to seed
+    # the online behavioural baseline's ~10-minute learning window, instead
+    # of it only ever learning from live traffic one flow at a time. See
+    # OnlineBaseline.warm_start -- doesn't skip the real-time-diversity
+    # requirement, just lets a historical capture that genuinely spans it
+    # satisfy it immediately instead of waiting live.
+    warm_start_pcap: Optional[str] = None
 
 
 @router.get("/interfaces")
@@ -60,7 +68,8 @@ def start(req: StartRequest):
         raise HTTPException(409, f"capture already running on {_agent.iface_req!r}; stop it first")
     fwd = make_forwarder()   # POSTs alerts to STEALTHTAP_API_URL/alerts/ingest when set
     agent = LiveAgent(req.interface, req.bpf, prefer_kernel=req.prefer_kernel,
-                      buffer_mb=req.buffer_mb, promisc=req.promisc, alert_sink=fwd)
+                      buffer_mb=req.buffer_mb, promisc=req.promisc, alert_sink=fwd,
+                      warm_start_pcap=req.warm_start_pcap)
     agent._forwarder = fwd
     try:
         agent.start()

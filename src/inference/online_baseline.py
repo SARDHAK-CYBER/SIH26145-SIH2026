@@ -135,6 +135,69 @@ class OnlineBaseline:
         ge = n - int(np.searchsorted(self._cal, score, side="left"))
         return (1 + ge) / (n + 1)
 
+    # ------------------------------------------------------------ warm start
+    def warm_start(self, records: list[dict]) -> None:
+        """Seed the learning window from a batch of already-completed flows
+        (e.g. a short historical pcap of this same network, parsed once at
+        capture start) instead of only ever learning one flow at a time as
+        live traffic trickles in -- a cold deployment otherwise sits in
+        `learning` phase for a fixed ~10 minutes (`learn_min_seconds`) no
+        matter how much traffic arrives, which is a long wait for a demo
+        or a fresh install and was flagged directly as a real usability
+        gap (not a bug -- the wait exists on purpose, see the module
+        docstring) after live-testing this session.
+
+        Does NOT bypass `learn_min_seconds`: what's compared against it is
+        the batch's OWN internal time range (max(ts) - min(ts)), never
+        "now minus the file's timestamp" -- an old pcap with a narrow
+        internal span must not trivially satisfy the requirement just
+        because it was captured long ago. (An earlier version of this got
+        that wrong -- compared against the file's raw timestamp directly
+        -- and was caught by testing against a real sample pcap through
+        the real API: it armed instantly on a capture that only actually
+        spans ~37 real seconds, years old.) A batch whose own span already
+        covers `learn_min_seconds` arms immediately, correctly, since the
+        traffic really does cover that much real diversity, just observed
+        retroactively. A narrower batch is credited for the diversity it
+        DOES have and waits out the rest against the real wall clock from
+        here -- the statistical basis for the wait is never weakened by
+        this method, only satisfied earlier when the data genuinely
+        earns it.
+
+        Safe to call more than once before arming (e.g. an initial warm
+        start followed by early live flows); a no-op once already armed,
+        so a stray resend can never silently reset learned profiles."""
+        if self.armed or not records:
+            return
+        for rec in records:
+            self._learn.append((_service(rec), _features(rec, self.one_way)))
+        self.stats["learned_flows"] = len(self._learn)
+
+        # The real-time-diversity requirement is about how much of a real
+        # time RANGE the traffic covers, not how long ago the file was
+        # captured -- an old pcap with a narrow internal span (e.g. 30
+        # seconds of traffic recorded years ago) must NOT trivially satisfy
+        # a 600-second requirement just because "now minus its timestamp"
+        # is huge. Caught by testing this against a REAL sample pcap
+        # through the real API, not assumed: an early version compared
+        # against `min(timestamps)` directly and armed instantly on a
+        # capture that only actually spans ~37 real seconds.
+        timestamps = [float(r["ts"]) for r in records if r.get("ts")]
+        batch_span = (max(timestamps) - min(timestamps)) if len(timestamps) >= 2 else 0.0
+        if self._t0 is None:
+            # A batch whose OWN span already covers learn_min_seconds needs
+            # nothing further from the wall clock -- back-date _t0 so the
+            # gate below is satisfied immediately, correctly. A narrower
+            # batch gets credited for the diversity it DOES have; the rest
+            # must still be earned against real elapsed time from now,
+            # exactly as if these flows had simply arrived live.
+            self._t0 = time.time() - min(batch_span, self.learn_min_seconds)
+
+        now = time.time()
+        if (len(self._learn) >= self.learn_min_flows and now - self._t0 >= self.learn_min_seconds) \
+                or len(self._learn) >= self.max_learn_flows:
+            self._fit()
+
     # ------------------------------------------------------------ observe
     def observe(self, rec: dict, now: Optional[float] = None) -> Optional[Alert]:
         """Feed ONE completed (expired) flow. Returns an Alert when armed and
