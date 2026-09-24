@@ -79,6 +79,7 @@ class VolumetricDDoSDetector(Detector):
         window_seconds: float = WINDOW_SECONDS,
         flood_threshold: int = FLOOD_FLOW_THRESHOLD,
         key_prefix: str = "",
+        allow_native: bool = True,
     ):
         self.redis = redis_client
         self.slowloris_duration_s = slowloris_duration_s
@@ -106,8 +107,24 @@ class VolumetricDDoSDetector(Detector):
         # native handling: a fresh NativeEng01() per Detector instance is
         # already isolated by construction, which is what key_prefix
         # exists to guarantee for the Redis path.
+        #
+        # allow_native=False is for src/capture/engine_pool.py's multi-
+        # worker mode specifically: NativeEng01's spoofed-flood check
+        # tracks distinct source IPs PER DESTINATION (self.dst in
+        # eng01.rs), in-process. The pool shards records by SOURCE ip, so
+        # a real spoofed flood's many distinct attacking sources land on
+        # DIFFERENT workers -- each one's native counter would only ever
+        # see a fraction of the true fan-in and could silently miss a
+        # real attack. The Redis HLL path this falls back to is keyed by
+        # dst_ip in a store every worker shares, which is exactly what
+        # this cross-source check needs and per-worker in-process state
+        # cannot provide. ENG-02/05/06/13's native state is entirely
+        # src_ip-first-keyed (checked directly against their .rs source),
+        # so worker-local state is already correct for them -- this is
+        # not a generic multi-worker vs. native problem, just this one
+        # engine's one dst_ip-keyed sub-check.
         self._native = None
-        if (_NATIVE_ENG01_AVAILABLE and not _FORCE_PYTHON_ENG01
+        if (allow_native and _NATIVE_ENG01_AVAILABLE and not _FORCE_PYTHON_ENG01
                 and window_seconds == WINDOW_SECONDS and flood_threshold == FLOOD_FLOW_THRESHOLD
                 and slowloris_duration_s == 120.0 and slowloris_max_bytes == 50):
             self._native = stealthtap_core.NativeEng01()

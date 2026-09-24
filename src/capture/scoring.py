@@ -149,7 +149,10 @@ class ScoringEngine:
         )
 
         self._engines = {
-            "eng01": VolumetricDDoSDetector(redis_client=r),
+            # allow_native=False in pool-worker mode: see the comment in
+            # VolumetricDDoSDetector.__init__ -- its native path can't see
+            # cross-worker fan-in for the dst_ip-keyed spoofed-flood check.
+            "eng01": VolumetricDDoSDetector(redis_client=r, allow_native=self.worker_id is None),
             "eng02": C2BeaconingDetector(redis_client=r),
             "eng03": DGADetector(model_server=self._model_server),
             "eng04": EncryptedMalwareDetector(),
