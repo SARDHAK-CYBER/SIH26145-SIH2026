@@ -1,7 +1,7 @@
 //! Streaming (packet-at-a-time) flow assembler -- the live-capture
 //! counterpart to parse.rs's whole-file parser, and a byte-for-byte port of
 //! src/capture/flow_assembler.py's `FlowAssembler`: same flow orientation,
-//! same flow UID, same immediate dns/ssl/modbus/dnp3 emission, same
+//! same flow UID, same immediate dns/ssl/modbus/dnp3/http emission, same
 //! snapshot/expire/flush lifecycle for `conn`. That Python class is the
 //! reference specification (already validated in production on real
 //! traffic this session), not something to reinvent -- every field name,
@@ -56,6 +56,7 @@ pub struct LiveFlow {
     pub orig_pkts: u64, pub resp_pkts: u64,
     pub uid: String,
     pub emitted_ssl: bool,
+    pub emitted_http: bool,
 }
 
 impl LiveFlow {
@@ -103,13 +104,16 @@ pub struct ModbusOut { pub uid: String, pub ts: f64, pub orig_h: String, pub ori
     pub resp_h: String, pub resp_p: u16, pub func: String, pub register: u16, pub segment_hash: String }
 pub struct Dnp3Out { pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p: u16,
     pub resp_h: String, pub resp_p: u16, pub fc_request: String, pub segment_hash: String }
+pub struct HttpOut { pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p: u16,
+    pub resp_h: String, pub resp_p: u16, pub method: String, pub uri: String,
+    pub user_agent: String, pub request_body_len: u64, pub segment_hash: String }
 
-pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out) }
+pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out), Http(HttpOut) }
 
 #[derive(Default, Clone)]
 pub struct Stats {
     pub packets: u64, pub non_ip: u64, pub flows_seen: u64,
-    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub conn: u64,
+    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub conn: u64,
 }
 
 // Function-code name tables -- identical to flow_assembler.py's _MODBUS_FC / _DNP3_FC.
@@ -158,6 +162,50 @@ fn parse_dnp3(p: &[u8], s_ip: &str, s_p: u16, d_ip: &str, d_p: u16, ts: f64, uid
         fc_request: name.to_string(),
         segment_hash: seg_hash(&[uid.to_string(), name.to_string()]),
     })
+}
+
+// Matches Zeek's base HTTP analyzer's own scope: HTTP/1.x request line +
+// headers. HTTP/2 is a binary framing format Zeek's base analyzer doesn't
+// parse either, so staying HTTP/1.x-only keeps this at parity, not behind
+// it. Structural detection (valid method + " " + target + " HTTP/1.x"),
+// not a port allowlist -- ENG-09's whole point is catching C2 that hides
+// on non-standard ports, so gating on port 80/8080 would defeat it.
+const HTTP_METHODS: [&str; 9] = ["GET", "POST", "HEAD", "PUT", "DELETE", "OPTIONS", "PATCH", "CONNECT", "TRACE"];
+
+fn split_line(buf: &[u8]) -> Option<(&[u8], &[u8])> {
+    for i in 0..buf.len() {
+        if buf[i] == b'\n' {
+            let end = if i > 0 && buf[i - 1] == b'\r' { i - 1 } else { i };
+            return Some((&buf[..end], &buf[i + 1..]));
+        }
+    }
+    None
+}
+
+fn parse_http_request(payload: &[u8]) -> Option<(String, String, String, u64)> {
+    let (line1, mut rest) = split_line(payload)?;
+    let line1 = std::str::from_utf8(line1).ok()?;
+    let mut parts = line1.splitn(3, ' ');
+    let method = parts.next()?;
+    let uri = parts.next()?;
+    let version = parts.next()?;
+    if !HTTP_METHODS.contains(&method) || !version.starts_with("HTTP/1.") { return None; }
+
+    let mut user_agent = String::new();
+    let mut request_body_len: u64 = 0;
+    while let Some((line, next)) = split_line(rest) {
+        if line.is_empty() { break; } // end of headers
+        rest = next;
+        let Ok(line) = std::str::from_utf8(line) else { continue };
+        let Some((name, value)) = line.split_once(':') else { continue };
+        let value = value.trim();
+        match name.trim().to_ascii_lowercase().as_str() {
+            "user-agent" => user_agent = value.to_string(),
+            "content-length" => request_body_len = value.parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    Some((method.to_string(), uri.to_string(), user_agent, request_body_len))
 }
 
 pub struct LiveFlowAssembler {
@@ -239,6 +287,28 @@ impl LiveFlowAssembler {
             }
         }
 
+        // HTTP/1.x request (immediate, once per flow) -- client side only.
+        // Matches flow_assembler.py: parse the request line + a bounded
+        // set of headers (User-Agent, Content-Length) that ENG-09 reads.
+        if l4.proto == "tcp" && !l4.payload.is_empty() {
+            let is_orig = self.flows.get(&flow_key)
+                .map(|f| f.orig_ip == src_ip && f.orig_port == l4.sport)
+                .unwrap_or(false);
+            let already = self.flows.get(&flow_key).map(|f| f.emitted_http).unwrap_or(true);
+            if is_orig && !already {
+                if let Some((method, uri, user_agent, body_len)) = parse_http_request(l4.payload) {
+                    if let Some(f) = self.flows.get_mut(&flow_key) { f.emitted_http = true; }
+                    self.stats.http += 1;
+                    out.push(Immediate::Http(HttpOut {
+                        uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                        resp_h: dst_ip.clone(), resp_p: l4.dport,
+                        segment_hash: seg_hash(&[uid.clone(), method.clone(), uri.clone()]),
+                        method, uri, user_agent, request_body_len: body_len,
+                    }));
+                }
+            }
+        }
+
         // Modbus / DNP3 (immediate)
         if l4.proto == "tcp" && !l4.payload.is_empty() {
             if l4.sport == 502 || l4.dport == 502 {
@@ -270,7 +340,7 @@ impl LiveFlowAssembler {
             self.flows.insert(key.clone(), LiveFlow {
                 orig_ip, orig_port, resp_ip, resp_port, proto,
                 first_ts: ts, last_ts: ts, orig_bytes: 0, resp_bytes: 0,
-                orig_pkts: 0, resp_pkts: 0, uid, emitted_ssl: false,
+                orig_pkts: 0, resp_pkts: 0, uid, emitted_ssl: false, emitted_http: false,
             });
             self.stats.flows_seen += 1;
         }

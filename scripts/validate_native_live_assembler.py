@@ -101,6 +101,8 @@ def compare_one(path: Path) -> tuple[bool | None, str]:
             return (log_type, rec["uid"], rec["func"], rec["register"])
         if log_type == "dnp3":
             return (log_type, rec["uid"], rec["fc_request"])
+        if log_type == "http":
+            return (log_type, rec["uid"], rec["method"], rec["uri"], rec["user_agent"], rec["request_body_len"])
         return (log_type, rec.get("uid"))
 
     py_imm_keys = sorted(imm_key(*i) for i in py_immediate)

@@ -187,6 +187,17 @@ impl LiveFlowAssembler {
                     d.set_item("segment_hash", &r.segment_hash)?;
                     ("dnp3", d)
                 }
+                Immediate::Http(r) => {
+                    let d = PyDict::new_bound(py);
+                    d.set_item("uid", &r.uid)?; d.set_item("ts", r.ts)?;
+                    d.set_item("id.orig_h", &r.orig_h)?; d.set_item("id.orig_p", r.orig_p)?;
+                    d.set_item("id.resp_h", &r.resp_h)?; d.set_item("id.resp_p", r.resp_p)?;
+                    d.set_item("proto", "tcp")?; d.set_item("method", &r.method)?;
+                    d.set_item("uri", &r.uri)?; d.set_item("user_agent", &r.user_agent)?;
+                    d.set_item("request_body_len", r.request_body_len)?;
+                    d.set_item("segment_hash", &r.segment_hash)?;
+                    ("http", d)
+                }
             };
             list.append((log_type, d))?;
         }
@@ -221,6 +232,7 @@ impl LiveFlowAssembler {
         d.set_item("ssl", s.ssl)?;
         d.set_item("modbus", s.modbus)?;
         d.set_item("dnp3", s.dnp3)?;
+        d.set_item("http", s.http)?;
         d.set_item("conn", s.conn)?;
         Ok(d.into())
     }

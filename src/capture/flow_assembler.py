@@ -4,7 +4,7 @@ records out, in the exact raw-record shape src.flow_mapping.map_record
 consumes. This is the live-capture counterpart to pcap_parser.parse_pcap
 (which does the same thing in one batch over a file).
 
-Emits immediately: dns, ssl (with a real JA4), modbus, dnp3.
+Emits immediately: dns, ssl (with a real JA4), modbus, dnp3, http.
 Emits on idle-expiry / flush: conn (bidirectional byte totals + duration).
 
 Deep payload is never inspected beyond what the PS allows -- DNS names,
@@ -40,6 +40,10 @@ _DNP3_FC = {
     0x13: "SAVE_CONFIGURATION", 0x14: "ENABLE_UNSOLICITED", 0x15: "DISABLE_UNSOLICITED",
     0x18: "ASSIGN_CLASS", 0x1B: "DELETE_FILE",
 }
+# HTTP/1.x request methods -- structural detection, not a port allowlist:
+# ENG-09 exists specifically to catch HTTP-based C2 that hides on
+# non-standard ports, so gating this on port 80/8080 would defeat it.
+_HTTP_METHODS = {"GET", "POST", "HEAD", "PUT", "DELETE", "OPTIONS", "PATCH", "CONNECT", "TRACE"}
 
 FLOW_IDLE_TIMEOUT_S = 60.0
 FLOW_HARD_TIMEOUT_S = 300.0
@@ -57,7 +61,7 @@ def _seg_hash(*parts: Any) -> str:
 class _Flow:
     __slots__ = ("orig_ip", "orig_port", "resp_ip", "resp_port", "proto",
                  "first_ts", "last_ts", "orig_bytes", "resp_bytes", "orig_pkts",
-                 "resp_pkts", "uid", "emitted_ssl")
+                 "resp_pkts", "uid", "emitted_ssl", "emitted_http")
 
     def __init__(self, o_ip, o_p, r_ip, r_p, proto, ts):
         self.orig_ip, self.orig_port = o_ip, o_p
@@ -68,6 +72,7 @@ class _Flow:
         self.orig_pkts = self.resp_pkts = 0
         self.uid = _flow_uid(o_ip, o_p, r_ip, r_p, proto)
         self.emitted_ssl = False
+        self.emitted_http = False
 
     def add(self, src_ip, src_port, plen, ts):
         self.last_ts = max(self.last_ts, ts)
@@ -98,7 +103,7 @@ class FlowAssembler:
         self._dirty: set = set()   # flow keys that got new packets since the last snapshot()
         self._idle = idle_timeout_s
         self.stats = {"packets": 0, "non_ip": 0, "flows_seen": 0,
-                      "dns": 0, "ssl": 0, "modbus": 0, "dnp3": 0, "conn": 0}
+                      "dns": 0, "ssl": 0, "modbus": 0, "dnp3": 0, "http": 0, "conn": 0}
 
     # ---------------- packet ingest ----------------
     def process(self, pkt) -> list[tuple[str, dict]]:
@@ -182,6 +187,13 @@ class FlowAssembler:
                 }))
                 self.stats["ssl"] += 1
 
+        # ---- HTTP/1.x request (immediate, once per flow, client side only) ----
+        if proto == "tcp" and payload and not flow.emitted_http and src_ip == flow.orig_ip and sport == flow.orig_port:
+            rec = self._http_request(payload, src_ip, sport, dst_ip, dport, ts, flow.uid)
+            if rec is not None:
+                flow.emitted_http = True
+                out.append(rec)
+
         # ---- Modbus / DNP3 (immediate) ----
         if proto == "tcp" and payload:
             rec = self._modbus(payload, src_ip, sport, dst_ip, dport, ts, flow.uid) if 502 in (sport, dport) else None
@@ -191,6 +203,51 @@ class FlowAssembler:
                 out.append(rec)
 
         return out
+
+    # ---------------- HTTP ----------------
+    def _http_request(self, p: bytes, s_ip, s_p, d_ip, d_p, ts, uid) -> Optional[tuple[str, dict]]:
+        """HTTP/1.x request line + a bounded set of headers -- matches
+        Zeek's base HTTP analyzer's own scope (HTTP/2 is a binary framing
+        format Zeek's base analyzer doesn't parse either, so this isn't
+        behind it). Only ENG-09's fields: method, uri, user_agent,
+        request_body_len (from Content-Length; 0 if absent/chunked, same
+        conservative under-detect-quietly bias as the rest of this
+        session's fixes rather than guessing)."""
+        try:
+            head, _, _ = p.partition(b"\r\n\r\n")
+            lines = head.split(b"\r\n") if b"\r\n" in head else head.split(b"\n")
+            if not lines:
+                return None
+            parts = lines[0].split(b" ", 2)
+            if len(parts) != 3:
+                return None
+            method, uri, version = (x.decode("latin-1") for x in parts)
+            if method not in _HTTP_METHODS or not version.startswith("HTTP/1."):
+                return None
+            user_agent, request_body_len = "", 0
+            for line in lines[1:]:
+                name, sep, value = line.partition(b":")
+                if not sep:
+                    continue
+                name = name.strip().lower()
+                value = value.strip().decode("latin-1", "ignore")
+                if name == b"user-agent":
+                    user_agent = value
+                elif name == b"content-length":
+                    try:
+                        request_body_len = int(value)
+                    except ValueError:
+                        request_body_len = 0
+        except Exception:
+            return None
+        self.stats["http"] += 1
+        return ("http", {
+            "uid": uid, "ts": ts, "id.orig_h": s_ip, "id.orig_p": s_p,
+            "id.resp_h": d_ip, "id.resp_p": d_p, "proto": "tcp",
+            "method": method, "uri": uri, "user_agent": user_agent,
+            "request_body_len": request_body_len,
+            "segment_hash": _seg_hash(uid, method, uri),
+        })
 
     # ---------------- OT decoders ----------------
     def _modbus(self, p: bytes, s_ip, s_p, d_ip, d_p, ts, uid) -> Optional[tuple[str, dict]]:

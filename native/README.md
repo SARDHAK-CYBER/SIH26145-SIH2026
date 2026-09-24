@@ -28,7 +28,16 @@ to opt out):
 - Scope: Ethernet-framed input only (real NIC capture is always
   Ethernet — confirmed against `src/capture/backends.py`), `conn`,
   `dns` (UDP + TCP), `ssl` (real FoxIO JA4 fingerprint, not a
-  placeholder), `modbus`, `dnp3`.
+  placeholder), `modbus`, `dnp3`, `http` (HTTP/1.x request line +
+  User-Agent/Content-Length — feeds ENG-09, which was previously
+  dormant on live capture; matches Zeek's own base analyzer's scope,
+  since HTTP/2 is binary-framed and out of scope there too).
+  **Not implemented**: `kerberos` (ENG-11 stays dormant on live
+  capture) — Kerberos is binary ASN.1, not text like HTTP, and this
+  project has zero real Kerberos captures locally to validate a parser
+  against. Per this project's own "Validated, not asserted" standard
+  (below), shipping an unvalidated binary-protocol parser for a
+  security detector was judged worse than leaving the gap disclosed.
 - Flow assembly itself stays single-process even when the multi-core
   engine pool (below) is active — see that section for why.
 
@@ -45,7 +54,10 @@ captures, field-by-field, order included.
   produced identical accuracy tables to the decimal place.
 - Live-path: 21/26 real captures identical (5 skipped — non-Ethernet
   linktype, not representative of live NIC capture, reported not
-  silently ignored).
+  silently ignored). Includes `http`: 2 of these captures carry real
+  HTTP/1.x requests (`netbios_ssn2.pcap` 61 requests, `test.pcap` 5) —
+  native and Python extracted identical method/uri/user_agent/
+  request_body_len on every one, not just an identical count.
 
 Real bugs found and fixed during validation, not assumed away:
 1. DNS port check only covered UDP 53, missing mDNS (5353).
