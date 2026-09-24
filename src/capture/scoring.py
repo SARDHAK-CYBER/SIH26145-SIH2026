@@ -129,7 +129,11 @@ class ScoringEngine:
 
         if _ML_OK:
             try:
-                self._model_server = HybridModelServer()
+                # Real-time hot path: an untrusted IsolationForest (see
+                # IFOREST_MIN_F1) never affects a live alert, so skip
+                # running it -- see FamilyModels.skip_untrusted_iforest
+                # for the measured per-row cost this avoids.
+                self._model_server = HybridModelServer(skip_untrusted_iforest=True)
             except Exception as exc:
                 print(f"{tag} ML disabled: {exc}")
                 self._model_server = None

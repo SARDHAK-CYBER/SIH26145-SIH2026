@@ -137,12 +137,23 @@ def _extract_anomaly_score_batch(outputs) -> Optional[np.ndarray]:
 
 
 class FamilyModels:
-    def __init__(self, family: str, iforest_trusted: bool = True):
+    def __init__(self, family: str, iforest_trusted: bool = True, skip_untrusted_iforest: bool = False):
         self.family = family
         self.xgb_session: Optional[ort.InferenceSession] = None
         self.iforest_session: Optional[ort.InferenceSession] = None
         self.top_features: Optional[list] = None  # global XGBoost importances, for Alert explainability
         self.iforest_trusted = iforest_trusted    # see IFOREST_MIN_F1
+        # Measured (models/flow_*_v1.onnx, 16,300-row batch, warm):
+        # XGBoost ~5us/row vs IsolationForest ~59us/row -- skl2onnx's
+        # IsolationForest export is ~12x more expensive per row than
+        # onnxmltools' XGBoost export for the same input. Paying that for
+        # a score that IFOREST_MIN_F1 already excludes from every
+        # detection decision (see _combine) is a pure throughput tax with
+        # zero effect on any alert. Kept opt-in (default False, i.e. same
+        # behavior as before) so the upload/API path's model_scores
+        # transparency is unchanged; src/capture/scoring.py opts in for
+        # the live real-time path where per-flow cost caps max pps.
+        self.skip_untrusted_iforest = skip_untrusted_iforest
         self._load()
 
     def _combine(self, scores: dict[str, float]) -> Optional[dict]:
@@ -171,15 +182,35 @@ class FamilyModels:
         opts = _session_options()
         if xgb_path.exists():
             self.xgb_session = ort.InferenceSession(str(xgb_path), sess_options=opts, providers=["CPUExecutionProvider"])
+            self._warm_up(self.xgb_session)
             print(f"[model_server] loaded {xgb_path}")
         if if_path.exists():
             self.iforest_session = ort.InferenceSession(str(if_path), sess_options=opts, providers=["CPUExecutionProvider"])
+            self._warm_up(self.iforest_session)
             print(f"[model_server] loaded {if_path}")
         if imp_path.exists():
             try:
                 self.top_features = json.loads(imp_path.read_text())[:5]
             except Exception as exc:
                 print(f"[model_server] could not read {imp_path.name}: {exc}")
+
+    @staticmethod
+    def _warm_up(session: "ort.InferenceSession") -> None:
+        """onnxruntime defers graph optimization/kernel selection to the
+        first .run() call -- measured at ~1.5-2.5s for these models
+        (flow_xgboost_v1.onnx, flow_isolation_forest_v1.onnx), ~15-20x
+        slower than every call after. HybridModelServer is a long-lived
+        singleton (one per API process / live-capture agent, not one per
+        request -- see src/api/main.py, src/capture/scoring.py), so
+        paying this at load time keeps it out of the first real flow's
+        latency instead of silently inflating it."""
+        inp = session.get_inputs()[0]
+        n_features = inp.shape[-1] if isinstance(inp.shape[-1], int) else 32
+        dummy = np.zeros((1, n_features), dtype=np.float32)
+        try:
+            session.run(None, {inp.name: dummy})
+        except Exception:
+            pass  # best-effort; a real request will surface any genuine problem
 
     @property
     def loaded(self) -> bool:
@@ -202,7 +233,7 @@ class FamilyModels:
             if proba is not None:
                 scores["xgboost"] = proba
 
-        if self.iforest_session is not None:
+        if self.iforest_session is not None and not (self.skip_untrusted_iforest and not self.iforest_trusted):
             input_name = self.iforest_session.get_inputs()[0].name
             outputs = self.iforest_session.run(None, {input_name: x})
             raw_score = _extract_anomaly_score(outputs)
@@ -230,7 +261,7 @@ class FamilyModels:
             xgb_probas = _extract_positive_class_proba_batch(outputs)
 
         iforest_scores: Optional[np.ndarray] = None
-        if self.iforest_session is not None:
+        if self.iforest_session is not None and not (self.skip_untrusted_iforest and not self.iforest_trusted):
             input_name = self.iforest_session.get_inputs()[0].name
             outputs = self.iforest_session.run(None, {input_name: x})
             raw = _extract_anomaly_score_batch(outputs)
@@ -249,7 +280,7 @@ class FamilyModels:
 
 
 class HybridModelServer:
-    def __init__(self):
+    def __init__(self, skip_untrusted_iforest: bool = False):
         manifest_path = MODELS_DIR / "MANIFEST.json"
         raw_manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else []
         self.manifest: list[dict] = raw_manifest if isinstance(raw_manifest, list) else [raw_manifest] if raw_manifest else []
@@ -265,7 +296,7 @@ class HybridModelServer:
         self.families: dict[str, FamilyModels] = {}
         for f in FAMILIES:
             trusted = if_f1.get(f, 1.0) >= IFOREST_MIN_F1  # unknown F1 -> trust (no evidence against)
-            self.families[f] = FamilyModels(f, iforest_trusted=trusted)
+            self.families[f] = FamilyModels(f, iforest_trusted=trusted, skip_untrusted_iforest=skip_untrusted_iforest)
             if f in if_f1 and not trusted:
                 print(f"[model_server] {f} isolation_forest F1={if_f1[f]:.3f} < {IFOREST_MIN_F1} "
                       f"-- demoted to advisory (XGBoost drives {f} detection)")
