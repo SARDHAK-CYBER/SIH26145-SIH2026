@@ -81,10 +81,21 @@ def map_record(rec: dict[str, Any], log_type: str) -> dict[str, Any]:
         flow["http_uri"] = rec.get("uri", "")
         flow["http_user_agent"] = rec.get("user_agent", "")
         flow["http_request_body_len"] = rec.get("request_body_len", 0)
+        # Zeek's HTTP::Info field, confirmed against zeek/zeek's own
+        # base/protocols/http/main.zeek: "Actual uncompressed content size
+        # of the data transferred from the server." Answers "what data was
+        # transferred" for the response side too, not just the request.
+        flow["http_response_body_len"] = rec.get("response_body_len", 0)
     elif log_type == "kerberos":
         flow["krb_request_type"] = rec.get("request_type", "")
         flow["krb_cipher"] = rec.get("cipher", "")
         flow["krb_service"] = rec.get("service", "")
+        # Zeek's KRB::Info "client" field -- confirmed against zeek/zeek's
+        # own base/protocols/krb/main.zeek: "Client principal name" (format
+        # "username/realm"). Only the TICKET is encrypted; the AS-REQ/
+        # TGS-REQ carrying this field is cleartext, so this is a real,
+        # directly-observed identity, not an inference.
+        flow["krb_client"] = rec.get("client", "")
     elif log_type == "cip":
         flow["protocol_analyzed"] = "enip"
         flow["cip_service"] = rec.get("service")

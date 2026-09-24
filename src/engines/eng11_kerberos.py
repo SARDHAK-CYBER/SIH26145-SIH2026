@@ -2,7 +2,14 @@
 ENG-11 -- Kerberoasting detection via Kerberos ticket-encryption analysis.
 
 Fields used (KRB::Info, kerberos.log) confirmed directly against Zeek's
-own official documentation, not guessed: request_type, service, cipher.
+own official documentation, not guessed: request_type, service, cipher,
+client.
+
+`client` (the requesting principal, "username/realm") answers "which
+user" for this alert type specifically -- a real, directly-observed
+identity, not an inference: only the TICKET itself is encrypted, the
+AS-REQ/TGS-REQ carrying the requester's name is cleartext, which is
+exactly why Zeek can log it at all.
 
 Kerberoasting is a well-documented, specific technique: an attacker
 requests a Ticket Granting Service (TGS) ticket for a service account,
@@ -31,6 +38,7 @@ class KerberosAttackDetector(Detector):
         request_type = flow.get("krb_request_type", "")
         cipher = flow.get("krb_cipher", "")
         service = flow.get("krb_service", "")
+        client = flow.get("krb_client", "")
 
         if request_type != "TGS" or cipher not in WEAK_CIPHERS:
             return None
@@ -55,7 +63,10 @@ class KerberosAttackDetector(Detector):
                 tactic="Credential Access", technique_id="T1558.003",
                 technique_name="Steal or Forge Kerberos Tickets: Kerberoasting",
             ),
-            evidence={"krb_service": service, "krb_cipher": cipher, "krb_request_type": request_type},
+            evidence={
+                "requesting_user": client or "(not observed)",
+                "krb_service": service, "krb_cipher": cipher, "krb_request_type": request_type,
+            },
             forensics={"raw_segment_hash_sha256": flow.get("segment_hash", "")},
             detection_mode="rule",
         )
