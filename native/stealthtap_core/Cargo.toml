@@ -18,6 +18,23 @@ sha2 = "0.10"
 # `conn` below) -- measured directly against eval_real_traffic.py.
 indexmap = "2"
 
+# Linux-only: AF_XDP capture (src/afxdp.rs). Gated at the dependency level,
+# not just with #[cfg] in code, so a Windows build (this project's primary
+# platform) never fetches or attempts to link libxdp/libbpf at all.
+#
+# libxdp-sys is pulled in transitively by xsk-rs, but is listed here
+# explicitly too, purely to set its build features (Cargo unifies features
+# across the dependency graph for one resolved version) -- without this,
+# its default build tries to discover libbpf/libelf/zlib via pkg-config
+# and compile its own default XDP program with clang, neither of which
+# can be assumed present on an arbitrary target machine. `vendored`
+# builds libbpf+libelf+zlib from source instead (via the `cc` crate, not
+# a Makefile/configure, per `use_cc_build`); `use_precompiled_bpf` uses
+# libxdp's own prebuilt default-program object instead of compiling one.
+[target.'cfg(target_os = "linux")'.dependencies]
+xsk-rs = { version = "0.11", features = ["use_cc_build"] }
+libxdp-sys = { version = "0.2", features = ["vendored", "use_precompiled_bpf", "use_cc_build"] }
+
 [profile.release]
 opt-level = 3
 lto = true

@@ -1,18 +1,28 @@
 """
 Capture backends, fastest-available first:
 
-  1. AFPacketBackend  -- Linux only. Raw AF_PACKET socket with a
+  1. AfXdpBackend     -- Linux only, native (src/capture/afxdp_backend.py,
+     native/stealthtap_core/src/afxdp.rs). AF_XDP: a UMEM + fill/rx rings
+     bound to one NIC queue, kernel-bypass-*capable*. Requires
+     CAP_NET_RAW+CAP_BPF (or root) and a kernel with CONFIG_XDP_SOCKETS.
+     Validated with a real bind + real packet capture in native/driver XDP
+     mode (not generic/SKB) on a real NIC driver (hv_netvsc) -- see
+     afxdp_backend.py's module docstring for exactly what that does and
+     doesn't confirm (zero-copy specifically is still unconfirmed). Falls
+     back cleanly to (2) if unavailable or the bind fails.
+
+  2. AFPacketBackend  -- Linux only. Raw AF_PACKET socket with a
      kernel-side PACKET_MMAP RX ring + PACKET_FANOUT (so multiple worker
      sockets share the load) + an optional kernel BPF filter attached via
      SO_ATTACH_FILTER. Packets are copied straight out of the kernel ring
      with zero per-packet syscalls in the fast path -- this is the
      "kernel-level, high-speed" path.
 
-  2. ScapyBackend     -- portable (libpcap / Npcap). Uses scapy's
+  3. ScapyBackend     -- portable (libpcap / Npcap). Uses scapy's
      AsyncSniffer, which itself sits on the OS kernel capture driver.
      This is what runs on Windows and on Linux without CAP_NET_RAW.
 
-Both yield scapy packet objects to a callback so the rest of the
+All three yield scapy packet objects to a callback so the rest of the
 pipeline (FlowAssembler) is backend-agnostic.
 """
 from __future__ import annotations
@@ -325,11 +335,18 @@ def select_backend(iface: str, on_packet: PacketCB, bpf: Optional[str] = None,
                    promisc: bool = True) -> BaseBackend:
     """Pick the fastest backend that can actually run here.
 
-    Linux + prefer_kernel  -> AFPacketBackend (mmap RX ring + FANOUT + kernel BPF)
+    Linux + prefer_kernel  -> AfXdpBackend (native AF_XDP) if the module was
+                               built with it and the bind succeeds, else
+                               AFPacketBackend (mmap RX ring + FANOUT + kernel BPF)
     everything else         -> ScapyBackend   (libpcap/Npcap: kernel BPF + enlarged
                                                kernel ring + pcap_stats drop counters)
     """
     if prefer_kernel and platform.system() == "Linux":
+        try:
+            from src.capture.afxdp_backend import AfXdpBackend
+            return AfXdpBackend(iface, on_packet, bpf, buffer_mb=buffer_mb, promisc=promisc)
+        except CaptureError:
+            pass
         try:
             return AFPacketBackend(iface, on_packet, bpf, buffer_mb=buffer_mb, promisc=promisc)
         except CaptureError:

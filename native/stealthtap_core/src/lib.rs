@@ -9,6 +9,8 @@
 //! files are not yet supported (returns a clear error, not a silent
 //! wrong answer) -- see native/README.md.
 
+#[cfg(target_os = "linux")]
+mod afxdp;
 mod eng01;
 mod eng02;
 mod eng05;
@@ -247,5 +249,7 @@ fn stealthtap_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NativeEng05>()?;
     m.add_class::<NativeEng06>()?;
     m.add_class::<NativeEng13>()?;
+    #[cfg(target_os = "linux")]
+    m.add_class::<afxdp::AfXdpCapture>()?;
     Ok(())
 }
