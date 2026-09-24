@@ -61,11 +61,12 @@ This is genuinely new detection capacity, not a repackaging of the existing mode
 
 | | Linux | Windows |
 |---|---|---|
-| Live capture backend | `AF_PACKET` mmap ring + fanout — genuinely kernel-level | Npcap (kernel driver, not bundled — see licence note below) |
+| Live capture backend | `AfXdpBackend` (native AF_XDP, `select_backend()`'s first choice) → `AF_PACKET` mmap ring + fanout fallback — genuinely kernel-level either way | Npcap (kernel driver, not bundled — see licence note below) |
 | Full pipeline (Zeek+ICSNPP+Suricata+YARA) | Docker | Docker |
-| Standalone desktop app | Yes — needs `CAP_NET_RAW`/root for live capture | Yes — needs Administrator for live capture |
+| Standalone desktop app | Yes — needs `CAP_NET_RAW`+`CAP_BPF`/root for live capture | Yes — needs Administrator for live capture |
 | Native Rust core (`native/stealthtap_core`) | Builds with `maturin develop --release` (Rust toolchain required at build time; installs as a normal Python extension module, no runtime Rust dependency) | Same; this project's own build needed a `LIB` env-var workaround for a from-source Python install with no standard `libs/` directory — see `native/README.md` |
-| 10G+ kernel-bypass (AF_XDP/DPDK) | Not implemented — see §8 | Not available on this platform at any tier |
+| AF_XDP kernel-bypass capture | Implemented (`native/stealthtap_core/src/afxdp.rs`), gated to Linux only at the dependency level. Real bind + real packet capture validated on a real NIC driver (`hv_netvsc`) in **native/driver XDP mode**, not generic — see `native/README.md`'s AF_XDP section for exactly what was and wasn't confirmed (zero-copy specifically wasn't independently checked) | Not applicable — AF_XDP is a Linux kernel feature |
+| DPDK | Not implemented, not planned — a full second packet-processing framework for a platform this project isn't targeting first; see §9 | Not available on this platform |
 
 **Npcap licensing**: free for up to 5 systems, may not be redistributed. The desktop build never bundles it; it must be installed separately by the user from npcap.com. This is a real constraint on any future "install and go" enterprise Windows deployment — see §10.
 
@@ -123,6 +124,7 @@ The user asked directly: which gives the highest accuracy on real traffic? **Rul
 - Serial-only industrial fieldbuses (PROFIBUS DP/PA, Foundation Fieldbus H1, wired HART, Modbus RTU) without a protocol gateway.
 - Any capability requiring a paid license, subscription, or non-redistributable driver bundled into the product (Npcap OEM, PF_RING ZC, Suricata Emerging Threats Pro). Everything shipped is open-source or, in Npcap's single case, free-and-separately-installed.
 - Claims of accuracy this project has not itself measured. Where a number appears in this document, it was produced by a script in `scripts/` that can be re-run.
+- DPDK. AF_XDP (§6, `native/stealthtap_core/src/afxdp.rs`) already covers the kernel-bypass-capable-capture use case DPDK would otherwise be reached for; DPDK additionally wants its own hugepage-backed memory model and (for most real throughput) a NIC bound out of the kernel entirely via a userspace driver (`vfio-pci`/`uio`) — real operational cost for a project not chasing 40G+/100G workloads.
 
 ## 10. Licensing and distribution notes
 

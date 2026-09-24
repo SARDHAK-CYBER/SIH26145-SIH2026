@@ -156,6 +156,55 @@ that's still true, with a second compounding reason on top now.
 **Not recommended**: `num_workers=1` (the default) is the fastest
 configuration measured for this pipeline.
 
+## AF_XDP capture backend (`src/afxdp.rs`, Linux only)
+
+`src/capture/afxdp_backend.py`'s `AfXdpBackend` -- a kernel-bypass-capable
+capture path (`select_backend()`'s first choice on Linux, ahead of
+`AFPacketBackend`), built on the `xsk-rs` crate. A UMEM (shared
+packet-buffer region) plus fill/RX rings, bound directly to one NIC queue.
+Entirely gated behind `#[cfg(target_os = "linux")]` at both the module and
+the `Cargo.toml` dependency level (`[target.'cfg(target_os = "linux")'.
+dependencies]`), so it cannot affect the Windows build this project is
+primarily developed on -- confirmed directly, not assumed: the Windows
+build still succeeds and still lacks `AfXdpCapture` after this module was
+added.
+
+**Validated, not just written**, and corrected against a real wrong
+assumption along the way:
+
+- Compiled and linked on a real Linux host (WSL2 Kali, kernel
+  6.6.87-microsoft-standard-WSL2) using `xsk-rs`'s vendored-libbpf +
+  vendored-libelf + vendored-zlib + `use_precompiled_bpf` build path, so
+  the target machine needs no system libxdp/libbpf-dev at runtime -- only
+  ordinary build tooling (a C compiler, pkg-config, autoconf/automake/
+  libtool, autopoint, flex, bison, gawk) at build time.
+- **Real AF_XDP bind and real packet capture on real hardware**: bound to
+  a live `eth0` (driver `hv_netvsc`) and received real off-the-wire
+  packets. `ip -d link show eth0` while bound showed `prog/xdp` -- **native
+  (driver) XDP mode, not generic/SKB mode**. This corrects an assumption
+  stated to the user before checking: that a Hyper-V-virtualized NIC could
+  only reach generic mode. `hv_netvsc` has had native XDP support upstream
+  since ~5.7 and it is genuinely active here. Not independently confirmed:
+  the AF_XDP *zero-copy* bind flag specifically (related to but distinct
+  from native mode; `hv_netvsc`'s native XDP has historically been
+  copy-mode in many kernel versions) -- so the throughput claim AF_XDP
+  exists for is closer to proven than originally caveated, but the exact
+  copy-vs-zerocopy mode wasn't independently checked.
+- **A real bug found by this testing, not by inspection**: the constructor
+  originally seeded the whole UMEM (default 4096 frames) into the fill
+  queue in one `produce()` call, assuming a partial accept if the ring was
+  smaller. It doesn't partially accept -- libxdp's default fill-queue size
+  is 2048, and an over-large `produce()` call rejects the WHOLE batch
+  (0/4096 accepted, not 2048/4096) -- confirmed against the real bind
+  above, not assumed from reading the source. Fixed by sizing the fill/
+  completion queues to `frame_count` explicitly via `UmemConfigBuilder`;
+  confirmed fixed by re-running the same real bind + capture test.
+
+Falls back the same way every native feature in this codebase does -- a
+normal exception (missing module on Windows, missing `CAP_NET_RAW`/
+`CAP_BPF`, no XDP-capable driver, kernel too old) caught by
+`select_backend()`, which moves on to `AFPacketBackend`.
+
 ## Building
 
 ```
