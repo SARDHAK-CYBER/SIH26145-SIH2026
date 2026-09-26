@@ -73,7 +73,18 @@ def interfaces(include_down: bool = True, include_loopback: bool = False):
 
 @router.get("/capabilities")
 def caps():
-    return capabilities()
+    c = capabilities()
+    try:
+        import ctypes
+        c["elevated"] = bool(ctypes.windll.shell32.IsUserAnAdmin()) if os.name == "nt" else os.geteuid() == 0
+    except Exception:
+        c["elevated"] = None
+    try:
+        from src.capture.live_agent import NATIVE_CAPTURE_AVAILABLE
+        c["native_engine"] = NATIVE_CAPTURE_AVAILABLE
+    except Exception:
+        c["native_engine"] = False
+    return c
 
 
 @router.post("/start")
@@ -112,6 +123,19 @@ def _allowed_replay_path(path: str) -> Path:
         raise HTTPException(403, "replay files must live under the working directory, the home directory or "
                                  "STEALTHTAP_REPLAY_DIRS")
     return p
+
+
+@router.get("/replay-files")
+def replay_files():
+    """Classic .pcap files the replay endpoint may read: samples/, the extra dirs, and (if set) uploads."""
+    roots = [Path("samples").resolve()]
+    roots += [Path(x).resolve() for x in os.environ.get("STEALTHTAP_REPLAY_DIRS", "").split(os.pathsep) if x]
+    out = []
+    for r in roots:
+        if r.is_dir():
+            for f in sorted(r.glob("*.pcap")):
+                out.append({"path": str(f), "name": f.name, "mb": round(f.stat().st_size / 1e6, 1)})
+    return out
 
 
 @router.post("/replay")

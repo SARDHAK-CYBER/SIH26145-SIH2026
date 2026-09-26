@@ -98,7 +98,7 @@ impl Iterator for PacketIter {
     }
 }
 
-fn live_conn_to_dict(py: Python<'_>, r: &live::LiveConnRecord) -> PyResult<PyObject> {
+pub(crate) fn live_conn_to_dict(py: Python<'_>, r: &live::LiveConnRecord) -> PyResult<PyObject> {
     let d = PyDict::new_bound(py);
     d.set_item("uid", &r.uid)?;
     d.set_item("ts", r.ts)?;

@@ -2,11 +2,10 @@ import { useCallback, useRef, useState } from 'react';
 
 interface Props {
   onAnalyze: (file: File) => void;
-  onLoadSample: () => void;
   isAnalyzing: boolean;
 }
 
-export function UploadPanel({ onAnalyze, onLoadSample, isAnalyzing }: Props) {
+export function UploadPanel({ onAnalyze, isAnalyzing }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -17,34 +16,6 @@ export function UploadPanel({ onAnalyze, onLoadSample, isAnalyzing }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* 1-Click Simulated Attack Banner */}
-      <div className="glass" style={{
-        padding: 22,
-        background: 'linear-gradient(135deg, rgba(0, 229, 255, 0.08), rgba(139, 92, 246, 0.08))',
-        border: '1px solid rgba(0, 229, 255, 0.3)',
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <h3 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 4px', color: 'var(--accent-cyan)' }}>
-              1-Click Ground Truth Simulated Attack Capture
-            </h3>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-              Instantly load simulated attack traffic exercising all 13 engines (DDoS, C2, DGA, JA4, Recon, Exfil, Modbus/DNP3, YARA) and ONNX ML models.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={isAnalyzing}
-            onClick={onLoadSample}
-            style={{ padding: '10px 22px', fontSize: 13 }}
-          >
-            {isAnalyzing ? 'Processing Pipeline…' : 'Load Simulated Attack PCAP'}
-          </button>
-        </div>
-      </div>
-
       {/* Main Drag-and-Drop Dropzone */}
       <div className="glass" style={{ padding: 0 }}>
         <div

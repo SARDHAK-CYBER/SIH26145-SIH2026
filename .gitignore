@@ -58,3 +58,6 @@ eval_results*/
 
 # --- Desktop-app dashboard build output (regenerated: see native/README.md-adjacent build step) ---
 build/
+
+# uploaded-capture store for the packet inspector (runtime data)
+data/

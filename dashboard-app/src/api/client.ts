@@ -5,12 +5,19 @@ import type {
   CaptureInterface,
   CaptureStatus,
   Alert,
+  SeriesPoint,
+  HostRow,
+  ProtoRow,
+  FlowRow,
+  AlertSummary,
+  PacketRow,
+  PacketDetail,
 } from '../types/alert';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
 // Live capture can run as its own host-side service (see
 // `python -m src.capture.live_agent serve`). Defaults to the main API.
-export const LIVE_BASE = import.meta.env.VITE_LIVE_API_BASE ?? API_BASE;
+export const LIVE_BASE = import.meta.env.VITE_LIVE_API_BASE ?? 'http://localhost:8100';
 
 export class ApiError extends Error {}
 
@@ -30,10 +37,32 @@ export async function analyzePcap(file: File): Promise<AnalysisResponse> {
   return j<AnalysisResponse>(resp, 'Analysis failed');
 }
 
-export async function fetchSampleAnalysis(): Promise<AnalysisResponse> {
-  const resp = await fetch(`${API_BASE}/api/sample/analysis`);
-  return j<AnalysisResponse>(resp, 'Could not load sample analysis');
+// Large captures: submit, then poll (the API answers 202 immediately and keeps serving).
+export async function analyzePcapJob(file: File, onProgress?: (elapsedS: number) => void): Promise<AnalysisResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const sub = await fetch(`${API_BASE}/analyze/pcap/async`, { method: 'POST', body: formData });
+  const { job_id } = await j<{ job_id: string }>(sub, 'Could not submit the capture');
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const resp = await fetch(`${API_BASE}/analyze/jobs/${job_id}`);
+    const body = await resp.json().catch(() => ({}));
+    if (body.status === 'done') return body.result as AnalysisResponse;
+    if (body.status === 'error' || !resp.ok) throw new ApiError(body.error ?? body.detail ?? 'Analysis failed');
+    onProgress?.(body.elapsed_s ?? 0);
+  }
 }
+
+// ── Packet inspector over an uploaded capture ──────────────────────────
+export const pcapInspector = {
+  page: (analysisId: string, start: number, limit: number, filter: string) =>
+    fetch(`${API_BASE}/analyze/${analysisId}/packets?start=${start}&limit=${limit}&filter=${encodeURIComponent(filter)}`)
+      .then((r) => j<{ total: number; next: number; rows: PacketRow[]; first_ts: number; last_ts: number }>(r, 'packet list failed')),
+  detail: (analysisId: string, n: number) =>
+    fetch(`${API_BASE}/analyze/${analysisId}/packet/${n}`).then((r) => j<PacketDetail>(r, 'packet detail failed')),
+  exportUrl: (analysisId: string, filter: string) =>
+    `${API_BASE}/analyze/${analysisId}/export.pcap?filter=${encodeURIComponent(filter)}`,
+};
 
 // ── Pipeline & model introspection ─────────────────────────────────────
 export async function fetchPipelineStatus(): Promise<PipelineStatus> {
@@ -131,6 +160,27 @@ export const live = {
       }),
     }).then((r) => j<CaptureStatus>(r, 'could not start capture')),
   stop: () => fetch(`${LIVE_BASE}/capture/stop`, { method: 'POST' }).then((r) => j<CaptureStatus>(r, 'stop failed')),
+  replay: (path: string, loops: number, speed: number) =>
+    fetch(`${LIVE_BASE}/capture/replay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, loops, speed }),
+    }).then((r) => j<CaptureStatus>(r, 'could not start replay')),
+  series: (seconds = 300) =>
+    fetch(`${LIVE_BASE}/capture/series?seconds=${seconds}`).then((r) => (r.ok ? (r.json() as Promise<SeriesPoint[]>) : [])),
+  summary: () =>
+    fetch(`${LIVE_BASE}/capture/summary`).then((r) => (r.ok ? (r.json() as Promise<AlertSummary>) : { alerts_by_class: {}, alerts_by_severity: {} })),
+  hosts: (limit = 500) =>
+    fetch(`${LIVE_BASE}/capture/hosts?limit=${limit}`).then((r) => (r.ok ? (r.json() as Promise<HostRow[]>) : [])),
+  protocols: () =>
+    fetch(`${LIVE_BASE}/capture/protocols`).then((r) => (r.ok ? (r.json() as Promise<ProtoRow[]>) : [])),
+  flows: (n = 60) =>
+    fetch(`${LIVE_BASE}/capture/flows?n=${n}`).then((r) => (r.ok ? (r.json() as Promise<FlowRow[]>) : [])),
+  packets: (after: number, limit: number, filter: string) =>
+    fetch(`${LIVE_BASE}/capture/packets?after=${after}&limit=${limit}&filter=${encodeURIComponent(filter)}`)
+      .then((r) => j<PacketRow[]>(r, 'packet list failed')),
+  packet: (id: number) => fetch(`${LIVE_BASE}/capture/packet/${id}`).then((r) => j<PacketDetail>(r, 'packet detail failed')),
+  exportUrl: (filter: string) => `${LIVE_BASE}/capture/export.pcap?filter=${encodeURIComponent(filter)}`,
   streamUrl: () => `${LIVE_BASE}/capture/stream`,
 };
 

@@ -30,7 +30,7 @@ use pyo3::types::{PyDict, PyList};
 
 use crate::inventory::{mac_str, PROTO_NAMES};
 use crate::ja4::ja4_and_sni;
-use crate::live::{now_unix, Immediate, LiveFlowAssembler};
+use crate::live::{now_unix, Immediate, LiveConnRecord, LiveFlowAssembler};
 use crate::parse::{parse_dns_query, parse_ip_header, parse_l4};
 use crate::pcap::PcapReader;
 
@@ -364,13 +364,17 @@ fn line_of(id: u64, s: &Summary) -> String {
     format!("{} {} {} {} {} {} {}", id, s.proto, s.src, s.dst, s.sport, s.dport, s.info).to_ascii_lowercase()
 }
 
+/// What the capture thread hands to Python: a protocol record seen on the wire, or a flow
+/// that ended (only produced at the end of each replay loop, so loops don't merge into one flow).
+enum Item { Imm(Immediate), Conn(LiveConnRecord) }
+
 // ------------------------------------------------------------------- shared state
 struct Shared {
     stop: AtomicBool,
     running: AtomicBool,
     finished: AtomicBool,
     asm: Mutex<LiveFlowAssembler>,
-    out: Mutex<VecDeque<(f64, Immediate)>>,
+    out: Mutex<VecDeque<(f64, Item)>>,
     out_cv: Condvar,
     out_cap: usize,
     ring: Mutex<PacketRing>,
@@ -410,7 +414,7 @@ impl Batch {
 fn flush_batch(sh: &Shared, b: &mut Batch) {
     if b.meta.is_empty() { return; }
     let arr = now_unix();
-    let mut recs: Vec<(f64, Immediate)> = Vec::new();
+    let mut recs: Vec<(f64, Item)> = Vec::new();
     let mut bytes = 0u64;
     let mut last_ts = 0f64;
     {
@@ -424,7 +428,7 @@ fn flush_batch(sh: &Shared, b: &mut Batch) {
                 let ip = format!("{}.{}.{}.{}", frame[28], frame[29], frame[30], frame[31]);
                 asm.inv.observe_arp(&ip, m, ts, n as u64);
             }
-            for r in asm.process(ts, frame) { recs.push((arr, r)); }
+            for r in asm.process(ts, frame) { recs.push((arr, Item::Imm(r))); }
         }
     }
     {
@@ -500,14 +504,18 @@ fn run_file(sh: Arc<Shared>, path: String, loops: u64, speed: f64) {
     let mut done = 0u64;
     let wall0 = Instant::now();
     let mut first_ts: Option<f64> = None;
+    let mut rd = match PcapReader::open(&path) {
+        Ok(r) => r,
+        Err(e) => { set_err(&sh, format!("{path}: {e}")); sh.finished.store(true, Ordering::SeqCst); sh.running.store(false, Ordering::SeqCst); return; }
+    };
+    let lt = rd.linktype as i32;
+    if !linktype_supported(lt) {
+        set_err(&sh, format!("{path}: unsupported linktype {lt}"));
+        sh.finished.store(true, Ordering::SeqCst); sh.running.store(false, Ordering::SeqCst);
+        return;
+    }
+    sh.linktype.store(lt as u64, Ordering::Relaxed);
     'outer: loop {
-        let mut rd = match PcapReader::open(&path) {
-            Ok(r) => r,
-            Err(e) => { set_err(&sh, format!("{path}: {e}")); break; }
-        };
-        let lt = rd.linktype as i32;
-        if !linktype_supported(lt) { set_err(&sh, format!("{path}: unsupported linktype {lt}")); break; }
-        sh.linktype.store(lt as u64, Ordering::Relaxed);
         let mut loop_first: Option<f64> = None;
         let mut loop_last = 0f64;
         loop {
@@ -538,7 +546,19 @@ fn run_file(sh: Arc<Shared>, path: String, loops: u64, speed: f64) {
         sh.loops_done.store(done, Ordering::Relaxed);
         if loops != 0 && done >= loops { break; }
         // next pass continues in "time" right after this one so flows/windows keep advancing
-        span_offset += (loop_last - loop_first.unwrap_or(loop_last)) + 1.0;
+        // Idle-timeout gap: the next pass starts >= idle_timeout after this one ended, and the
+        // flows still open are expired right now, so consecutive loops are separate flows
+        // (not one flow that never ends and eventually looks like a slow-loris).
+        span_offset += (loop_last - loop_first.unwrap_or(loop_last)) + 61.0;
+        {
+            let ended = { sh.asm.lock().unwrap().expire(f64::MAX / 4.0)   /* far-future clock: everything still open has ended */ };
+            if !ended.is_empty() {
+                let mut out = sh.out.lock().unwrap();
+                for r in ended { if out.len() >= sh.out_cap { sh.rec_dropped.fetch_add(1, Ordering::Relaxed); continue; } out.push_back((now_unix(), Item::Conn(r))); }
+                sh.out_cv.notify_all();
+            }
+        }
+        if rd.rewind().is_err() { set_err(&sh, format!("{path}: cannot rewind")); break; }
     }
     flush_batch(&sh, &mut batch);
     sh.finished.store(true, Ordering::SeqCst);
@@ -634,7 +654,7 @@ impl NativeCapture {
     #[pyo3(signature = (timeout_ms=100, max_records=5000))]
     fn poll(&self, py: Python<'_>, timeout_ms: u64, max_records: usize) -> PyResult<PyObject> {
         let sh = self.sh.clone();
-        let batch: Vec<(f64, Immediate)> = py.allow_threads(|| {
+        let batch: Vec<(f64, Item)> = py.allow_threads(|| {
             let mut out = sh.out.lock().unwrap();
             if out.is_empty() && timeout_ms > 0 {
                 out = sh.out_cv.wait_timeout(out, Duration::from_millis(timeout_ms)).unwrap().0;
@@ -643,10 +663,18 @@ impl NativeCapture {
             out.drain(..n).collect()
         });
         let list = PyList::empty_bound(py);
-        for (arr, rec) in &batch {
-            let (lt, d) = crate::immediate_to_dict(py, rec)?;
-            d.set_item("_arr", *arr)?;
-            list.append((lt, d))?;
+        for (arr, item) in &batch {
+            match item {
+                Item::Imm(rec) => {
+                    let (lt, d) = crate::immediate_to_dict(py, rec)?;
+                    d.set_item("_arr", *arr)?;
+                    list.append((lt, d))?;
+                }
+                Item::Conn(rec) => {
+                    let d = crate::live_conn_to_dict(py, rec)?;
+                    list.append(("conn", d))?;
+                }
+            }
         }
         Ok(list.into())
     }

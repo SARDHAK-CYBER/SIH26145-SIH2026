@@ -5,7 +5,7 @@
 //! project's real-capture eval set except one is classic pcap.
 
 use std::fs::File;
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
 
 pub struct PcapReader {
     reader: BufReader<File>,
@@ -38,6 +38,14 @@ impl PcapReader {
         };
         let linktype = rd_u32(&hdr[20..24]);
         Ok(Self { reader, little_endian, nanosecond, linktype })
+    }
+
+    /// Back to the first packet without reopening the file. Reopening the same file
+    /// hundreds of times per second (soak/loop replays) made Windows real-time file
+    /// scanning throttle each open to ~150 ms -- a 7x slowdown after ~3 s.
+    pub fn rewind(&mut self) -> io::Result<()> {
+        self.reader.seek(SeekFrom::Start(24))?;
+        Ok(())
     }
 
     fn read_u32(&mut self) -> io::Result<Option<u32>> {

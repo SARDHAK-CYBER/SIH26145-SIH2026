@@ -45,7 +45,7 @@ def build_desktop_app(root: Path):
     from src.memstore import MemoryStore
 
     app = FastAPI(title="StealthTap", version="1.0.0")
-    app.add_middleware(CORSMiddleware, allow_origins=["http://127.0.0.1:8100", "http://localhost:8100"],
+    app.add_middleware(CORSMiddleware, allow_origins=["http://127.0.0.1:8100", "http://localhost:8100", "http://localhost:5173", "http://localhost:4173"],
                        allow_methods=["*"], allow_headers=["*"])
 
     @app.on_event("startup")
@@ -106,6 +106,8 @@ def main() -> None:
     args = ap.parse_args()
 
     root = resource_root()
+    from src.perf import boost_process
+    boost_process()
     os.chdir(root)                                   # samples/ etc. resolve relative to the bundle
     sys.path.insert(0, str(root))
     os.environ["STEALTHTAP_STANDALONE"] = "1"

@@ -66,6 +66,8 @@ export interface ToolCoverage {
 
 export interface AnalysisResponse {
   analysis_id: string;
+  inspectable?: boolean;
+  capture_bytes?: number;
   filename: string;
   parser_used: 'zeek' | 'scapy_fallback';
   packet_summary: PacketSummary;
@@ -134,7 +136,11 @@ export type ActiveNavTab =
   | 'ai_models'
   | 'json_studio'
   | 'upload'
+  | 'packets'
   | 'live_capture';
+
+export type LiveTab = 'overview' | 'alerts' | 'hosts' | 'flows' | 'packets' | 'capture';
+export type Workspace = 'pcap' | 'live';
 
 // ── Live capture (src/api/live_capture.py) ──────────────────────────────
 export interface CaptureInterface {
@@ -190,5 +196,60 @@ export interface CaptureStatus {
   throughput?: CaptureThroughput;
   detection_latency?: CaptureLatency;
   assembler?: Record<string, number>;
+  finished?: boolean;
+  native?: boolean;
+  source?: 'interface' | 'pcap-replay' | 'python';
+  capture?: CaptureEngineStats | null;
+  capture_error?: string | null;
+  num_workers?: number;
+}
+
+export interface CaptureEngineStats {
+  packets: number; recv: number; bytes: number; non_ip: number; flows_seen: number;
+  active_flows: number; hosts: number; hosts_dropped: number;
+  dns: number; ssl: number; http: number; modbus: number; dnp3: number; conn: number;
+  kernel_recv: number; kernel_drop: number; if_drop: number;
+  records_dropped: number; pending_records: number; unsupported_frames: number;
+  ring_first_id: number; ring_last_id: number; ring_len: number;
+  last_ts: number; loops_done: number; running: boolean; finished: boolean;
+}
+
+// ── Live dashboard data ─────────────────────────────────────────────────
+export interface SeriesPoint {
+  t: number; pps: number; mbps: number; flows: number; pending: number;
+  kdrop: number; alerts: number; udrop: number;
+}
+
+export interface HostRow {
+  ip: string; mac: string | null; first: number; last: number;
+  tx_pkts: number; rx_pkts: number; tx_bytes: number; rx_bytes: number;
+  tcp: number; udp: number; other: number; via_arp: boolean;
+  local: boolean; gateway_for_remote: boolean;
+}
+
+export interface ProtoRow { name: string; packets: number; bytes: number }
+
+export interface FlowRow {
+  uid: string; ts: number; 'id.orig_h': string; 'id.orig_p': number;
+  'id.resp_h': string; 'id.resp_p': number; proto: string; duration: number;
+  orig_bytes: number; resp_bytes: number; orig_pkts: number; resp_pkts: number;
+}
+
+export interface AlertSummary {
+  alerts_by_class: Record<string, number>;
+  alerts_by_severity: Record<string, number>;
+}
+
+// ── Packet inspector ────────────────────────────────────────────────────
+export interface PacketRow {
+  id: number; ts: number; len: number; proto: string;
+  src: string; dst: string; sport: number; dport: number; info: string;
+}
+
+export interface PacketLayerField { name: string; value: string }
+export interface PacketLayer { name: string; start: number; end: number; fields: PacketLayerField[] }
+export interface PacketDetail {
+  id: number; ts: number; wire_len: number; captured: number; truncated?: boolean;
+  layers: PacketLayer[]; hex: Array<{ off: number; hex: string; ascii: string }>; error?: string;
 }
 

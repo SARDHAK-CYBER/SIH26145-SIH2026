@@ -63,11 +63,17 @@ def _session_options() -> Optional["ort.SessionOptions"]:
     inside a pool worker (see src/capture/scoring.py); unset in the
     default single-process case, so behaviour there is unchanged."""
     n = os.environ.get("STEALTHTAP_ONNX_INTRA_THREADS")
-    if not n:
-        return None
     opts = ort.SessionOptions()
+    # By default onnxruntime sizes a spinning thread pool to ALL cores per session. These are
+    # tiny tree ensembles (~2 us/row): the pool never helps and its idle spin-wait burned
+    # ~6 cores of CPU in the live pipeline (measured: 750% CPU at 70k pps, ~1 core of real
+    # work). Small pool, no spinning.
+    if not n:
+        n = str(min(2, os.cpu_count() or 2))
     opts.intra_op_num_threads = max(1, int(n))
     opts.inter_op_num_threads = 1
+    opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    opts.add_session_config_entry("session.inter_op.allow_spinning", "0")
     return opts
 FAMILIES = ["flow", "dns", "tls", "modbus"]
 

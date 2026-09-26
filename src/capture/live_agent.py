@@ -305,6 +305,8 @@ class LiveAgent:
     def start(self, backend_factory=None) -> None:
         if self._running.is_set():
             return
+        from src.perf import boost_process
+        boost_process()
         if backend_factory is None and NATIVE_CAPTURE_AVAILABLE and not _FORCE_PYTHON_CAPTURE:
             try:
                 self._start_native()
@@ -367,6 +369,8 @@ class LiveAgent:
         speed=0: as fast as possible, 1.0: original timing). Native engine only."""
         if not NATIVE_CAPTURE_AVAILABLE:
             raise CaptureError("pcap replay needs the native module (stealthtap_core) -- build it with maturin")
+        from src.perf import boost_process
+        boost_process()
         self._start_native(pcap=path, loops=loops, speed=speed)
 
     def replay_pcap(self, path: str, realtime: bool = False, loops: int = 1, speed: Optional[float] = None) -> None:
@@ -440,7 +444,19 @@ class LiveAgent:
     def _run_loop(self) -> None:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._consume_native() if self._ncap is not None else self._consume())
+        coro = self._consume_native() if self._ncap is not None else self._consume()
+        prof_path = os.environ.get("STEALTHTAP_PROFILE")
+        if prof_path:            # profile the consumer thread (cProfile only sees its own thread)
+            import cProfile
+            pr = cProfile.Profile()
+            pr.enable()
+            try:
+                self._loop.run_until_complete(coro)
+            finally:
+                pr.disable()
+                pr.dump_stats(prof_path)
+            return
+        self._loop.run_until_complete(coro)
 
     _DRAIN_BATCH = 512   # packets pulled per loop pass before checking the cadence
 
@@ -492,7 +508,19 @@ class LiveAgent:
         for _lt, rec in self._assembler.snapshot():
             await self._dispatch_conn("conn_snapshot", rec, _DISPATCH_CONN_SNAPSHOT)
         expire_kw = {} if expire_now is None else {"now": expire_now}
-        expired = [r for lt, r in self._assembler.expire(**expire_kw) if lt == "conn"]
+        await self._handle_expired([r for lt, r in self._assembler.expire(**expire_kw) if lt == "conn"])
+        # pool mode: each worker batches its own shard's ML call and
+        # observes its own shard's baseline, draining every loop
+        # iteration -- no extra drain needed here.
+        if self._ncap is not None:
+            st = self._ncap.stats()
+            self._rate_view = self._rate.sample(st["recv"], st["bytes"], {"drop": st["kernel_drop"]})
+        else:
+            kstats = self._backend.kernel_stats() if hasattr(self._backend, "kernel_stats") else None
+            self._rate_view = self._rate.sample(self._assembler.stats["packets"], self._bytes, kstats)
+
+    async def _handle_expired(self, expired: list) -> None:
+        """Flows that ended: final conn-scoring, batched ML, live baseline."""
         for rec in expired:
             await self._dispatch_conn("conn_expire", rec, _DISPATCH_CONN_EXPIRE)
         if self._scoring is not None:
@@ -503,15 +531,6 @@ class LiveAgent:
                 b_alert = self._scoring.observe_baseline(rec)
                 if b_alert is not None:
                     self._emit(b_alert, None)
-        # pool mode: each worker batches its own shard's ML call and
-        # observes its own shard's baseline, draining every loop
-        # iteration -- no extra drain needed here.
-        if self._ncap is not None:
-            st = self._ncap.stats()
-            self._rate_view = self._rate.sample(st["recv"], st["bytes"], {"drop": st["kernel_drop"]})
-        else:
-            kstats = self._backend.kernel_stats() if hasattr(self._backend, "kernel_stats") else None
-            self._rate_view = self._rate.sample(self._assembler.stats["packets"], self._bytes, kstats)
 
     def _sample_series(self, force: bool = False) -> None:
         """One telemetry point per second for the live dashboard's charts."""
@@ -544,10 +563,16 @@ class LiveAgent:
                 recs = await loop.run_in_executor(None, cap.poll, 100, 4000)
             if recs:
                 mono, wall = time.monotonic(), time.time()
+                ended = []
                 for log_type, rec in recs:
+                    if log_type == "conn":          # a replayed loop's flows ended
+                        ended.append(rec)
+                        continue
                     arr = rec.pop("_arr", None)
                     t_arr = mono - (wall - arr) if arr else None
                     await self._dispatch_immediate(log_type, rec, t_arr)
+                if ended:
+                    await self._handle_expired(ended)
             await self._flush_ml_immediate()
             if self._pool is not None:
                 self._pool.flush()
@@ -564,9 +589,15 @@ class LiveAgent:
             recs = cap.poll(0, 4000)
             if not recs:
                 break
+            ended = []
             for log_type, rec in recs:
+                if log_type == "conn":
+                    ended.append(rec)
+                    continue
                 rec.pop("_arr", None)
                 await self._dispatch_immediate(log_type, rec, None)
+            if ended:
+                await self._handle_expired(ended)
         for _lt, rec in self._assembler.flush():
             await self._dispatch_conn("conn_flush", rec, _DISPATCH_CONN_EXPIRE)
         await self._flush_ml_immediate()

@@ -473,3 +473,39 @@ button:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important;
 .json-number { color: var(--code-number); }
 .json-boolean { color: var(--code-bool); }
 .json-null { color: var(--code-null); font-style: italic; }
+
+/* ───────────── workspace switch, live dashboard, packet inspector ───────────── */
+.ws-switch { display: grid; gap: 4px; margin: 4px 14px 10px; padding: 4px; border-radius: var(--radius-md); background: var(--bg-inset); border: 1px solid var(--glass-border-subtle); }
+.ws-switch button { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: left; }
+.ws-switch button:hover { color: var(--text); background: var(--bg-surface-hover); }
+.ws-switch button.on { background: var(--nav-active-bg); color: var(--nav-active-fg); }
+.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); display: inline-block; }
+.live-grid-2 { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 18px; }
+.live-grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+@media (max-width: 1000px) { .live-grid-2 { grid-template-columns: 1fr; } }
+.panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.panel-title .mono { text-transform: none; letter-spacing: 0; color: var(--text-dim); font-size: 11px; }
+.panel-title .link { text-transform: none; letter-spacing: 0; font-size: 11px; color: var(--accent-cyan); cursor: pointer; }
+.bar { height: 6px; border-radius: 3px; background: var(--bg-inset); overflow: hidden; }
+.bar > div { height: 100%; border-radius: 3px; }
+.empty { font-size: 12.5px; color: var(--text-dim); padding: 6px 0; }
+.tag { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 600; background: var(--bg-inset); color: var(--text-muted); border: 1px solid var(--glass-border-subtle); }
+.tag-local { color: var(--accent-emerald); border-color: color-mix(in srgb, var(--accent-emerald) 40%, transparent); }
+.tag-remote { color: var(--accent-blue); border-color: color-mix(in srgb, var(--accent-blue) 40%, transparent); }
+.tag-gw { color: var(--accent-amber); border-color: color-mix(in srgb, var(--accent-amber) 45%, transparent); }
+.alert-row { display: grid; grid-template-columns: 62px 1fr auto; gap: 10px; align-items: center; padding: 9px 16px; border-top: 1px solid var(--glass-border-subtle); cursor: pointer; }
+.alert-row:hover { background: var(--bg-surface-hover); }
+.live-pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px; font-size: 11.5px; background: var(--bg-inset); border: 1px solid var(--glass-border-subtle); color: var(--text); }
+.live-pill.warn { color: var(--sev-critical); border-color: color-mix(in srgb, var(--sev-critical) 45%, transparent); }
+.pk-input { padding: 8px 12px; font-size: 12.5px; border-radius: var(--radius-sm); background: var(--bg-inset); border: 1px solid var(--glass-border); color: var(--text); outline: none; flex: 1 1 280px; min-width: 200px; }
+.pk-input:focus { border-color: var(--accent-cyan); }
+.pk-list { max-height: 44vh; overflow: auto; }
+.pk-table thead th { position: sticky; top: 0; background: var(--bg-surface-raised); z-index: 1; }
+.pk-table tbody td { padding: 5px 12px; font-size: 11.5px; white-space: nowrap; }
+.pk-table td.pk-info { white-space: normal; overflow: hidden; text-overflow: ellipsis; max-width: 520px; }
+.pk-table tr.pk-sel { background: color-mix(in srgb, var(--accent-cyan) 22%, transparent) !important; }
+.pk-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 1100px) { .pk-detail { grid-template-columns: 1fr; } }
+.pk-layer { cursor: pointer; font-size: 12.5px; font-weight: 700; padding: 3px 6px; border-radius: 4px; }
+.pk-layer.on { background: color-mix(in srgb, var(--accent-cyan) 20%, transparent); }
+.pk-hi { background: color-mix(in srgb, var(--accent-cyan) 38%, transparent); border-radius: 2px; }
