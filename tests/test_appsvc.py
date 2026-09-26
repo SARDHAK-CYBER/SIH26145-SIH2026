@@ -138,6 +138,13 @@ def test_smtp_enumeration_and_legitimate_mail():
     # a bulk mailer: 30 recipients, all accepted -> no refusals -> not enumeration
     bulk = [(f"RCPT TO:<u{i}@b.c>\r\n".encode(), 40000, 25) for i in range(30)]
     assert _score(_events(bulk)) == []
+    # a mailing list with ~10% stale addresses: 40 recipients, 4 refused -> not enumeration
+    listy = []
+    for i in range(40):
+        listy.append((f"RCPT TO:<u{i}@b.c>\r\n".encode(), 40000, 25))
+        if i % 10 == 0:
+            listy.append((b"550 5.1.1 unknown\r\n", 25, 40000))
+    assert _score(_events(listy)) == []
     # harvesting: 20 recipients with refusals
     harvest = []
     for i in range(20):

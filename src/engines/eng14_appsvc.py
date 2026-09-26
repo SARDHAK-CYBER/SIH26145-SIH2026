@@ -9,7 +9,8 @@ Python twin src/capture/appsvc.py; this engine only interprets their events.
 Rules (each is a property of the PROTOCOL, not of a particular capture):
   distcc            a distcc job whose argv[0] is not a compiler (distcc exists to run compilers; `sh -c ...` is command execution)
   smtp enumeration  >= 3 distinct VRFY/EXPN arguments from one client to one server in 5 min (legitimate MTAs do not use VRFY),
-                    or >= 15 distinct RCPT TO recipients with >= 3 "550" refusals in 5 min (address harvesting)
+                    or >= 15 distinct RCPT TO recipients of which >= 30% (and >= 3) are refused with "55x" in 5 min (address harvesting;
+                    a bulk mailer whose list has a few stale addresses stays quiet)
   default creds     HTTP Basic credentials equal to a vendor default (tomcat:tomcat, admin:admin, ...) sent in cleartext
   http auth guessing >= 5 Basic-auth requests AND >= 5 401 answers between one client and one server within 60 s
   web deployment    POST/PUT to a code-deployment endpoint (Tomcat manager WAR upload, Jenkins script console); HIGH when the same
@@ -31,6 +32,7 @@ GUESS_WINDOW_S = 60.0
 VRFY_DISTINCT = 3
 RCPT_DISTINCT = 15
 RCPT_REJECTS = 3
+RCPT_REJECT_RATIO = 0.3   # harvesting is mostly refusals (the real capture: 81%); a mailing list with stale addresses is a few percent
 GUESS_MIN = 5
 MAX_KEYS = 50_000
 REALERT_S = 600.0        # the same finding for the same pair is reported once per 10 minutes
@@ -121,7 +123,8 @@ class AppServiceAttackDetector(Detector):
             why = None
             if len(st["vrfy"]) >= VRFY_DISTINCT:
                 why = f"{len(st['vrfy'])} distinct VRFY/EXPN account probes"
-            elif len(st["rcpt"]) >= RCPT_DISTINCT and len(st["rej"]) >= RCPT_REJECTS:
+            elif (len(st["rcpt"]) >= RCPT_DISTINCT and len(st["rej"]) >= RCPT_REJECTS
+                  and len(st["rej"]) >= RCPT_REJECT_RATIO * len(st["rcpt"])):
                 why = f"{len(st['rcpt'])} distinct RCPT recipients with {len(st['rej'])} refusals"
             if why and self._once("smtp_enum", client, server, ts):
                 return self._alert(flow, severity="MEDIUM", conf=85.0, cls="RECONNAISSANCE", tactic="Discovery", tid="T1087",
