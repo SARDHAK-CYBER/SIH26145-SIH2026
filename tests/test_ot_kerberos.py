@@ -209,3 +209,90 @@ def test_real_cip_stop_plc_and_s7_stop_are_detected():
         got = {str(x["evidence"].get("function_code") or x["evidence"].get("cip_service_code")) for x in a.recent_alerts(20)}
         a.stop()
         assert expect in got, (name, got)
+
+
+# ---- real-derived / independently-encoded checks for events no public capture contains -------------------------------
+def _write_pcap(tmp_path, frames, name="x.pcap"):
+    from src.api.packet_detail import to_pcap_bytes
+    f = tmp_path / name
+    f.write_bytes(to_pcap_bytes([(1000.0 + i, fr) for i, fr in enumerate(frames)]))
+    return f
+
+
+def test_dcp_factory_reset_decoded_from_scapy_independent_encoder(tmp_path):
+    """PROFINET-DCP frames built by scapy's own pnio/pnio_dcp encoder (independent of our parser), Set with the
+    Control option: reset-to-factory must be CRITICAL end to end (Rust replay + Python twin)."""
+    pytest.importorskip("scapy.contrib.pnio_dcp")
+    from scapy.contrib.pnio import ProfinetIO
+    from scapy.contrib.pnio_dcp import ProfinetDCP
+    from scapy.layers.l2 import Ether
+    from src.capture.ot import parse_profinet_dcp
+
+    def frame(**kw):
+        return bytes(Ether(src="02:00:00:00:00:01", dst="01:0e:cf:00:00:00", type=0x8892) / ProfinetIO(frameID=0xFEFD)
+                     / ProfinetDCP(service_id=4, service_type=0, xid=1, reserved=0, **kw))
+    cases = {"CONTROL,FACTORY_RESET": dict(option=5, sub_option=6, dcp_block_length=4, block_qualifier=0),
+             "CONTROL": dict(option=5, sub_option=3, dcp_block_length=4, block_qualifier=0)}
+    frames = [frame(**kw) for kw in cases.values()]
+    assert [parse_profinet_dcp(fr)[1] for fr in frames] == list(cases)
+    rs = [r["detail"] for _t, r in _native_records(_write_pcap(tmp_path, frames), {"profinet"})]
+    assert rs == list(cases)
+    import asyncio
+    from src.engines.eng07_ot_anomaly import OTIndustrialAnomalyDetector
+    from src.flow_mapping import map_record
+    det, loop = OTIndustrialAnomalyDetector(), asyncio.new_event_loop()
+    sev = []
+    for blocks in cases:
+        f = map_record({"uid": "P", "ts": 1.0, "id.orig_h": "02:00:00:00:00:01", "id.resp_h": "01:0e:cf:00:00:00", "id.orig_p": 0,
+                        "id.resp_p": 0, "function": "DCP_SET", "detail": blocks, "code": 0x204}, "profinet")
+        sev.append(loop.run_until_complete(det.score(f)).severity)
+    loop.close()
+    assert sev == ["CRITICAL", "HIGH"]
+
+
+def _mutate_first(path, dport, proto, patch):
+    """Take a REAL captured request and change only the service byte."""
+    from scapy.utils import PcapReader
+    from scapy.layers.inet import IP, TCP, UDP
+    for pkt in PcapReader(str(path)):
+        l4 = pkt.getlayer(TCP) if proto == "tcp" else pkt.getlayer(UDP)
+        if IP in pkt and l4 is not None and l4.dport == dport and bytes(l4.payload):
+            payload = bytearray(bytes(l4.payload))
+            if patch(payload):
+                l4.remove_payload()
+                pkt = pkt / bytes(payload)
+                del pkt[IP].len, pkt[IP].chksum, l4.chksum
+                return bytes(pkt.__class__(bytes(pkt)))
+    return None
+
+
+def test_bacnet_write_from_a_real_read_request(tmp_path):
+    f = PUB / "bacnet" / "BACnetARRAY-element-0.pcap"
+    if not f.exists():
+        pytest.skip("public sample not downloaded")
+
+    def patch(p):                                  # confirmed-request ReadProperty (12) -> WriteProperty (15)
+        if p[:1] == b"\x81" and p[4] == 1 and (p[6] >> 4) == 0 and p[9] == 12:
+            p[9] = 15
+            return True
+    fr = _mutate_first(f, 47808, "udp", patch)
+    if fr is None:
+        pytest.skip("no simple confirmed ReadProperty in this capture")
+    got = [r["function"] for _t, r in _native_records(_write_pcap(tmp_path, [fr]), {"bacnet"})]
+    assert got == ["WRITE_PROPERTY"]
+
+
+def test_opcua_write_from_a_real_read_request(tmp_path):
+    f = PUB / "opcua" / "opcua-signed.pcap"
+    if not f.exists():
+        pytest.skip("public sample not downloaded")
+
+    def patch(p):                                  # ReadRequest TypeId 631 -> WriteRequest 673 (four-byte NodeId 0x01 ns id)
+        if p[:3] == b"MSG" and len(p) > 28 and p[24] == 0x01 and int.from_bytes(p[26:28], "little") == 631:
+            p[26:28] = (673).to_bytes(2, "little")
+            return True
+    fr = _mutate_first(f, 4840, "tcp", patch)
+    if fr is None:
+        pytest.skip("no plain ReadRequest in this capture")
+    got = [r["function"] for _t, r in _native_records(_write_pcap(tmp_path, [fr]), {"opcua"})]
+    assert got == ["WRITE"]

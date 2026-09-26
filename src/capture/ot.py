@@ -215,9 +215,12 @@ def parse_profinet_dcp(frame: bytes) -> Optional[tuple[str, str, int]]:
     if ty & 1 or name is None:
         return None
     dlen = int.from_bytes(d[10:12], "big")
-    blocks, factory, p, end = [], False, 12, min(12 + dlen, len(d))
+    # a zero/oversized DCPDataLength (seen from other encoders) falls back to the bytes actually present; padding (option 0) ends the list
+    blocks, factory, p, end = [], False, 12, (len(d) if dlen == 0 or 12 + dlen > len(d) else 12 + dlen)
     while p + 4 <= end:
         opt, sub, bl = d[p], d[p + 1], int.from_bytes(d[p + 2:p + 4], "big")
+        if opt == 0:
+            break
         if opt == 1:
             blocks.append("IP")
         elif opt == 2:

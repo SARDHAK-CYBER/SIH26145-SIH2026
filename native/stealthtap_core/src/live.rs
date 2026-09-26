@@ -370,9 +370,11 @@ fn parse_profinet_dcp(frame: &[u8]) -> Option<(String, String, u32)> {
     let mut blocks: Vec<&str> = Vec::new();
     let mut factory = false;
     let mut p = 12usize;
-    let end = (12 + dlen).min(d.len());
+    // a zero/oversized DCPDataLength (seen from other encoders) falls back to the bytes actually present; padding (option 0) ends the list
+    let end = if dlen == 0 || 12 + dlen > d.len() { d.len() } else { 12 + dlen };
     while p + 4 <= end {
         let (opt, sub) = (d[p], d[p + 1]);
+        if opt == 0 { break; }
         let bl = u16::from_be_bytes([d[p + 2], d[p + 3]]) as usize;
         match opt { 1 => blocks.push("IP"), 2 => blocks.push("DEVICE"), 5 => { blocks.push("CONTROL"); if sub == 5 || sub == 6 { factory = true; } } _ => {} }
         p += 4 + bl + (bl & 1);                      // blocks are padded to even length
