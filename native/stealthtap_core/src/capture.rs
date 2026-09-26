@@ -20,6 +20,7 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::io::{Read, Seek, SeekFrom};
 use std::os::raw::c_long;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -29,6 +30,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use crate::inventory::{mac_str, PROTO_NAMES};
+use crate::live::Stats;
 use crate::ja4::ja4_and_sni;
 use crate::flow_engines::{hit_to_py as flow_hit_to_py, FlowEngines, Hit};
 use crate::live::{now_unix, Immediate, LiveConnRecord, LiveFlowAssembler};
@@ -365,6 +367,10 @@ fn line_of(id: u64, s: &Summary) -> String {
     format!("{} {} {} {} {} {} {}", id, s.proto, s.src, s.dst, s.sport, s.dport, s.info).to_ascii_lowercase()
 }
 
+/// A batch handed to a shard worker: the shared frame arena plus the indices (into `batch.meta`) of the
+/// packets whose flows hash to that shard.
+struct Work { batch: Arc<Batch>, idx: Vec<u32>, arr: f64 }
+
 /// What the capture thread hands to Python: a protocol record seen on the wire, or a flow
 /// that ended (only produced at the end of each replay loop, so loops don't merge into one flow).
 enum Item { Imm(Immediate), Conn(LiveConnRecord), Hit(Hit, LiveConnRecord) }
@@ -374,7 +380,9 @@ struct Shared {
     stop: AtomicBool,
     running: AtomicBool,
     finished: AtomicBool,
-    asm: Mutex<LiveFlowAssembler>,
+    asms: Vec<Mutex<LiveFlowAssembler>>,       // one assembler per shard (flow-hash partitioned)
+    txs: Mutex<Option<Vec<SyncSender<Work>>>>,  // capture thread -> shard workers (None when unsharded / stopped)
+    inflight: AtomicU64,                        // batches handed to workers and not yet processed
     out: Mutex<VecDeque<(f64, Item)>>,
     engines: Mutex<Option<FlowEngines>>,   // native flow engines (see flow_engines.rs); None = Python scores flows
     out_cv: Condvar,
@@ -413,25 +421,92 @@ impl Batch {
     fn full(&self) -> bool { self.meta.len() >= BATCH_PKTS || self.arena.len() > (1 << 20) - 70_000 }
 }
 
+/// Symmetric flow hash straight from the raw frame (no allocation): both directions of a flow land in
+/// the same shard. Non-IP frames (ARP...) go to shard 0.
+fn shard_of(f: &[u8], n: usize) -> usize {
+    if n <= 1 || f.len() < 34 { return 0; }
+    let mut et = u16::from_be_bytes([f[12], f[13]]);
+    let mut off = 14usize;
+    while (et == 0x8100 || et == 0x88a8) && f.len() >= off + 4 { et = u16::from_be_bytes([f[off + 2], f[off + 3]]); off += 4; }
+    let word = |i: usize| u32::from_be_bytes([f[i], f[i + 1], f[i + 2], f[i + 3]]);
+    let h: u32 = match et {
+        0x0800 => {
+            if f.len() < off + 20 { return 0; }
+            let ihl = ((f[off] & 0x0f) as usize) * 4;
+            let proto = f[off + 9];
+            let mut x = word(off + 12) ^ word(off + 16);
+            if (proto == 6 || proto == 17) && ihl >= 20 && f.len() >= off + ihl + 4 {
+                let sp = u16::from_be_bytes([f[off + ihl], f[off + ihl + 1]]) as u32;
+                let dp = u16::from_be_bytes([f[off + ihl + 2], f[off + ihl + 3]]) as u32;
+                x ^= (sp ^ dp).wrapping_mul(0x9E37_79B1);
+            }
+            x
+        }
+        0x86dd => {
+            if f.len() < off + 40 { return 0; }
+            let mut x = 0u32;
+            for i in 0..4 { x ^= word(off + 8 + 4 * i) ^ word(off + 24 + 4 * i); }
+            let nh = f[off + 6];
+            if (nh == 6 || nh == 17) && f.len() >= off + 44 {
+                let sp = u16::from_be_bytes([f[off + 40], f[off + 41]]) as u32;
+                let dp = u16::from_be_bytes([f[off + 42], f[off + 43]]) as u32;
+                x ^= (sp ^ dp).wrapping_mul(0x9E37_79B1);
+            }
+            x
+        }
+        _ => return 0,
+    };
+    ((h.wrapping_mul(0x85EB_CA6B) >> 7) as usize) % n
+}
+
+/// One frame through one shard's assembler (ARP bookkeeping included).
+fn process_frame(asm: &mut LiveFlowAssembler, ts: f64, frame: &[u8], arr: f64, recs: &mut Vec<(f64, Item)>) {
+    if frame.len() >= 42 && frame[12] == 0x08 && frame[13] == 0x06 {   // ARP
+        let mut m = [0u8; 6]; m.copy_from_slice(&frame[22..28]);
+        let ip = format!("{}.{}.{}.{}", frame[28], frame[29], frame[30], frame[31]);
+        asm.inv.observe_arp(&ip, m, ts, frame.len() as u64);
+    }
+    for r in asm.process(ts, frame) { recs.push((arr, Item::Imm(r))); }
+}
+
+fn push_records(sh: &Shared, recs: Vec<(f64, Item)>) {
+    if recs.is_empty() { return; }
+    let mut out = sh.out.lock().unwrap();
+    for r in recs {
+        if out.len() >= sh.out_cap { sh.rec_dropped.fetch_add(1, Ordering::Relaxed); continue; }
+        out.push_back(r);
+    }
+    sh.out_cv.notify_all();
+}
+
+fn shard_worker(sh: Arc<Shared>, shard: usize, rx: Receiver<Work>) {
+    while let Ok(w) = rx.recv() {
+        let mut recs: Vec<(f64, Item)> = Vec::new();
+        {
+            let mut asm = sh.asms[shard].lock().unwrap();
+            for &i in &w.idx {
+                let (ts, off, n, _) = w.batch.meta[i as usize];
+                process_frame(&mut asm, ts, &w.batch.arena[off..off + n], w.arr, &mut recs);
+            }
+        }
+        push_records(&sh, recs);
+        sh.inflight.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Block until every batch handed to the shard workers has been processed.
+fn wait_workers_idle(sh: &Shared) {
+    while sh.inflight.load(Ordering::SeqCst) > 0 { std::thread::sleep(Duration::from_micros(200)); }
+}
+
 fn flush_batch(sh: &Shared, b: &mut Batch) {
     if b.meta.is_empty() { return; }
     let arr = now_unix();
-    let mut recs: Vec<(f64, Item)> = Vec::new();
     let mut bytes = 0u64;
     let mut last_ts = 0f64;
-    {
-        let mut asm = sh.asm.lock().unwrap();
-        for &(ts, off, n, _wire) in &b.meta {
-            let frame = &b.arena[off..off + n];
-            bytes += n as u64;
-            if ts > last_ts { last_ts = ts; }
-            if n >= 42 && frame[12] == 0x08 && frame[13] == 0x06 {   // ARP
-                let mut m = [0u8; 6]; m.copy_from_slice(&frame[22..28]);
-                let ip = format!("{}.{}.{}.{}", frame[28], frame[29], frame[30], frame[31]);
-                asm.inv.observe_arp(&ip, m, ts, n as u64);
-            }
-            for r in asm.process(ts, frame) { recs.push((arr, Item::Imm(r))); }
-        }
+    for &(ts, _off, n, _wire) in &b.meta {
+        bytes += n as u64;
+        if ts > last_ts { last_ts = ts; }
     }
     {
         let mut ring = sh.ring.lock().unwrap();
@@ -443,16 +518,35 @@ fn flush_batch(sh: &Shared, b: &mut Batch) {
         let prev = f64::from_bits(sh.last_ts_bits.load(Ordering::Relaxed));
         if last_ts > prev { sh.last_ts_bits.store(last_ts.to_bits(), Ordering::Relaxed); }
     }
-    if !recs.is_empty() {
-        let mut out = sh.out.lock().unwrap();
-        for r in recs {
-            if out.len() >= sh.out_cap { sh.rec_dropped.fetch_add(1, Ordering::Relaxed); continue; }
-            out.push_back(r);
+
+    let n = sh.asms.len();
+    let txs = if n > 1 { sh.txs.lock().unwrap().clone() } else { None };
+    match txs {
+        None => {
+            let mut recs: Vec<(f64, Item)> = Vec::new();
+            {
+                let mut asm = sh.asms[0].lock().unwrap();
+                for &(ts, off, len, _) in &b.meta { process_frame(&mut asm, ts, &b.arena[off..off + len], arr, &mut recs); }
+            }
+            push_records(sh, recs);
+            b.arena.clear();
+            b.meta.clear();
         }
-        sh.out_cv.notify_all();
+        Some(txs) => {
+            let mut idx: Vec<Vec<u32>> = vec![Vec::new(); n];
+            for (i, &(_ts, off, len, _)) in b.meta.iter().enumerate() {
+                idx[shard_of(&b.arena[off..off + len], n)].push(i as u32);
+            }
+            let cap = b.arena.capacity();
+            let done = std::mem::replace(b, Batch { arena: Vec::with_capacity(cap), meta: Vec::with_capacity(BATCH_PKTS) });
+            let shared = Arc::new(done);
+            for (k, ix) in idx.into_iter().enumerate() {
+                if ix.is_empty() { continue; }
+                sh.inflight.fetch_add(1, Ordering::SeqCst);
+                if txs[k].send(Work { batch: shared.clone(), idx: ix, arr }).is_err() { sh.inflight.fetch_sub(1, Ordering::SeqCst); }
+            }
+        }
     }
-    b.arena.clear();
-    b.meta.clear();
 }
 
 fn set_err(sh: &Shared, m: String) { *sh.err.lock().unwrap() = Some(m); }
@@ -497,6 +591,7 @@ fn run_live(sh: Arc<Shared>, api: Arc<PcapApi>, h: Handle, linktype: i32) {
         sh.if_drop.store(st[2] as u64, Ordering::Relaxed);
     }
     unsafe { (api.close)(h.0) };
+    wait_workers_idle(&sh);
     sh.running.store(false, Ordering::SeqCst);
 }
 
@@ -596,7 +691,8 @@ fn run_file(sh: Arc<Shared>, path: String, loops: u64, speed: f64) {
         // (not one flow that never ends and eventually looks like a slow-loris).
         span_offset += (loop_last - loop_first.unwrap_or(loop_last)) + 61.0;
         {
-            let ended = { sh.asm.lock().unwrap().expire(f64::MAX / 4.0)   /* far-future clock: everything still open has ended */ };
+            wait_workers_idle(&sh);
+            let ended = sh.expire_all(f64::MAX / 4.0);   // far-future clock: everything still open has ended
             if !ended.is_empty() {
                 let items = score_ended(&sh, ended, BASELINE_SAMPLE_MAX);
                 let mut out = sh.out.lock().unwrap();
@@ -611,8 +707,66 @@ fn run_file(sh: Arc<Shared>, path: String, loops: u64, speed: f64) {
         if rd.rewind().is_err() { set_err(&sh, format!("{path}: cannot rewind")); break; }
     }
     flush_batch(&sh, &mut batch);
+    wait_workers_idle(&sh);
     sh.finished.store(true, Ordering::SeqCst);
     sh.running.store(false, Ordering::SeqCst);
+}
+
+impl Shared {
+    /// Merge per-shard results back into first-seen (timestamp) order: the stateful engines are
+    /// order-sensitive (ENG-05's windowed fan-out, ENG-01's first-crossing dedup), and shard-by-shard
+    /// concatenation changed their alerts on a real capture.
+    fn ordered(&self, mut v: Vec<LiveConnRecord>) -> Vec<LiveConnRecord> {
+        if self.asms.len() > 1 { v.sort_by(|a, b| a.ts.partial_cmp(&b.ts).unwrap_or(std::cmp::Ordering::Equal)); }
+        v
+    }
+    fn snapshot_all(&self, limit: usize) -> Vec<LiveConnRecord> {
+        let per = (limit / self.asms.len()).max(1);
+        self.ordered(self.asms.iter().flat_map(|a| a.lock().unwrap().snapshot(per)).collect())
+    }
+    fn expire_all(&self, now: f64) -> Vec<LiveConnRecord> {
+        self.ordered(self.asms.iter().flat_map(|a| a.lock().unwrap().expire(now)).collect())
+    }
+    fn flush_all(&self) -> Vec<LiveConnRecord> {
+        self.ordered(self.asms.iter().flat_map(|a| a.lock().unwrap().flush()).collect())
+    }
+    fn active_all(&self) -> usize { self.asms.iter().map(|a| a.lock().unwrap().active_flows()).sum() }
+    fn top_flows_all(&self, n: usize) -> Vec<LiveConnRecord> {
+        let mut v: Vec<LiveConnRecord> = self.asms.iter().flat_map(|a| a.lock().unwrap().top_flows(n)).collect();
+        v.sort_by(|a, b| (b.orig_bytes + b.resp_bytes).cmp(&(a.orig_bytes + a.resp_bytes)));
+        v.truncate(n);
+        v
+    }
+    fn stats_all(&self) -> Stats {
+        let mut t = Stats::default();
+        for a in &self.asms {
+            let s = a.lock().unwrap().stats.clone();
+            t.packets += s.packets; t.non_ip += s.non_ip; t.flows_seen += s.flows_seen; t.dns += s.dns; t.ssl += s.ssl;
+            t.modbus += s.modbus; t.dnp3 += s.dnp3; t.http += s.http; t.kerberos += s.kerberos; t.s7comm += s.s7comm;
+            t.iec104 += s.iec104; t.conn += s.conn;
+        }
+        t
+    }
+}
+
+struct MergedHost { first: f64, last: f64, tx_pkts: u64, rx_pkts: u64, tx_bytes: u64, rx_bytes: u64, tcp: u64, udp: u64, other: u64,
+                    mac: Option<[u8; 6]>, via_arp: bool }
+
+fn merged_hosts(sh: &Shared) -> std::collections::HashMap<String, MergedHost> {
+    let mut m: std::collections::HashMap<String, MergedHost> = std::collections::HashMap::new();
+    for a in &sh.asms {
+        let a = a.lock().unwrap();
+        for (ip, h) in a.inv.hosts.iter() {
+            let e = m.entry(ip.clone()).or_insert(MergedHost { first: h.first, last: h.last, tx_pkts: 0, rx_pkts: 0, tx_bytes: 0,
+                rx_bytes: 0, tcp: 0, udp: 0, other: 0, mac: None, via_arp: false });
+            e.first = e.first.min(h.first); e.last = e.last.max(h.last);
+            e.tx_pkts += h.tx_pkts; e.rx_pkts += h.rx_pkts; e.tx_bytes += h.tx_bytes; e.rx_bytes += h.rx_bytes;
+            e.tcp += h.tcp; e.udp += h.udp; e.other += h.other;
+            if e.mac.is_none() { e.mac = h.mac; }
+            e.via_arp |= h.via_arp;
+        }
+    }
+    m
 }
 
 fn hits_to_list(py: Python<'_>, hits: Vec<(Hit, LiveConnRecord)>) -> PyResult<PyObject> {
@@ -629,6 +783,7 @@ pub struct NativeCapture {
     sh: Arc<Shared>,
     cfg: Mutex<Option<SourceCfg>>,
     th: Mutex<Option<JoinHandle<()>>>,
+    workers: Mutex<Vec<JoinHandle<()>>>,
 }
 
 #[pymethods]
@@ -638,10 +793,10 @@ impl NativeCapture {
     #[new]
     #[pyo3(signature = (iface=None, bpf=None, snaplen=65535, buffer_mb=64, promisc=true, timeout_ms=10,
                         pcap=None, loops=1, speed=0.0, ring_packets=50000, ring_snap=256,
-                        idle_timeout_s=60.0, max_pending_records=1_000_000))]
+                        idle_timeout_s=60.0, max_pending_records=1_000_000, shards=1))]
     fn new(iface: Option<String>, bpf: Option<String>, snaplen: i32, buffer_mb: i32, promisc: bool,
            timeout_ms: i32, pcap: Option<String>, loops: u64, speed: f64, ring_packets: usize,
-           ring_snap: usize, idle_timeout_s: f64, max_pending_records: usize) -> PyResult<Self> {
+           ring_snap: usize, idle_timeout_s: f64, max_pending_records: usize, shards: usize) -> PyResult<Self> {
         let cfg = match (iface, pcap) {
             (Some(i), None) => SourceCfg::Live { iface: i, bpf, snaplen, buffer_bytes: buffer_mb.saturating_mul(1024 * 1024),
                                                   promisc, timeout_ms },
@@ -650,7 +805,8 @@ impl NativeCapture {
         };
         let sh = Arc::new(Shared {
             stop: AtomicBool::new(false), running: AtomicBool::new(false), finished: AtomicBool::new(false),
-            asm: Mutex::new(LiveFlowAssembler::new(idle_timeout_s)),
+            asms: (0..shards.max(1)).map(|_| Mutex::new(LiveFlowAssembler::new(idle_timeout_s))).collect(),
+            txs: Mutex::new(None), inflight: AtomicU64::new(0),
             out: Mutex::new(VecDeque::new()), engines: Mutex::new(None), out_cv: Condvar::new(), out_cap: max_pending_records,
             ring: Mutex::new(PacketRing { q: VecDeque::new(), next_id: 0, cap: ring_packets, snap: ring_snap.max(64) }),
             err: Mutex::new(None),
@@ -658,7 +814,7 @@ impl NativeCapture {
             if_drop: AtomicU64::new(0), rec_dropped: AtomicU64::new(0), last_ts_bits: AtomicU64::new(0),
             loops_done: AtomicU64::new(0), linktype: AtomicU64::new(0), unsupported: AtomicU64::new(0),
         });
-        Ok(Self { sh, cfg: Mutex::new(Some(cfg)), th: Mutex::new(None) })
+        Ok(Self { sh, cfg: Mutex::new(Some(cfg)), th: Mutex::new(None), workers: Mutex::new(Vec::new()) })
     }
 
     /// Opens the source (raises OSError with the driver's message if that fails) and
@@ -667,6 +823,19 @@ impl NativeCapture {
         let cfg = self.cfg.lock().unwrap().take()
             .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("already started"))?;
         let sh = self.sh.clone();
+        if sh.asms.len() > 1 {
+            let mut txs = Vec::new();
+            let mut ws = self.workers.lock().unwrap();
+            for k in 0..sh.asms.len() {
+                let (tx, rx) = sync_channel::<Work>(256);
+                txs.push(tx);
+                let shc = sh.clone();
+                ws.push(std::thread::Builder::new().name(format!("stealthtap-shard-{k}"))
+                    .spawn(move || shard_worker(shc, k, rx))
+                    .map_err(|e| pyo3::exceptions::PyOSError::new_err(e.to_string()))?);
+            }
+            *sh.txs.lock().unwrap() = Some(txs);
+        }
         let handle = match cfg {
             SourceCfg::Live { iface, bpf, snaplen, buffer_bytes, promisc, timeout_ms } => {
                 let api = Arc::new(load_pcap().map_err(pyo3::exceptions::PyOSError::new_err)?);
@@ -698,7 +867,13 @@ impl NativeCapture {
     fn stop(&self, py: Python<'_>) {
         self.sh.stop.store(true, Ordering::SeqCst);
         let th = self.th.lock().unwrap().take();
-        py.allow_threads(|| { if let Some(t) = th { let _ = t.join(); } });
+        let sh = self.sh.clone();
+        let ws: Vec<JoinHandle<()>> = std::mem::take(&mut *self.workers.lock().unwrap());
+        py.allow_threads(|| {
+            if let Some(t) = th { let _ = t.join(); }
+            *sh.txs.lock().unwrap() = None;      // closes the channels: workers drain and exit
+            for w in ws { let _ = w.join(); }
+        });
         self.sh.running.store(false, Ordering::SeqCst);
     }
 
@@ -755,7 +930,7 @@ impl NativeCapture {
     /// Snapshot active flows through ENG-01/05/13 in Rust: -> [(engine, conn_dict, hit_dict), ...]
     #[pyo3(signature = (limit=4000))]
     fn snapshot_scored(&self, py: Python<'_>, limit: usize) -> PyResult<PyObject> {
-        let recs = { self.sh.asm.lock().unwrap().snapshot(limit) };
+        let recs = self.sh.snapshot_all(limit);
         let sh = self.sh.clone();
         let hits = py.allow_threads(move || {
             let mut guard = sh.engines.lock().unwrap();
@@ -776,10 +951,7 @@ impl NativeCapture {
     /// -> (hits [(engine, conn_dict, hit_dict)], sample [conn_dict] for the baseline, total_ended)
     #[pyo3(signature = (now=None, sample_max=2000, flush=false))]
     fn expire_scored(&self, py: Python<'_>, now: Option<f64>, sample_max: usize, flush: bool) -> PyResult<PyObject> {
-        let recs = {
-            let mut a = self.sh.asm.lock().unwrap();
-            if flush { a.flush() } else { a.expire(now.unwrap_or_else(now_unix)) }
-        };
+        let recs = if flush { self.sh.flush_all() } else { self.sh.expire_all(now.unwrap_or_else(now_unix)) };
         let total = recs.len();
         let sh = self.sh.clone();
         let items = py.allow_threads(move || score_ended(&sh, recs, sample_max));
@@ -799,39 +971,47 @@ impl NativeCapture {
 
     #[pyo3(signature = (limit=4000))]
     fn snapshot(&self, py: Python<'_>, limit: usize) -> PyResult<PyObject> {
-        let recs = { self.sh.asm.lock().unwrap().snapshot(limit) };
+        let recs = self.sh.snapshot_all(limit);
         crate::conn_batch_to_pylist(py, recs)
     }
 
     #[pyo3(signature = (now=None))]
     fn expire(&self, py: Python<'_>, now: Option<f64>) -> PyResult<PyObject> {
-        let recs = { self.sh.asm.lock().unwrap().expire(now.unwrap_or_else(now_unix)) };
+        let recs = self.sh.expire_all(now.unwrap_or_else(now_unix));
         crate::conn_batch_to_pylist(py, recs)
     }
 
     fn flush(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let recs = { self.sh.asm.lock().unwrap().flush() };
+        let recs = self.sh.flush_all();
         crate::conn_batch_to_pylist(py, recs)
     }
 
-    fn active_flows(&self) -> usize { self.sh.asm.lock().unwrap().active_flows() }
+    fn active_flows(&self) -> usize { self.sh.active_all() }
 
     #[pyo3(signature = (n=50))]
     fn top_flows(&self, py: Python<'_>, n: usize) -> PyResult<PyObject> {
-        let recs = { self.sh.asm.lock().unwrap().top_flows(n) };
+        let recs = self.sh.top_flows_all(n);
         crate::conn_batch_to_pylist(py, recs)
     }
 
     fn stats(&self, py: Python<'_>) -> PyResult<PyObject> {
         let d = PyDict::new_bound(py);
         {
-            let a = self.sh.asm.lock().unwrap();
-            let s = &a.stats;
+            let s = self.sh.stats_all();
             d.set_item("packets", s.packets)?; d.set_item("non_ip", s.non_ip)?; d.set_item("flows_seen", s.flows_seen)?;
             d.set_item("dns", s.dns)?; d.set_item("ssl", s.ssl)?; d.set_item("modbus", s.modbus)?;
-            d.set_item("dnp3", s.dnp3)?; d.set_item("http", s.http)?; d.set_item("conn", s.conn)?;
-            d.set_item("active_flows", a.active_flows())?;
-            d.set_item("hosts", a.inv.hosts.len())?; d.set_item("hosts_dropped", a.inv.hosts_dropped)?;
+            d.set_item("dnp3", s.dnp3)?; d.set_item("http", s.http)?; d.set_item("kerberos", s.kerberos)?;
+            d.set_item("s7comm", s.s7comm)?; d.set_item("iec104", s.iec104)?; d.set_item("conn", s.conn)?;
+            d.set_item("active_flows", self.sh.active_all())?;
+            let (hn, hd) = if self.sh.asms.len() == 1 {
+                let a = self.sh.asms[0].lock().unwrap(); (a.inv.hosts.len(), a.inv.hosts_dropped)
+            } else {
+                let mut dropped = 0u64;
+                for a in &self.sh.asms { dropped += a.lock().unwrap().inv.hosts_dropped; }
+                (merged_hosts(&self.sh).len(), dropped)
+            };
+            d.set_item("hosts", hn)?; d.set_item("hosts_dropped", hd)?;
+            d.set_item("shards", self.sh.asms.len())?;
         }
         {
             let r = self.sh.ring.lock().unwrap();
@@ -844,7 +1024,7 @@ impl NativeCapture {
         d.set_item("if_drop", self.sh.if_drop.load(Ordering::Relaxed))?;
         d.set_item("records_dropped", self.sh.rec_dropped.load(Ordering::Relaxed))?;
         d.set_item("unsupported_frames", self.sh.unsupported.load(Ordering::Relaxed))?;
-        d.set_item("pending_records", self.sh.out.lock().unwrap().len())?;
+        d.set_item("pending_records", self.sh.out.lock().unwrap().len() + self.sh.inflight.load(Ordering::SeqCst) as usize)?;
         d.set_item("last_ts", f64::from_bits(self.sh.last_ts_bits.load(Ordering::Relaxed)))?;
         d.set_item("loops_done", self.sh.loops_done.load(Ordering::Relaxed))?;
         d.set_item("linktype", self.sh.linktype.load(Ordering::Relaxed))?;
@@ -856,8 +1036,8 @@ impl NativeCapture {
     /// Hosts seen so far, heaviest first.
     #[pyo3(signature = (limit=500))]
     fn hosts(&self, py: Python<'_>, limit: usize) -> PyResult<PyObject> {
-        let a = self.sh.asm.lock().unwrap();
-        let mut v: Vec<(&String, &crate::inventory::Host)> = a.inv.hosts.iter().collect();
+        let m = merged_hosts(&self.sh);
+        let mut v: Vec<(&String, &MergedHost)> = m.iter().collect();
         v.sort_by(|x, y| (y.1.tx_bytes + y.1.rx_bytes).cmp(&(x.1.tx_bytes + x.1.rx_bytes)));
         let list = PyList::empty_bound(py);
         for (ip, h) in v.into_iter().take(limit) {
@@ -873,12 +1053,17 @@ impl NativeCapture {
     }
 
     fn protocols(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let a = self.sh.asm.lock().unwrap();
+        let mut pk = [0u64; 32];
+        let mut by = [0u64; 32];
+        for a in &self.sh.asms {
+            let a = a.lock().unwrap();
+            for i in 0..32 { pk[i] += a.inv.proto_pkts[i]; by[i] += a.inv.proto_bytes[i]; }
+        }
         let list = PyList::empty_bound(py);
         for (i, n) in PROTO_NAMES.iter().enumerate() {
-            if a.inv.proto_pkts[i] == 0 { continue; }
+            if pk[i] == 0 { continue; }
             let d = PyDict::new_bound(py);
-            d.set_item("name", n)?; d.set_item("packets", a.inv.proto_pkts[i])?; d.set_item("bytes", a.inv.proto_bytes[i])?;
+            d.set_item("name", n)?; d.set_item("packets", pk[i])?; d.set_item("bytes", by[i])?;
             list.append(d)?;
         }
         Ok(list.into())

@@ -167,3 +167,30 @@ def test_native_flow_engines_match_the_python_engines(rel, monkeypatch):
         return out
 
     assert run(py_engines=False) == run(py_engines=True)
+
+
+@pytest.mark.parametrize("shards", [2, 4])
+def test_sharded_assembly_matches_single_shard(shards):
+    """Flow-hash sharding (N assembler threads) must not change what is detected or counted."""
+    path = ROOT / "samples" / "netbios_ssn2.pcap"
+    if not path.exists():
+        pytest.skip("sample capture not present")
+
+    def run(n):
+        cap = core.NativeCapture(pcap=str(path), loops=1, speed=0.0, shards=n)
+        cap.start()
+        recs = []
+        while True:
+            recs += [(t, r["uid"]) for t, r in cap.poll(20, 5000) if t != "conn"]
+            if cap.finished() and cap.pending() == 0:
+                break
+        st = cap.stats()
+        flows = sorted((r["uid"], r["orig_bytes"], r["resp_bytes"], r["orig_pkts"], r["resp_pkts"]) for _t, r in cap.flush())
+        hosts = sorted((h["ip"], h["tx_bytes"], h["rx_bytes"], h["tx_pkts"], h["rx_pkts"]) for h in cap.hosts(100000))
+        protos = sorted((p["name"], p["packets"], p["bytes"]) for p in cap.protocols())
+        cap.stop()
+        return sorted(recs), flows, hosts, protos, st["packets"], st["shards"]
+
+    base, sharded = run(1), run(shards)
+    assert sharded[5] == shards
+    assert base[:5] == sharded[:5]

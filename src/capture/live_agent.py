@@ -86,6 +86,7 @@ ALERT_COOLDOWN_S = float(os.environ.get("LIVE_ALERT_COOLDOWN", "30.0"))
 HIGHSPEED_PPS = float(os.environ.get("LIVE_HIGHSPEED_PPS", "50000"))
 HIGHSPEED_MBPS = float(os.environ.get("LIVE_HIGHSPEED_MBPS", "200"))
 DEFAULT_ENGINE_WORKERS = int(os.environ.get("LIVE_ENGINE_WORKERS", "1"))
+CAPTURE_SHARDS = max(1, int(os.environ.get("STEALTHTAP_SHARDS", str(max(1, min(4, (os.cpu_count() or 4) // 4))))))   # flow-hash shards (assembler threads) in the native engine
 BASELINE_SAMPLE_MAX = int(os.environ.get("LIVE_BASELINE_MAX_PER_TICK", "2000"))   # flows/tick fed to the online baseline
 _IMMEDIATE = set(_DISPATCH_IMMEDIATE)   # latency measurable end-to-end
 
@@ -345,10 +346,11 @@ class LiveAgent:
             if pcap:
                 cap = NativeCapture(pcap=pcap, loops=loops,
                                     speed=(speed if speed is not None else (1.0 if realtime else 0.0)),
-                                    ring_packets=ring, idle_timeout_s=60.0)
+                                    ring_packets=ring, idle_timeout_s=60.0, shards=CAPTURE_SHARDS)
             else:
                 cap = NativeCapture(iface=self.iface, bpf=self.bpf, buffer_mb=self.buffer_mb,
-                                    promisc=self.promisc, ring_packets=ring, idle_timeout_s=60.0)
+                                    promisc=self.promisc, ring_packets=ring, idle_timeout_s=60.0,
+                                    shards=CAPTURE_SHARDS)
             self._build_engines()
             cap.start()
         except OSError as exc:
