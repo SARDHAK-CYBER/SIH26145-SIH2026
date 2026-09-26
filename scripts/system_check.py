@@ -271,13 +271,14 @@ def performance(quick: bool) -> None:
     S = "performance"
 
     def live_bench():
-        cp = sh([PY, "scripts/bench_throughput.py", "samples/netbios_ssn2.pcap"], timeout=300,
-                env={**os.environ, "LIVE_ENGINE_WORKERS": "1"})
-        m = re.search(r"SUSTAINED THROUGHPUT\s*:\s*([\d,]+) pps", cp.stdout)
-        d = re.search(r"dropped.*?:\s*([\d,]+)", cp.stdout)
-        pps = int(m.group(1).replace(",", "")) if m else 0
-        drop = int(d.group(1).replace(",", "")) if d else -1
-        return ("PASS" if pps > 3000 and drop == 0 else "WARN"), f"live pipeline {pps:,} pps, dropped={drop}"
+        # native capture thread -> assembler -> 13 engines + ML, looping a REAL capture for 12 s
+        out = ROOT / "docs" / "reports" / "_live_bench.json"
+        sh([PY, "scripts/replay_soak.py", "samples/netbios_ssn2.pcap", "--seconds", "12", "--per-file", "12",
+            "--out", str(out)], timeout=300)
+        import json as _json
+        sm = _json.loads(out.read_text())["summary"] if out.exists() else {}
+        pps, drop = int(sm.get("avg_pps", 0)), int(sm.get("records_dropped_last", -1))
+        return ("PASS" if pps > 50_000 and drop == 0 else "WARN"), f"live pipeline {pps:,} pps ({sm.get('avg_gbit_s')} Gbit/s), records dropped={drop}"
     check(S, "live pipeline throughput (1 worker)", live_bench)
 
     def api_pcap():
