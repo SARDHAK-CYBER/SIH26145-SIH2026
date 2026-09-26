@@ -70,8 +70,8 @@ on both OSes. Linux capture sensors can add `--features afxdp` (AF_XDP).
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 21 | Live NIC capture on the native engine, real Wi-Fi, incl. IPv6 | **Blocked on one UAC approval** | Npcap is Administrators-only: run `scripts/start_sensor.ps1` once, connect the Capture tab to `http://127.0.0.1:8101` |
+| 21 | Live NIC capture on the native engine, real Wi-Fi, incl. IPv6 | **Done** | Elevated sensor, real Wi-Fi + real internet downloads: 148 Mbit/s, 0 kernel drops, agent saw 296,070 packets vs NIC counter 292,804 over 30 s, 179 local devices learned passively (ARP/broadcast), real link-local IPv6 (ICMPv6 ND) parsed. This network has no global IPv6 (`curl -6` fails); global-v6 flows remain covered by tests only. Real-traffic FP found and fixed: periodic LLMNR multicast flagged as C2 (ENG-02 now ignores multicast/broadcast) |
 | 22 | Multi-threaded capture/assembly sharding | Open | Single capture thread: ~1M pps on real mixes, 100–420k pps on flow-per-packet floods |
 | 23 | Live-baseline sampling under flood | Open | Baseline is fed ≤ 2,000 flows/tick when flow rates are extreme |
 | 24 | Hard-negative retraining (dns/flow) | Open | Needs a longer real benign live capture |
-| 25 | Network discovery (active, own subnet) | Open | Passive host inventory done; active sweep not implemented |
+| 25 | Network discovery (active, own subnet) | Implemented, sweep untested | `POST /network/discover` (nmap -sn only, private ranges inside an attached subnet, ≤1024 addresses, rate-limited; scope rules verified). A real sweep needs the elevated sensor restarted with this code (nmap timed out ~100 s un-elevated) |
