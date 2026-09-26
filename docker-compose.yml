@@ -31,12 +31,28 @@ services:
       - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
     ports:
       - "9092:9092"
+    restart: unless-stopped
+    healthcheck:
+      # dependents start only once the broker actually answers -- the
+      # log-shipper used to crash at boot ("Unable to bootstrap from
+      # redpanda:9092") because depends_on only waited for the container
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 15s
 
   redis:
     # redis-stack-server ships the RedisBloom module (Count-Min Sketch, HLL)
     image: redis/redis-stack-server:7.2.0-v11
     ports:
       - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   postgres:
     image: postgres:16
@@ -48,6 +64,12 @@ services:
       - "5432:5432"
     volumes:
       - stealthtap_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stealthtap -d stealthtap"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   opensearch:
     # Kept for now (existing OT/IT batch path still writes here). Once
@@ -80,8 +102,10 @@ services:
       - ZEEK_LOG_DIR=/zeek-logs
     volumes:
       - stealthtap_zeek_logs:/zeek-logs:ro
+    restart: unless-stopped
     depends_on:
-      - redpanda
+      redpanda:
+        condition: service_healthy
 
   streaming-engine:
     build:
@@ -94,10 +118,14 @@ services:
       - RELAY_SOCKET=/var/run/stealthtap/alerts.sock
     volumes:
       - stealthtap_relay_socket:/var/run/stealthtap
+    restart: unless-stopped
     depends_on:
-      - redpanda
-      - redis
-      - log-shipper
+      redpanda:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      log-shipper:
+        condition: service_started
 
   zeek-batch:
     # NEW: real Zeek (+ ICSNPP OT plugins) for uploaded-pcap analysis,
@@ -110,6 +138,7 @@ services:
     volumes:
       - stealthtap_zeek_incoming:/incoming
       - stealthtap_zeek_outgoing:/outgoing
+    restart: unless-stopped
 
   suricata-batch:
     # Real signature-based network detection (20,829 ET Open rules),
@@ -122,6 +151,7 @@ services:
     volumes:
       - stealthtap_suricata_incoming:/incoming
       - stealthtap_suricata_outgoing:/outgoing
+    restart: unless-stopped
 
   api:
     build:
@@ -144,10 +174,22 @@ services:
       - stealthtap_zeek_outgoing:/outgoing
       - stealthtap_suricata_incoming:/suricata_incoming
       - stealthtap_suricata_outgoing:/suricata_outgoing
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 6s
+      retries: 4
+      start_period: 30s
     depends_on:
-      - postgres
-      - zeek-batch
-      - suricata-batch
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      zeek-batch:
+        condition: service_started
+      suricata-batch:
+        condition: service_started
 
   dashboard:
     build:

@@ -12,3 +12,10 @@ samples/
 *.pcap
 .dockerignore
 Dockerfile
+
+native/stealthtap_core/target/
+native/**/target/
+eval_results*/
+build/
+docs/reports/
+*.pdf
