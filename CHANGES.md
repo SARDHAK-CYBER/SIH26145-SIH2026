@@ -1,3 +1,13 @@
+# Second pass — real-data live path, native capture, separate dashboards — 2026-09-26
+
+- Separate Live / PCAP dashboards, packet inspector for both, no synthetic data in the UI.
+- Native capture engine (Npcap/libpcap runtime-loaded, GIL-free), host inventory, packet ring, pcap replay; ENG-01/02/05/06/13 evaluated in Rust.
+- Kerberos, S7comm, IEC-104 decoders; ENG-07/ENG-11 rules validated on real public captures.
+- Performance: EcoQoS opt-out, ORT no-spin, IsolationForest load opt-in, replay rewind, bounded final drain.
+- ENG-06 tuned on real benign data (1 MiB single-flow floor, ≥5 flows for accumulated).
+- `src/scapy_safe.py`: no more 122 s stall when importing scapy under Admin-only Npcap.
+- Tools: `scripts/live_soak.py`, `replay_soak.py`, `live_replay_eval.py`, `start_sensor.ps1`. Details: `docs/PRD.md` §13.
+
 # Full-stack test + hardening pass — 2026-09-26
 
 `scripts/system_check.py` (new) found the defects below; result **27 PASS / 0 WARN / 0 FAIL**, 123 tests.

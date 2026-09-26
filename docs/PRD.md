@@ -214,3 +214,30 @@ There is no labeled TLS dataset, and inventing labels would be dishonest. Instea
 
 ### 12.4 Measured accuracy on the latest Docker-path real-traffic re-run
 Hybrid file-level recall 83%, precision 95%, F1 0.89, flow-level FPR 0.167% (1/598 flows); specificity 50% (1 of 2 benign captures clean) — small samples, wide intervals, same caveats as §7. The living list of what is still open is `docs/PRIORITIES.md`.
+
+## 13. 2026-09-26 (second pass) — real-data live path, native capture engine, separate dashboards
+
+### 13.1 What changed
+* **Two dashboards** (`#/live`, `#/pcap`) with a Wireshark-style **packet inspector** (layer tree + hex + filter + `.pcap` export) for both; the bundled synthetic "sample" is gone from the UI.
+* **Native capture engine** (`native/stealthtap_core/src/capture.rs`): runtime-loaded Npcap/libpcap read loop, flow assembly, host inventory, packet ring and pcap index in one GIL-free thread; the same thread replays real pcaps (loops/speed) for soak tests. ENG-01/02/05/06/13 now run in Rust over whole flow batches (`flow_engines.rs`); Python builds Alerts only for hits. Alerts are identical to the Python path on 26 real captures (`tests/test_native_capture.py`).
+* **Decoders** (Rust + Python twins, cross-checked on real public captures): Kerberos KDC replies (ENG-11 now works live), S7comm and IEC 60870-5-104 control requests (ENG-07 rules).
+
+### 13.2 Measured (full live pipeline: capture thread → assembler → 13 engines + ML → alerts; real captures, no synthetic data)
+| Workload | Result |
+|---|---|
+| `normal2.pcap` looped (real desktop mix) | **~950k pps = 6.0 Gbit/s** sustained, 28.7M packets/30 s, 0 dropped, RSS flat |
+| 15-minute mixed soak, all 27 real captures | 527M packets / 127 GB, avg 585k pps (1.13 Gbit/s incl. flow-heavy files), peak 1.16M pps, 0 dropped, max RSS 749 MB, no crash |
+| `mirai.pcap` (94 MB, 565k flows/pass) | 100–420k pps, consumer backlog 1M → 0 after Rust flow engines, 0 records dropped |
+| Real Wi-Fi, 3–6 parallel downloads (~150 Mbit/s, before native engine) | 99.8% of NIC packets captured, 0 drops |
+
+Bottlenecks found and fixed: Windows EcoQoS clamps a background process ~8× after 3 s (`src/perf.py` opts out); onnxruntime spin-waiting burned ~6 cores; three advisory IsolationForest models cost ~70 s of start-up (now opt-in, `STEALTHTAP_LOAD_IFOREST=1`); reopening the replay file hundreds of times/s made Windows file scanning throttle it; per-flow Python cost capped flow-heavy traffic at ~28k flows/s. **Npcap in Administrators-only mode makes every non-elevated process that imports scapy or opens the driver wait ~122 s for a UAC prompt** — `src/scapy_safe.py` removes that for non-capturing processes; capturing needs one long-lived elevated sensor (`scripts/start_sensor.ps1`).
+
+### 13.3 Accuracy on real labelled captures (single pass, live path)
+14 unique attack captures: 11 detected (78.6%); missed: `distcc_exec_backdoor`, `smtp`, `tomcat` (small application-layer captures with no volumetric/behavioural signature). Benign: `normal2` clean; `normal.pcap` alerts RECONNAISSANCE — correct, it contains a real nmap-style SYN scan of the router (fixed source port 54920, ~80 ports). A 601 KB ordinary upload in the same file falsely raised DATA_EXFILTRATION → ENG-06 single-flow floor 256 KB → 1 MiB and the accumulated check needs ≥ 5 flows. OT (real public captures): DNP3 write/select/operate, S7 block download and IEC-104 commands alert; S7 status reads stay quiet; a real Windows-2003 AD login raises no Kerberoasting alert (machine-account SPN classes excluded; ENG-11 also matches `krbtgt/REALM`).
+
+### 13.4 Honest limits
+* Live capture on a real NIC was validated before this pass (99.8% capture ratio) but **not re-run on the new native engine** — needs one UAC approval for the elevated sensor.
+* A Wi-Fi client sees its own traffic plus broadcast/multicast, not other hosts' unicast; whole-network capture needs a mirror port, TAP or gateway placement.
+* No GPU path: inference is ~2 µs/row on CPU; a GPU would only add latency.
+* Replayed loops look periodic (C2_BEACONING artifacts) — accuracy is measured on single passes only.
+* EtherNet/IP, OPC UA, PROFINET, BACnet still have no detection logic (no real captures available to validate against).

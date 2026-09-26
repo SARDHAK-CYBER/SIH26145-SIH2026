@@ -51,6 +51,13 @@ Methodology note: this dev machine showed real, substantial throughput swings (n
 
 **What would close the remaining gap**: the remaining ~7 engines (ENG-03/04/07/09/11 and the Suricata/YARA/BZAR Docker-only engines) are either already cheap (stateless or exact-match), Docker-only (can't run in the hot path regardless), or lower-volume in practice — diminishing returns from porting them individually. The larger remaining lever is the ONNX inference cost itself (now the single biggest remaining line item) and further architectural work on how many flows reach Python at all. See `docs/PRD.md` §11 for the full methodology and every number behind this table.
 
+### Update 2026-09-26 (second pass) — separate dashboards, native capture engine, real-data live path
+
+* **Two dashboards**: `#/live` (overview, alerts, hosts, flows, packets, capture control) and `#/pcap` (upload analysis), both with a Wireshark-style packet inspector. No synthetic data is shown.
+* **Native capture engine** (Rust, GIL-free) + flow engines in Rust: **~950k pps / 6.0 Gbit/s sustained** on a real captured traffic mix through the full pipeline, a 15-minute / 127 GB soak with no drops, memory flat. Flow-per-packet floods (mirai) hold 100–420k pps.
+* Real-capture accuracy through the live path: 11/14 attack captures detected, no false alert on the clean benign capture; OT/Kerberos decoders validated on real public captures. Full numbers and limits: `docs/PRD.md` §13.
+* **Windows note**: with Npcap in "Administrators only" mode, run `powershell -File scripts\start_sensor.ps1` once (one UAC prompt) for live NIC capture. Live capture on a real NIC still needs re-running on the native engine.
+
 ### Update 2026-09-26 — real-traffic hardening pass (measured, not asserted)
 
 A full-stack test (`python scripts/system_check.py`) found and fixed these; every row has a regression test (`tests/test_regressions_2026_09.py`, `tests/test_api_availability.py`, `tests/test_raw_ingest.py`, `tests/test_tls_sni.py`):

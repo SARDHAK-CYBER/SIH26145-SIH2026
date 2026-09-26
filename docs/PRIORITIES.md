@@ -49,13 +49,13 @@ Full report: `docs/reports/LATEST.md` (history: `docs/reports/history.csv`)
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 13 | ENG-11 (Kerberoasting) dormant on live capture | Open | Binary ASN.1 parser; no Kerberos captures locally to validate against |
-| 14 | IPv6 validated on a constructed packet, not a captured live one | Open (low) | Ambient IPv6 on the dev network was link-local only |
+| 13 | ENG-11 (Kerberoasting) dormant on live capture | **Done** | Rust+Python KDC-reply parsers agree on the real `krb-816` capture; machine-SPN classes excluded. `tests/test_ot_kerberos.py` |
+| 14 | IPv6 validated on a constructed packet, not a captured live one | Open (low) | Needs the elevated sensor on the real Wi-Fi |
 | 20 | Multi-core scale-out beyond one process | Open | Needs batched/native ENG-01 state or a shared-memory design; see #9 |
 | 15 | Hard-negative retraining (dns/flow), long-run live-baseline evaluation | Open | Needs more real benign data |
-| 16 | OT breadth (EtherNet/IP, S7comm, OPC UA, PROFINET detection) | Open | Parsed by Zeek/ICSNPP, no detection logic |
-| 17 | Packet-level (Wireshark-style) inspector in the dashboard | Open | |
-| 18 | ENG-05 fan-out threshold borderline FP (25 targets, benign CDN traffic) | Open | Needs more real-traffic evidence before retuning |
+| 16 | OT breadth | Partly done | S7comm + IEC-104 detection added and validated on real captures; EtherNet/IP, OPC UA, PROFINET, BACnet still open (no real captures) |
+| 17 | Packet-level (Wireshark-style) inspector in the dashboard | **Done** | Live ring + uploaded-PCAP index, layer tree/hex/filter/export |
+| 18 | ENG-05 fan-out threshold borderline FP | **Closed — not a FP** | The `normal.pcap` alert is a real nmap-style SYN scan of the router (fixed sport 54920, ~80 ports) |
 | 19 | Windows kernel-bypass | Not planned | XDP for Windows is Server-only |
 
 ## Deployment direction
@@ -65,3 +65,13 @@ The product ships as a **service**, not a frozen executable: `docker compose up 
 `uvicorn` (bare service) on Linux or Windows. The PyInstaller single-exe path is
 retired — the native module is per-platform anyway, and a service works identically
 on both OSes. Linux capture sensors can add `--features afxdp` (AF_XDP).
+
+## Added 2026-09-26 (second pass)
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 21 | Live NIC capture on the native engine, real Wi-Fi, incl. IPv6 | **Blocked on one UAC approval** | Npcap is Administrators-only: run `scripts/start_sensor.ps1` once, connect the Capture tab to `http://127.0.0.1:8101` |
+| 22 | Multi-threaded capture/assembly sharding | Open | Single capture thread: ~1M pps on real mixes, 100–420k pps on flow-per-packet floods |
+| 23 | Live-baseline sampling under flood | Open | Baseline is fed ≤ 2,000 flows/tick when flow rates are extreme |
+| 24 | Hard-negative retraining (dns/flow) | Open | Needs a longer real benign live capture |
+| 25 | Network discovery (active, own subnet) | Open | Passive host inventory done; active sweep not implemented |
