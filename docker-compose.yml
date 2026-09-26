@@ -30,7 +30,7 @@ services:
       - --kafka-addr=PLAINTEXT://0.0.0.0:9092
       - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
     ports:
-      - "9092:9092"
+      - "127.0.0.1:9092:9092"     # loopback only: never publish a datastore to the network
     restart: unless-stopped
     healthcheck:
       # dependents start only once the broker actually answers -- the
@@ -46,7 +46,7 @@ services:
     # redis-stack-server ships the RedisBloom module (Count-Min Sketch, HLL)
     image: redis/redis-stack-server:7.2.0-v11
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"     # loopback only: never publish a datastore to the network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
@@ -61,7 +61,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set a real password in .env, do not use a default}
       - POSTGRES_DB=stealthtap
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"     # loopback only: never publish a datastore to the network
     volumes:
       - stealthtap_postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -81,14 +81,14 @@ services:
       - discovery.type=single-node
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD:?set a real password in .env, do not use a default}
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"     # loopback only: never publish a datastore to the network
 
   dashboards:
     image: opensearchproject/opensearch-dashboards:2.14.0
     environment:
       - OPENSEARCH_HOSTS=https://opensearch:9200
     ports:
-      - "5601:5601"
+      - "127.0.0.1:5601:5601"     # loopback only: never publish a datastore to the network
     depends_on:
       - opensearch
 
@@ -160,13 +160,14 @@ services:
     entrypoint: ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       - DATABASE_URL=postgresql://stealthtap:${POSTGRES_PASSWORD:?set a real password in .env}@postgres:5432/stealthtap
+      - STEALTHTAP_API_KEY=${STEALTHTAP_API_KEY:?set STEALTHTAP_API_KEY (>=16 random chars) in .env}
       - MODELS_DIR=/models
       - ZEEK_INCOMING_DIR=/incoming
       - ZEEK_OUTGOING_DIR=/outgoing
       - SURICATA_INCOMING_DIR=/suricata_incoming
       - SURICATA_OUTGOING_DIR=/suricata_outgoing
     ports:
-      - "8000:8000"
+      - "${STEALTHTAP_BIND:-127.0.0.1}:8000:8000"   # set STEALTHTAP_BIND=0.0.0.0 only behind TLS
     volumes:
       - ./models:/models:ro
       - ./samples:/opt/stealthtap/samples:ro   # bundled pcap for GET /api/sample/analysis
@@ -198,7 +199,7 @@ services:
         VITE_API_BASE: http://localhost:8000
         VITE_LIVE_API_BASE: http://localhost:8100
     ports:
-      - "4173:4173"
+      - "${STEALTHTAP_BIND:-127.0.0.1}:4173:4173"
     depends_on:
       - api
 
@@ -221,6 +222,7 @@ services:
     tmpfs: ["/tmp"]
     environment:
       - STEALTHTAP_API_URL=${STEALTHTAP_API_URL:-http://127.0.0.1:8000}
+      - STEALTHTAP_API_KEY=${STEALTHTAP_API_KEY:?set STEALTHTAP_API_KEY in .env}
       - REDIS_URL=${SENSOR_REDIS_URL:-redis://127.0.0.1:6379/0}
       - MODELS_DIR=/models
       - CAPTURE_IFACE=${CAPTURE_IFACE:-eth0}

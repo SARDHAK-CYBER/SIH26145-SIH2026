@@ -1,13 +1,9 @@
 {
  "summary": {
-  "attack_files": 14,
-  "attack_detected": 11,
-  "recall": 0.786,
-  "missed": [
-   "distcc_exec_backdoor.pcap",
-   "smtp.pcap",
-   "tomcat.pcap"
-  ],
+  "attack_files": 15,
+  "attack_detected": 15,
+  "recall": 1.0,
+  "missed": [],
   "benign_files": 2,
   "benign_clean": 1,
   "benign_alerts": {
@@ -27,7 +23,7 @@
    "packets": 14057,
    "flows": 1723,
    "seconds": 0.23,
-   "pps": 59899,
+   "pps": 61302,
    "alerts": 2,
    "by_class": {
     "RECONNAISSANCE": 1,
@@ -43,7 +39,7 @@
    "packets": 1041,
    "flows": 79,
    "seconds": 0.03,
-   "pps": 31777,
+   "pps": 29798,
    "alerts": 2,
    "by_class": {
     "C2_BEACONING": 2
@@ -58,10 +54,12 @@
    "packets": 105,
    "flows": 7,
    "seconds": 0.03,
-   "pps": 3444,
-   "alerts": 0,
-   "by_class": {},
-   "p95_latency_ms": null
+   "pps": 3239,
+   "alerts": 1,
+   "by_class": {
+    "NETWORK_INTRUSION_ATTEMPT": 1
+   },
+   "p95_latency_ms": 0.55
   },
   {
    "file": "distcc_exec_backdoor2.pcap",
@@ -71,10 +69,12 @@
    "packets": 105,
    "flows": 13,
    "seconds": 0.03,
-   "pps": 3352,
-   "alerts": 0,
-   "by_class": {},
-   "p95_latency_ms": null
+   "pps": 3238,
+   "alerts": 1,
+   "by_class": {
+    "NETWORK_INTRUSION_ATTEMPT": 1
+   },
+   "p95_latency_ms": 0.03
   },
   {
    "file": "hydra_ftp.pcap",
@@ -83,8 +83,8 @@
    "duplicate_of": null,
    "packets": 3904,
    "flows": 128,
-   "seconds": 0.14,
-   "pps": 28759,
+   "seconds": 0.15,
+   "pps": 26687,
    "alerts": 1,
    "by_class": {
     "NETWORK_INTRUSION_ATTEMPT": 1
@@ -99,7 +99,7 @@
    "packets": 3904,
    "flows": 256,
    "seconds": 0.14,
-   "pps": 27816,
+   "pps": 28221,
    "alerts": 2,
    "by_class": {
     "NETWORK_INTRUSION_ATTEMPT": 2
@@ -113,8 +113,8 @@
    "duplicate_of": null,
    "packets": 20078,
    "flows": 3091,
-   "seconds": 0.16,
-   "pps": 124848,
+   "seconds": 0.23,
+   "pps": 87649,
    "alerts": 2,
    "by_class": {
     "NETWORK_INTRUSION_ATTEMPT": 1,
@@ -129,8 +129,8 @@
    "duplicate_of": "hydra_ssh.pcap",
    "packets": 20078,
    "flows": 6181,
-   "seconds": 0.28,
-   "pps": 70754,
+   "seconds": 0.32,
+   "pps": 62355,
    "alerts": 4,
    "by_class": {
     "NETWORK_INTRUSION_ATTEMPT": 2,
@@ -145,8 +145,8 @@
    "duplicate_of": null,
    "packets": 49877,
    "flows": 24719,
-   "seconds": 0.32,
-   "pps": 156293,
+   "seconds": 0.24,
+   "pps": 208869,
    "alerts": 8,
    "by_class": {
     "RECONNAISSANCE": 3,
@@ -161,12 +161,29 @@
    "duplicate_of": "java_rmi.pcap",
    "packets": 49877,
    "flows": 5966,
-   "seconds": 0.12,
-   "pps": 414714,
-   "alerts": 3,
+   "seconds": 0.17,
+   "pps": 290436,
+   "alerts": 4,
    "by_class": {
-    "RECONNAISSANCE": 1,
+    "RECONNAISSANCE": 2,
     "VOLUMETRIC_DDOS": 2
+   },
+   "p95_latency_ms": null
+  },
+  {
+   "file": "mirai.pcap",
+   "mb": 93.8,
+   "benign": false,
+   "duplicate_of": null,
+   "packets": 1134964,
+   "flows": 564832,
+   "seconds": 2.62,
+   "pps": 433006,
+   "alerts": 10,
+   "by_class": {
+    "SLOWLORIS": 3,
+    "RECONNAISSANCE": 4,
+    "VOLUMETRIC_DDOS": 3
    },
    "p95_latency_ms": null
   },
@@ -177,8 +194,8 @@
    "duplicate_of": null,
    "packets": 48150,
    "flows": 6160,
-   "seconds": 0.18,
-   "pps": 267269,
+   "seconds": 0.19,
+   "pps": 257183,
    "alerts": 4,
    "by_class": {
     "C2_BEACONING": 1,
@@ -186,7 +203,7 @@
     "VOLUMETRIC_DDOS": 1,
     "NETWORK_INTRUSION_ATTEMPT": 1
    },
-   "p95_latency_ms": 0.07
+   "p95_latency_ms": 0.3
   },
   {
    "file": "netbios_ssn2.pcap",
@@ -195,8 +212,8 @@
    "duplicate_of": "netbios_ssn.pcap",
    "packets": 48150,
    "flows": 12300,
-   "seconds": 0.23,
-   "pps": 204922,
+   "seconds": 0.3,
+   "pps": 159051,
    "alerts": 7,
    "by_class": {
     "C2_BEACONING": 1,
@@ -204,7 +221,7 @@
     "VOLUMETRIC_DDOS": 2,
     "NETWORK_INTRUSION_ATTEMPT": 2
    },
-   "p95_latency_ms": 0.04
+   "p95_latency_ms": 2.07
   },
   {
    "file": "normal.pcap",
@@ -214,7 +231,7 @@
    "packets": 11452,
    "flows": 529,
    "seconds": 0.05,
-   "pps": 217179,
+   "pps": 211218,
    "alerts": 1,
    "by_class": {
     "RECONNAISSANCE": 1
@@ -229,7 +246,7 @@
    "packets": 22036,
    "flows": 99,
    "seconds": 0.05,
-   "pps": 415993,
+   "pps": 486318,
    "alerts": 0,
    "by_class": {},
    "p95_latency_ms": null
@@ -241,8 +258,8 @@
    "duplicate_of": null,
    "packets": 69833,
    "flows": 1754,
-   "seconds": 0.23,
-   "pps": 310040,
+   "seconds": 0.17,
+   "pps": 401320,
    "alerts": 2,
    "by_class": {
     "RECONNAISSANCE": 1,
@@ -257,8 +274,8 @@
    "duplicate_of": null,
    "packets": 45719,
    "flows": 5981,
-   "seconds": 0.17,
-   "pps": 273467,
+   "seconds": 0.2,
+   "pps": 233466,
    "alerts": 4,
    "by_class": {
     "C2_BEACONING": 1,
@@ -266,7 +283,7 @@
     "VOLUMETRIC_DDOS": 1,
     "NETWORK_INTRUSION_ATTEMPT": 1
    },
-   "p95_latency_ms": 1.12
+   "p95_latency_ms": 0.63
   },
   {
    "file": "ruby_drb2.pcap",
@@ -275,8 +292,8 @@
    "duplicate_of": "ruby_drb.pcap",
    "packets": 45719,
    "flows": 11943,
-   "seconds": 0.24,
-   "pps": 194382,
+   "seconds": 0.27,
+   "pps": 171622,
    "alerts": 7,
    "by_class": {
     "C2_BEACONING": 1,
@@ -284,7 +301,7 @@
     "VOLUMETRIC_DDOS": 2,
     "NETWORK_INTRUSION_ATTEMPT": 2
    },
-   "p95_latency_ms": 0.86
+   "p95_latency_ms": 2.56
   },
   {
    "file": "smtp.pcap",
@@ -293,11 +310,13 @@
    "duplicate_of": null,
    "packets": 913,
    "flows": 7,
-   "seconds": 0.13,
-   "pps": 6976,
-   "alerts": 0,
-   "by_class": {},
-   "p95_latency_ms": null
+   "seconds": 0.03,
+   "pps": 26742,
+   "alerts": 1,
+   "by_class": {
+    "RECONNAISSANCE": 1
+   },
+   "p95_latency_ms": 0.57
   },
   {
    "file": "smtp22.pcap",
@@ -306,11 +325,13 @@
    "duplicate_of": "smtp.pcap",
    "packets": 913,
    "flows": 13,
-   "seconds": 0.14,
-   "pps": 6763,
-   "alerts": 0,
-   "by_class": {},
-   "p95_latency_ms": null
+   "seconds": 0.03,
+   "pps": 28395,
+   "alerts": 1,
+   "by_class": {
+    "RECONNAISSANCE": 1
+   },
+   "p95_latency_ms": 0.32
   },
   {
    "file": "tomcat.pcap",
@@ -320,10 +341,12 @@
    "packets": 452,
    "flows": 24,
    "seconds": 0.03,
-   "pps": 14010,
-   "alerts": 0,
-   "by_class": {},
-   "p95_latency_ms": null
+   "pps": 14768,
+   "alerts": 1,
+   "by_class": {
+    "NETWORK_INTRUSION_ATTEMPT": 1
+   },
+   "p95_latency_ms": -0.91
   },
   {
    "file": "tomcat2.pcap",
@@ -333,10 +356,12 @@
    "packets": 452,
    "flows": 48,
    "seconds": 0.03,
-   "pps": 15149,
-   "alerts": 0,
-   "by_class": {},
-   "p95_latency_ms": null
+   "pps": 14489,
+   "alerts": 1,
+   "by_class": {
+    "NETWORK_INTRUSION_ATTEMPT": 1
+   },
+   "p95_latency_ms": 0.06
   },
   {
    "file": "unreallrcd.pcap",
@@ -345,17 +370,17 @@
    "duplicate_of": null,
    "packets": 94549,
    "flows": 23836,
-   "seconds": 0.47,
-   "pps": 200747,
+   "seconds": 0.37,
+   "pps": 257225,
    "alerts": 19,
    "by_class": {
     "C2_BEACONING": 3,
+    "NETWORK_INTRUSION_ATTEMPT": 2,
     "RECONNAISSANCE": 3,
     "VOLUMETRIC_DDOS": 10,
-    "NETWORK_INTRUSION_ATTEMPT": 2,
     "DATA_EXFILTRATION": 1
    },
-   "p95_latency_ms": 0.45
+   "p95_latency_ms": 34.23
   },
   {
    "file": "unreallrcd2.pcap",
@@ -364,16 +389,16 @@
    "duplicate_of": "unreallrcd.pcap",
    "packets": 94549,
    "flows": 21700,
-   "seconds": 0.42,
-   "pps": 223447,
+   "seconds": 0.61,
+   "pps": 155876,
    "alerts": 7,
    "by_class": {
     "C2_BEACONING": 1,
-    "RECONNAISSANCE": 2,
     "NETWORK_INTRUSION_ATTEMPT": 2,
+    "RECONNAISSANCE": 2,
     "VOLUMETRIC_DDOS": 2
    },
-   "p95_latency_ms": 0.06
+   "p95_latency_ms": 33.87
   },
   {
    "file": "vsftpd.pcap",
@@ -382,8 +407,8 @@
    "duplicate_of": null,
    "packets": 37173,
    "flows": 4835,
-   "seconds": 0.14,
-   "pps": 259183,
+   "seconds": 0.09,
+   "pps": 434968,
    "alerts": 4,
    "by_class": {
     "C2_BEACONING": 1,
@@ -391,7 +416,7 @@
     "VOLUMETRIC_DDOS": 1,
     "NETWORK_INTRUSION_ATTEMPT": 1
    },
-   "p95_latency_ms": 0.39
+   "p95_latency_ms": 21.15
   },
   {
    "file": "vsftpd2.pcap",
@@ -400,8 +425,8 @@
    "duplicate_of": "vsftpd.pcap",
    "packets": 37173,
    "flows": 9651,
-   "seconds": 0.19,
-   "pps": 200669,
+   "seconds": 0.22,
+   "pps": 169987,
    "alerts": 7,
    "by_class": {
     "C2_BEACONING": 1,
@@ -409,7 +434,7 @@
     "VOLUMETRIC_DDOS": 2,
     "NETWORK_INTRUSION_ATTEMPT": 2
    },
-   "p95_latency_ms": 0.38
+   "p95_latency_ms": 0.9
   },
   {
    "file": "zeus.pcap",
@@ -419,12 +444,12 @@
    "packets": 2005,
    "flows": 107,
    "seconds": 0.04,
-   "pps": 51240,
+   "pps": 45625,
    "alerts": 2,
    "by_class": {
     "DGA_DOMAIN": 2
    },
-   "p95_latency_ms": 3.72
+   "p95_latency_ms": 21.08
   }
  ]
 }

@@ -13,6 +13,7 @@ import type {
   PacketRow,
   PacketDetail,
 } from '../types/alert';
+import { installAuthFetch, withKey } from '../lib/auth';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
 // Live capture can run as its own host-side service (see
@@ -29,6 +30,12 @@ export function setLiveBase(url: string | null): void {
 export const LIVE_DEFAULT_BASE = LIVE_DEFAULT;
 
 export class ApiError extends Error {}
+
+// Attach the API key to every call aimed at the API or the sensor (the sensor endpoint is user-configurable, so match it live).
+installAuthFetch((url) => {
+  if (!/^https?:/i.test(url)) return url.startsWith('/');   // same-origin relative URLs (reverse-proxy deployments)
+  return url.startsWith(API_BASE) || url.startsWith(liveBase());
+});
 
 async function j<T>(resp: Response, fallbackMsg: string): Promise<T> {
   if (!resp.ok) {
@@ -70,7 +77,7 @@ export const pcapInspector = {
   detail: (analysisId: string, n: number) =>
     fetch(`${API_BASE}/analyze/${analysisId}/packet/${n}`).then((r) => j<PacketDetail>(r, 'packet detail failed')),
   exportUrl: (analysisId: string, filter: string) =>
-    `${API_BASE}/analyze/${analysisId}/export.pcap?filter=${encodeURIComponent(filter)}`,
+    withKey(`${API_BASE}/analyze/${analysisId}/export.pcap?filter=${encodeURIComponent(filter)}`),
 };
 
 // ── Pipeline & model introspection ─────────────────────────────────────
@@ -189,8 +196,8 @@ export const live = {
     fetch(`${liveBase()}/capture/packets?after=${after}&limit=${limit}&filter=${encodeURIComponent(filter)}`)
       .then((r) => j<PacketRow[]>(r, 'packet list failed')),
   packet: (id: number) => fetch(`${liveBase()}/capture/packet/${id}`).then((r) => j<PacketDetail>(r, 'packet detail failed')),
-  exportUrl: (filter: string) => `${liveBase()}/capture/export.pcap?filter=${encodeURIComponent(filter)}`,
-  streamUrl: () => `${liveBase()}/capture/stream`,
+  exportUrl: (filter: string) => withKey(`${liveBase()}/capture/export.pcap?filter=${encodeURIComponent(filter)}`),
+  streamUrl: () => withKey(`${liveBase()}/capture/stream`),
 };
 
 export interface Coverage {

@@ -55,9 +55,12 @@ class HttpAlertForwarder:
 
     def _post(self, alerts: list[dict]) -> None:
         try:
+            headers = {"Content-Type": "application/json"}
+            key = os.environ.get("STEALTHTAP_API_KEY", "").strip()
+            if key:
+                headers["X-API-Key"] = key
             req = urllib.request.Request(
-                self.endpoint, data=json.dumps(alerts).encode(),
-                headers={"Content-Type": "application/json"}, method="POST",
+                self.endpoint, data=json.dumps(alerts).encode(), headers=headers, method="POST",
             )
             urllib.request.urlopen(req, timeout=5).read()
             self.sent += len(alerts)

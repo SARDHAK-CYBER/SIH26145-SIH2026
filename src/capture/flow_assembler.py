@@ -17,6 +17,7 @@ import hashlib
 import time
 from typing import Any, Iterator, Optional
 
+from src.capture.appsvc import parse_appsvc
 from src.capture.kerberos import parse_kdc_reply
 from src.capture.ot import parse_bacnet, parse_enip, parse_iec104, parse_opcua, parse_profinet_dcp, parse_s7comm
 from src.capture.ja4 import ja4_from_client_hello, sni_from_client_hello
@@ -276,6 +277,20 @@ class FlowAssembler:
                         "uid": flow.uid, "ts": ts, "id.orig_h": src_ip, "id.orig_p": sport,
                         "id.resp_h": dst_ip, "id.resp_p": dport, "proto": "tcp",
                         "function": function, "detail": detail, "code": code,
+                        "segment_hash": _seg_hash(flow.uid, function, detail),
+                    })
+            if rec is None and dport not in (102, 2404, 4840, 44818) and 502 not in (sport, dport) and 20000 not in (sport, dport):
+                a = parse_appsvc(payload, sport, dport)
+                if a is not None:
+                    # plain-text service attacks; server->client evidence (401, SMTP 55x) is oriented like Zeek:
+                    # originator = the client, so state is keyed per client
+                    function, detail, code = a
+                    self.stats["appsvc"] = self.stats.get("appsvc", 0) + 1
+                    reply = function in ("http_401", "smtp_reject")
+                    oh, op, rh, rp = (dst_ip, dport, src_ip, sport) if reply else (src_ip, sport, dst_ip, dport)
+                    rec = ("appsvc", {
+                        "uid": flow.uid, "ts": ts, "id.orig_h": oh, "id.orig_p": op, "id.resp_h": rh, "id.resp_p": rp,
+                        "proto": "tcp", "function": function, "detail": detail, "code": code, "response": reply,
                         "segment_hash": _seg_hash(flow.uid, function, detail),
                     })
             if rec is not None:

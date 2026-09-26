@@ -56,6 +56,8 @@ app = FastAPI(title="StealthTap API", version="1.0.0")
 # dev/prod dashboard origins rather than a blanket wildcard.
 _default_origins = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,http://127.0.0.1:4173"
 _cors_origins = [o.strip() for o in os.environ.get("STEALTHTAP_CORS_ORIGINS", _default_origins).split(",") if o.strip()]
+from src import security
+security.install(app)   # before CORS so CORS wraps the 401 (last-added middleware is outermost)
 app.add_middleware(
     CORSMiddleware, allow_origins=_cors_origins, allow_methods=["*"], allow_headers=["*"],
 )

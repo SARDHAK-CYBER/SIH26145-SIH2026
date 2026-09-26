@@ -11,6 +11,7 @@
 
 #[cfg(all(target_os = "linux", feature = "afxdp"))]
 mod afxdp;
+mod appsvc;
 mod capture;
 mod eng01;
 mod eng02;
@@ -267,6 +268,7 @@ impl LiveFlowAssembler {
         d.set_item("opcua", s.opcua)?;
         d.set_item("opcua_encrypted", s.opcua_encrypted)?;
         d.set_item("opcua_unsecured", s.opcua_unsecured)?;
+        d.set_item("appsvc", s.appsvc)?;
         d.set_item("profinet", s.profinet)?;
         d.set_item("conn", s.conn)?;
         Ok(d.into())

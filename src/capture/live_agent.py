@@ -892,6 +892,9 @@ def _cmd_serve(a):
         print("[live_agent] scapy pre-warmed")
     except Exception as exc:
         print(f"[live_agent] scapy pre-warm skipped: {exc}")
+    from src import security
+    security.require_key_for_bind(a.host)
+    print(f"[live_agent] API key auth {'ON' if security.configured_key() else 'OFF (loopback only)'}")
     uvicorn.run(build_app(), host=a.host, port=a.port, log_level="info")
 
 

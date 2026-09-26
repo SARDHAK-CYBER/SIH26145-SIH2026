@@ -22,7 +22,7 @@ from typing import Any
 
 # Log types this mapper understands. Anything else falls through to the
 # common flow fields only.
-KNOWN_LOG_TYPES = ("conn", "dns", "ssl", "modbus", "dnp3", "http", "kerberos", "cip", "s7comm", "iec104", "bacnet", "opcua", "profinet")
+KNOWN_LOG_TYPES = ("conn", "dns", "ssl", "modbus", "dnp3", "http", "kerberos", "cip", "s7comm", "iec104", "bacnet", "opcua", "profinet", "appsvc")
 
 
 def compute_segment_hash(rec: dict[str, Any]) -> str:
@@ -116,6 +116,11 @@ def map_record(rec: dict[str, Any], log_type: str) -> dict[str, Any]:
         flow["protocol_analyzed"] = "bacnet"
         flow["bacnet_service"] = rec.get("function", "")
         flow["bacnet_kind"] = rec.get("detail", "")
+    elif log_type == "appsvc":
+        flow["protocol_analyzed"] = "appsvc"
+        flow["app_function"] = rec.get("function", "")
+        flow["app_detail"] = rec.get("detail", "")
+        flow["app_code"] = rec.get("code", 0)
     elif log_type == "iec104":
         flow["protocol_analyzed"] = "iec104"
         flow["iec104_type"] = rec.get("function", "")

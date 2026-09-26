@@ -52,6 +52,7 @@ from src.engines.eng08_yara_scan import YaraFileScanner
 from src.engines.eng09_http_threats import HTTPThreatDetector
 from src.engines.eng10_suricata import parse_suricata_alerts
 from src.engines.eng11_kerberos import KerberosAttackDetector
+from src.engines.eng14_appsvc import AppServiceAttackDetector
 from src.engines.eng12_bzar_notices import parse_bzar_notices
 from src.inference.model_server import HybridModelServer, MIN_ML_CONFIDENCE
 from src.inference.ml_alerts import build_ml_alert, ML_THREAT_MAPPING
@@ -316,6 +317,7 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
         "eng07": OTIndustrialAnomalyDetector(),
         "eng09": HTTPThreatDetector(),
         "eng11": KerberosAttackDetector(),
+        "eng14": AppServiceAttackDetector(),
     }
     alerts: list[dict] = []
     coverage = {name: {"records_processed": 0, "alerts_fired": 0} for name in list(rule_engines) + ["ml_flow", "ml_tls", "ml_modbus", "bzar"]}
@@ -472,6 +474,25 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
             coverage["eng11"]["alerts_fired"] += 1
             alerts.append(alert.model_dump(mode="json"))
 
+    # Payload-level events from the native decoders (plain-text service attacks + the OT protocols Zeek is not built to
+    # log here): fed to ENG-14 / ENG-07 exactly like the live path does, so an upload and a live capture of the same
+    # traffic reach the same verdict.
+    for rec in parsed.get("appsvc", []):
+        flow = map_record(rec, "appsvc")
+        _run_rule("eng14", flow)
+        alert = await rule_engines["eng14"].score(flow)
+        if alert:
+            coverage["eng14"]["alerts_fired"] += 1
+            alerts.append(alert.model_dump(mode="json"))
+    for kind in _OT_PAYLOAD_KINDS:
+        for rec in parsed.get(kind, []):
+            flow = map_record(rec, kind)
+            _run_rule("eng07", flow)
+            alert = await rule_engines["eng07"].score(flow)
+            if alert:
+                coverage["eng07"]["alerts_fired"] += 1
+                alerts.append(alert.model_dump(mode="json"))
+
     # BZAR operates on the whole notice.log at once, not per-record
     # scoring like the other engines -- it does its own internal
     # filtering for BZAR::-prefixed notices.
@@ -482,6 +503,59 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
     alerts.extend(bzar_alerts)
 
     return alerts, coverage
+
+
+_OT_PAYLOAD_KINDS = ("s7comm", "iec104", "bacnet", "opcua", "profinet")
+_PAYLOAD_KINDS = ("appsvc",) + _OT_PAYLOAD_KINDS
+PAYLOAD_SCAN_MAX_BYTES = int(os.environ.get("PAYLOAD_SCAN_MAX_BYTES", str(400 * 1024 * 1024)))
+
+
+def _payload_events(contents: bytes) -> dict[str, list[dict]]:
+    """One native pass over the capture collecting decoded application-layer events (see src/capture/appsvc.py and
+    native/.../appsvc.rs). Best-effort: no native module, or an unreadable file, simply yields nothing."""
+    out: dict[str, list[dict]] = {k: [] for k in _PAYLOAD_KINDS}
+    try:
+        import stealthtap_core as core
+    except ImportError:
+        return out
+    if len(contents) > PAYLOAD_SCAN_MAX_BYTES:
+        return out
+    with tempfile.NamedTemporaryFile(suffix=".pcap", delete=False) as tmp:
+        tmp.write(contents)
+        path = tmp.name
+    try:
+        from src.capture.rawpcap import iter_raw_pcap
+        asm = core.LiveFlowAssembler(60.0)
+        frames = iter_raw_pcap(path)
+        if frames is None:                      # pcapng / non-Ethernet link: scapy's raw reader (slower, so size-capped)
+            if len(contents) > 100 * 1024 * 1024:
+                return out
+            from scapy.utils import RawPcapNgReader, RawPcapReader
+            def _scapy_frames():
+                for reader in (RawPcapNgReader, RawPcapReader):
+                    try:
+                        with reader(path) as r:
+                            for data, meta in r:
+                                if reader is RawPcapNgReader:
+                                    yield ((meta.tshigh << 32 | meta.tslow) / float(getattr(meta, "tsresol", 1000000) or 1000000)), data
+                                else:
+                                    yield meta.sec + meta.usec / 1e6, data
+                        return
+                    except Exception:
+                        continue
+            frames = _scapy_frames()
+        for ts, raw in frames:
+            for kind, rec in asm.process(ts, raw):
+                if kind in out:
+                    out[kind].append(rec)
+    except Exception as exc:
+        print(f"[pcap_analysis] payload scan skipped: {exc}")
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return out
 
 
 def _run_engines_blocking(parsed, model_server, redis_client):
@@ -589,6 +663,9 @@ async def _analyze_contents(contents: bytes, filename: str, app_state) -> dict:
             parsed = await asyncio.to_thread(_parse_fallback, contents)
         except Exception as exc:
             raise HTTPException(422, f"could not parse pcap via either Zeek or the fallback parser: {exc}")
+    payload = await asyncio.to_thread(_payload_events, contents)
+    for k, v in payload.items():
+        parsed.setdefault(k, []).extend(v)
     parse_time = time.time() - t0
 
     model_server = getattr(app_state, "model_server", None)
@@ -645,6 +722,8 @@ async def _analyze_contents(contents: bytes, filename: str, app_state) -> dict:
             "http_requests": len(parsed.get("http", [])),
             "kerberos_events": len(parsed.get("kerberos", [])),
             "cip_events": len(parsed.get("cip", [])),
+            "appsvc_events": len(parsed.get("appsvc", [])),
+            "ot_payload_events": sum(len(parsed.get(k, [])) for k in _OT_PAYLOAD_KINDS),
             "files_yara_scanned": len(yara_alerts) if parser_used == "zeek" else None,
         },
         "pipeline_coverage": pipeline_coverage,

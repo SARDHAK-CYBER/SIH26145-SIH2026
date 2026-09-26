@@ -352,6 +352,8 @@ def build_app():
     from fastapi.middleware.cors import CORSMiddleware
 
     app = FastAPI(title="StealthTap Live Capture", version="1.0.0")
+    from src import security
+    security.install(app)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.include_router(router)
     from src.api.discovery import router as discovery_router

@@ -1,0 +1,62 @@
+﻿name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      SCAPY_USE_PCAPDNET: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: native/stealthtap_core }
+      - name: Install Python dependencies and the native core
+        run: |
+          python -m pip install -U pip maturin psutil
+          pip install -r requirements.txt
+          maturin build --release --manifest-path native/stealthtap_core/Cargo.toml -o wheels
+          pip install --no-index --find-links wheels stealthtap_core
+        shell: bash
+      - name: Native unit tests
+        run: cargo test --release --manifest-path native/stealthtap_core/Cargo.toml
+      - name: pytest
+        run: python -m pytest -q -x
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: dashboard-app } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: dashboard-app/package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose file is valid, refuses to start without secrets, and publishes no datastore port on 0.0.0.0
+        run: |
+          if docker compose config >/dev/null 2>&1; then echo "compose must refuse to render without secrets"; exit 1; fi
+          export POSTGRES_PASSWORD=ci-postgres-password OPENSEARCH_ADMIN_PASSWORD='Ci-Opensearch-1!' STEALTHTAP_API_KEY=ci-api-key-0123456789abcdef
+          docker compose config > rendered.yml
+          python3 - <<'PY'
+          import re, sys
+          txt = open("rendered.yml").read()
+          # datastore ports must be bound to loopback
+          for svc, port in (("redis", "6379"), ("postgres", "5432"), ("opensearch", "9200"), ("redpanda", "9092")):
+              blk = re.search(rf"\n  {svc}:\n(.*?)(?=\n  \S)", txt, re.S)
+              assert blk and re.search(rf"host_ip: 127\.0\.0\.1[\s\S]*?published: \"?{port}", blk.group(1)), f"{svc}:{port} not loopback-bound"
+          print("ok")
+          PY
+

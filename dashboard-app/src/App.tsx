@@ -3,6 +3,8 @@ import type { ThemeMode } from './components/ThemeToggle';
 import { LiveWorkspace } from './LiveWorkspace';
 import { PcapWorkspace } from './PcapWorkspace';
 import type { Workspace } from './types/alert';
+import { AuthGate } from './components/AuthGate';
+import './api/client';   // installs the API-key fetch wrapper before any request
 
 function workspaceFromHash(): Workspace {
   return window.location.hash.startsWith('#/pcap') ? 'pcap' : 'live';
@@ -48,6 +50,7 @@ export default function App() {
         <div className="orb orb-2" />
         <div className="orb orb-3" />
       </div>
+      <AuthGate />
       {workspace === 'live' ? <LiveWorkspace {...common} /> : <PcapWorkspace {...common} />}
     </>
   );

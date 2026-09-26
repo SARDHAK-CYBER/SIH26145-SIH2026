@@ -69,10 +69,13 @@ def sha256(path: Path) -> str:
 
 def run_file(path: Path, model_server, max_packets):
     from pcap_parser import parse_pcap
-    from src.api.pcap_analysis import _run_engines
+    from src.api.pcap_analysis import _run_engines, _payload_events
 
     t0 = time.time()
     parsed = parse_pcap(str(path), max_packets=max_packets)
+    # same payload-level decoders the API's upload path runs (plain-text service attacks + OT protocols)
+    for k, v in _payload_events(path.read_bytes()).items():
+        parsed.setdefault(k, []).extend(v)
     parse_s = time.time() - t0
     t0 = time.time()
     alerts, coverage = asyncio.new_event_loop().run_until_complete(

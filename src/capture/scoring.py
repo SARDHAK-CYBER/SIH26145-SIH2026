@@ -41,7 +41,7 @@ except Exception:
 # TLS handshake snapshot can't false-positive as exfiltration.
 DISPATCH_IMMEDIATE = {
     "dns": ("eng03",), "ssl": ("eng04", "eng03s"),
-    "modbus": ("eng07",), "dnp3": ("eng07",), "s7comm": ("eng07",), "iec104": ("eng07",), "cip": ("eng07",), "bacnet": ("eng07",), "opcua": ("eng07",), "profinet": ("eng07",),
+    "modbus": ("eng07",), "dnp3": ("eng07",), "s7comm": ("eng07",), "iec104": ("eng07",), "cip": ("eng07",), "bacnet": ("eng07",), "opcua": ("eng07",), "profinet": ("eng07",), "appsvc": ("eng14",),
     "http": ("eng09",), "kerberos": ("eng11",),
 }
 IMMEDIATE_ML_FAMILY = {"ssl": "tls", "modbus": "modbus"}
@@ -106,6 +106,7 @@ class ScoringEngine:
         from src.engines.eng09_http_threats import HTTPThreatDetector
         from src.engines.eng11_kerberos import KerberosAttackDetector
         from src.engines.eng13_bruteforce import BruteForceDetector
+        from src.engines.eng14_appsvc import AppServiceAttackDetector
 
         tag = f"[live_agent worker={self.worker_id}]" if self.worker_id is not None else "[live_agent]"
         # Single-process (worker_id is None): prefer the faster MemoryStore
@@ -166,6 +167,7 @@ class ScoringEngine:
             "eng09": HTTPThreatDetector(),
             "eng11": KerberosAttackDetector(),
             "eng13": BruteForceDetector(redis_client=r),
+            "eng14": AppServiceAttackDetector(),
         }
 
     def loaded_ml_families(self) -> list:

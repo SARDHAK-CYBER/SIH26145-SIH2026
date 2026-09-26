@@ -123,7 +123,7 @@ pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out),
 #[derive(Default, Clone)]
 pub struct Stats {
     pub packets: u64, pub non_ip: u64, pub flows_seen: u64,
-    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub opcua: u64, pub opcua_encrypted: u64, pub opcua_unsecured: u64, pub profinet: u64, pub conn: u64,
+    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub opcua: u64, pub opcua_encrypted: u64, pub opcua_unsecured: u64, pub profinet: u64, pub appsvc: u64, pub conn: u64,
 }
 
 // Function-code name tables -- identical to flow_assembler.py's _MODBUS_FC / _DNP3_FC.
@@ -634,6 +634,15 @@ impl LiveFlowAssembler {
                         resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
                         function, detail, code, class_id: 0, instance_id: 0, response: false }));
                 }
+            } else if let Some((function, detail, code)) = crate::appsvc::parse_appsvc(l4.payload, l4.sport, l4.dport) {
+                // plain-text service attacks (SMTP enumeration, HTTP auth attempts/admin deploy, distcc). Server->client
+                // evidence (401, SMTP 55x) is oriented like Zeek: originator = the client, so state is keyed per client.
+                self.stats.appsvc += 1;
+                let reply = function == "http_401" || function == "smtp_reject";
+                let (oh, op, rh, rp) = if reply { (dst_ip.clone(), l4.dport, src_ip.clone(), l4.sport) } else { (src_ip.clone(), l4.sport, dst_ip.clone(), l4.dport) };
+                out.push(Immediate::Ot(OtOut { kind: "appsvc", uid: uid.clone(), ts, orig_h: oh, orig_p: op,
+                    resp_h: rh, resp_p: rp, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
+                    function, detail, code, class_id: 0, instance_id: 0, response: reply }));
             }
         }
 
