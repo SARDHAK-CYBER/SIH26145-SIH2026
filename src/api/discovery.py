@@ -40,6 +40,16 @@ class DiscoverRequest(BaseModel):
     cidr: Optional[str] = None
 
 
+def _elevated() -> bool:
+    try:
+        if os.name == "nt":
+            import ctypes
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        return os.geteuid() == 0
+    except Exception:
+        return False
+
+
 def _nmap() -> Optional[str]:
     p = shutil.which("nmap")
     if p:
@@ -101,8 +111,13 @@ def _run(job_id: str, iface: str, target: ipaddress.IPv4Network) -> None:
         job.update(status="error", error="nmap is not installed")
         return
     try:
-        cp = subprocess.run([exe, "-sn", "-n", "--max-rate", str(MAX_RATE), "-oX", "-", str(target)],
-                            capture_output=True, text=True, timeout=600)
+        args = [exe, "-sn", "-n", "--max-rate", str(MAX_RATE)]
+        if not _elevated():
+            # No raw sockets without privileges (and on Windows Npcap's admin-only mode would stall ~2 minutes on a UAC
+            # prompt): fall back to connect()-based liveness probes -- finds hosts with an open common port, so it is a
+            # subset of what the ARP sweep of an elevated sensor finds.
+            args += ["--unprivileged", "-PS22,80,135,443,445,3389", "--host-timeout", "5s"]
+        cp = subprocess.run(args + ["-oX", "-", str(target)], capture_output=True, text=True, timeout=600)
         root = ET.fromstring(cp.stdout)
         hosts = []
         for h in root.findall("host"):
@@ -122,7 +137,8 @@ def _run(job_id: str, iface: str, target: ipaddress.IPv4Network) -> None:
                 row["hostname"] = hn.get("name")
             hosts.append(row)
         hosts.sort(key=lambda r: tuple(int(x) for x in r["ip"].split(".")))
-        job.update(status="done", hosts=hosts, finished=time.time())
+        job.update(status="done", hosts=hosts, finished=time.time(), mode="arp/ping (elevated)" if _elevated() else "tcp-connect probes (unprivileged)",
+                   note=None if _elevated() else "Unprivileged fallback: results are LOW confidence (on the host-only VMware subnet it reported 10 of 16 addresses up with ~500 ms uniform latency, which is not credible). Use the elevated sensor for an ARP sweep.")
     except Exception as exc:
         job.update(status="error", error=f"{type(exc).__name__}: {exc}")
 
