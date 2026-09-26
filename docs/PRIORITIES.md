@@ -53,7 +53,7 @@ Full report: `docs/reports/LATEST.md` (history: `docs/reports/history.csv`)
 | 14 | IPv6 validated on a constructed packet, not a captured live one | Open (low) | Needs the elevated sensor on the real Wi-Fi |
 | 20 | Multi-core scale-out beyond one process | Open | Needs batched/native ENG-01 state or a shared-memory design; see #9 |
 | 15 | Hard-negative retraining (dns/flow), long-run live-baseline evaluation | Open | Needs more real benign data |
-| 16 | OT breadth | Partly done | S7comm + IEC-104 detection added and validated on real captures; EtherNet/IP, OPC UA, PROFINET, BACnet still open (no real captures) |
+| 16 | OT breadth | Mostly done | Live decoders + ENG-07 rules validated on real captures: Modbus, DNP3, S7comm, IEC-104, **EtherNet/IP/CIP** (Digital Bond: lock/reboot/download/firmware/date-change alert, device-status polling silent). Still open: OPC UA, PROFINET, BACnet (repo's BACnet/PROFINET files are Git-LFS pointers/none available) |
 | 17 | Packet-level (Wireshark-style) inspector in the dashboard | **Done** | Live ring + uploaded-PCAP index, layer tree/hex/filter/export |
 | 18 | ENG-05 fan-out threshold borderline FP | **Closed — not a FP** | The `normal.pcap` alert is a real nmap-style SYN scan of the router (fixed sport 54920, ~80 ports) |
 | 19 | Windows kernel-bypass | Not planned | XDP for Windows is Server-only |
@@ -71,7 +71,7 @@ on both OSes. Linux capture sensors can add `--features afxdp` (AF_XDP).
 | # | Item | Status | Notes |
 |---|---|---|---|
 | 21 | Live NIC capture on the native engine, real Wi-Fi, incl. IPv6 | **Done** | Elevated sensor, real Wi-Fi + real internet downloads: 148 Mbit/s, 0 kernel drops, agent saw 296,070 packets vs NIC counter 292,804 over 30 s, 179 local devices learned passively (ARP/broadcast), real link-local IPv6 (ICMPv6 ND) parsed. This network has no global IPv6 (`curl -6` fails); global-v6 flows remain covered by tests only. Real-traffic FP found and fixed: periodic LLMNR multicast flagged as C2 (ENG-02 now ignores multicast/broadcast) |
-| 22 | Multi-threaded capture/assembly sharding | Open | Single capture thread: ~1M pps on real mixes, 100–420k pps on flow-per-packet floods |
+| 22 | Multi-threaded capture/assembly sharding | **Done** | Flow-hash sharded assembler threads (default min(4, cores/4); `STEALTHTAP_SHARDS`). Flood capture (mirai) 228k → 395k → 486k pps at 1/2/4 shards; real mix (normal2) **1.58M pps ≈ 10 Gbit/s**. Output identical to 1 shard on all 26 real captures (`tests/test_native_capture.py`) |
 | 23 | Live-baseline sampling under flood | Open | Baseline is fed ≤ 2,000 flows/tick when flow rates are extreme |
-| 24 | Hard-negative retraining (dns/flow) | Open | Needs a longer real benign live capture |
+| 24 | Hard-negative retraining (dns/flow) | **Not needed on current evidence** | 2.7M real live packets on Wi-Fi produced 0 ML alerts (dns model 0/25 CDN-style names, 0/33 real SNIs; flow model is corroboration-only). Retraining also needs the original 675k-row/CICIDS datasets, which are not in this repo — revisit only if a real ML false positive appears |
 | 25 | Network discovery (active, own subnet) | Implemented, sweep untested | `POST /network/discover` (nmap -sn only, private ranges inside an attached subnet, ≤1024 addresses, rate-limited; scope rules verified). A real sweep needs the elevated sensor restarted with this code (nmap timed out ~100 s un-elevated) |

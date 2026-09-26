@@ -240,4 +240,6 @@ Bottlenecks found and fixed: Windows EcoQoS clamps a background process ~8× aft
 * A Wi-Fi client sees its own traffic plus broadcast/multicast, not other hosts' unicast; whole-network capture needs a mirror port, TAP or gateway placement.
 * No GPU path: inference is ~2 µs/row on CPU; a GPU would only add latency.
 * Replayed loops look periodic (C2_BEACONING artifacts) — accuracy is measured on single passes only.
-* EtherNet/IP, OPC UA, PROFINET, BACnet still have no detection logic (no real captures available to validate against).
+* OPC UA, PROFINET and BACnet still have no detection logic (no real captures to validate against). EtherNet/IP/CIP is now decoded live and validated on real Digital Bond captures.
+* Capture/assembly is sharded across flow-hash threads (default min(4, cores/4)): flood capture 228k→486k pps, real mix 1.58M pps ≈ 10 Gbit/s, identical output to a single shard.
+* Active discovery (`/network/discover`) is implemented and scope-checked but a real sweep was not run (needs the elevated sensor restarted with this code).
