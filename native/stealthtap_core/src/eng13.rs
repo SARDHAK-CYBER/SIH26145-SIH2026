@@ -27,18 +27,20 @@ pub struct NativeEng13 {
     max_bucket_seen: i64,
 }
 
-#[pymethods]
+pub struct Eng13Hit {
+    pub confidence: f64,
+    pub count: u32,
+    pub dst_port: u16,
+}
+
 impl NativeEng13 {
-    #[new]
-    fn new() -> Self {
+    pub fn new_core() -> Self {
         NativeEng13 { attempts: HashMap::new(), alerted: HashSet::new(), max_bucket_seen: i64::MIN }
     }
 
-    /// Returns None, or a dict with confidence/evidence ready for
-    /// Python to build the Alert, mirroring BruteForceDetector.score().
-    fn check(&mut self, py: Python<'_>, src_ip: &str, dst_ip: &str, dst_port: u16, ts: f64) -> PyResult<Option<PyObject>> {
+    pub fn core(&mut self, src_ip: &str, dst_ip: &str, dst_port: u16, ts: f64) -> Option<Eng13Hit> {
         if !AUTH_PORTS.contains(&dst_port) {
-            return Ok(None);
+            return None;
         }
         let bucket = bucket_of(ts);
         if bucket > self.max_bucket_seen {
@@ -55,25 +57,44 @@ impl NativeEng13 {
             *c
         };
         if count < ATTEMPT_THRESHOLD {
-            return Ok(None);
+            return None;
         }
         if self.alerted.contains(&key) {
-            return Ok(None);
+            return None;
         }
         self.alerted.insert(key);
 
         let confidence = (70.0 + (count as f64 - ATTEMPT_THRESHOLD as f64) * 0.5).min(97.0);
-        let confidence = (confidence * 10.0).round() / 10.0;
+        Some(Eng13Hit { confidence: (confidence * 10.0).round() / 10.0, count, dst_port })
+    }
+}
 
-        let evidence = PyDict::new_bound(py);
-        evidence.set_item("connection_attempts", count)?;
-        evidence.set_item("window_seconds", WINDOW_SECONDS)?;
-        evidence.set_item("target_port", dst_port)?;
-        evidence.set_item("threshold", ATTEMPT_THRESHOLD)?;
+pub fn hit_to_py(py: Python<'_>, h: &Eng13Hit) -> PyResult<PyObject> {
+    let evidence = PyDict::new_bound(py);
+    evidence.set_item("connection_attempts", h.count)?;
+    evidence.set_item("window_seconds", WINDOW_SECONDS)?;
+    evidence.set_item("target_port", h.dst_port)?;
+    evidence.set_item("threshold", ATTEMPT_THRESHOLD)?;
 
-        let out = PyDict::new_bound(py);
-        out.set_item("confidence", confidence)?;
-        out.set_item("evidence", evidence)?;
-        Ok(Some(out.into()))
+    let out = PyDict::new_bound(py);
+    out.set_item("confidence", h.confidence)?;
+    out.set_item("evidence", evidence)?;
+    Ok(out.into())
+}
+
+#[pymethods]
+impl NativeEng13 {
+    #[new]
+    fn new() -> Self {
+        NativeEng13::new_core()
+    }
+
+    /// Returns None, or a dict with confidence/evidence ready for
+    /// Python to build the Alert, mirroring BruteForceDetector.score().
+    fn check(&mut self, py: Python<'_>, src_ip: &str, dst_ip: &str, dst_port: u16, ts: f64) -> PyResult<Option<PyObject>> {
+        match self.core(src_ip, dst_ip, dst_port, ts) {
+            Some(h) => Ok(Some(hit_to_py(py, &h)?)),
+            None => Ok(None),
+        }
     }
 }

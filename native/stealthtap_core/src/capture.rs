@@ -30,6 +30,7 @@ use pyo3::types::{PyDict, PyList};
 
 use crate::inventory::{mac_str, PROTO_NAMES};
 use crate::ja4::ja4_and_sni;
+use crate::flow_engines::{hit_to_py as flow_hit_to_py, FlowEngines, Hit};
 use crate::live::{now_unix, Immediate, LiveConnRecord, LiveFlowAssembler};
 use crate::parse::{parse_dns_query, parse_ip_header, parse_l4};
 use crate::pcap::PcapReader;
@@ -366,7 +367,7 @@ fn line_of(id: u64, s: &Summary) -> String {
 
 /// What the capture thread hands to Python: a protocol record seen on the wire, or a flow
 /// that ended (only produced at the end of each replay loop, so loops don't merge into one flow).
-enum Item { Imm(Immediate), Conn(LiveConnRecord) }
+enum Item { Imm(Immediate), Conn(LiveConnRecord), Hit(Hit, LiveConnRecord) }
 
 // ------------------------------------------------------------------- shared state
 struct Shared {
@@ -375,6 +376,7 @@ struct Shared {
     finished: AtomicBool,
     asm: Mutex<LiveFlowAssembler>,
     out: Mutex<VecDeque<(f64, Item)>>,
+    engines: Mutex<Option<FlowEngines>>,   // native flow engines (see flow_engines.rs); None = Python scores flows
     out_cv: Condvar,
     out_cap: usize,
     ring: Mutex<PacketRing>,
@@ -498,6 +500,49 @@ fn run_live(sh: Arc<Shared>, api: Arc<PcapApi>, h: Handle, linktype: i32) {
     sh.running.store(false, Ordering::SeqCst);
 }
 
+const BASELINE_SAMPLE_MAX: usize = 2000;
+
+/// Run the native flow engines over flows that just ended (when enabled) and return what Python
+/// still needs: the hits, plus an evenly-strided sample of the records for the online baseline.
+/// With the engines disabled every record is passed through unchanged (Python scores them).
+fn score_ended(sh: &Shared, ended: Vec<LiveConnRecord>, sample_max: usize) -> Vec<Item> {
+    let mut guard = sh.engines.lock().unwrap();
+    let Some(eng) = guard.as_mut() else { return ended.into_iter().map(Item::Conn).collect(); };
+    let mut hits: Vec<Hit> = Vec::new();
+    let mut hit_idx: Vec<usize> = Vec::new();
+    for (i, r) in ended.iter().enumerate() {
+        let before = hits.len();
+        eng.expire(r, &mut hits);
+        for _ in before..hits.len() { hit_idx.push(i); }
+    }
+    let stride = (ended.len() / sample_max.max(1)).max(1);
+    let mut out: Vec<Item> = Vec::new();
+    let mut hit_iter = hits.into_iter().zip(hit_idx.into_iter()).peekable();
+    for (i, r) in ended.into_iter().enumerate() {
+        // a record can carry several hits; each hit owns a copy of its record (rare)
+        let mut mine: Vec<Hit> = Vec::new();
+        while let Some((_, hi)) = hit_iter.peek() {
+            if *hi == i { mine.push(hit_iter.next().unwrap().0); } else { break; }
+        }
+        let keep_sample = i % stride == 0;
+        let mut owned = Some(r);
+        for h in mine {
+            let rec = owned.as_ref().map(clone_conn).unwrap();
+            out.push(Item::Hit(h, rec));
+        }
+        if keep_sample { out.push(Item::Conn(owned.take().unwrap())); }
+    }
+    out
+}
+
+fn clone_conn(r: &LiveConnRecord) -> LiveConnRecord {
+    LiveConnRecord {
+        uid: r.uid.clone(), ts: r.ts, orig_h: r.orig_h.clone(), orig_p: r.orig_p, resp_h: r.resp_h.clone(),
+        resp_p: r.resp_p, proto: r.proto, duration: r.duration, orig_bytes: r.orig_bytes, resp_bytes: r.resp_bytes,
+        orig_pkts: r.orig_pkts, resp_pkts: r.resp_pkts, segment_hash: r.segment_hash.clone(), snapshot_ts: r.snapshot_ts,
+    }
+}
+
 fn run_file(sh: Arc<Shared>, path: String, loops: u64, speed: f64) {
     let mut batch = Batch::new();
     let mut span_offset = 0f64;
@@ -553,8 +598,13 @@ fn run_file(sh: Arc<Shared>, path: String, loops: u64, speed: f64) {
         {
             let ended = { sh.asm.lock().unwrap().expire(f64::MAX / 4.0)   /* far-future clock: everything still open has ended */ };
             if !ended.is_empty() {
+                let items = score_ended(&sh, ended, BASELINE_SAMPLE_MAX);
                 let mut out = sh.out.lock().unwrap();
-                for r in ended { if out.len() >= sh.out_cap { sh.rec_dropped.fetch_add(1, Ordering::Relaxed); continue; } out.push_back((now_unix(), Item::Conn(r))); }
+                let now = now_unix();
+                for it in items {
+                    if out.len() >= sh.out_cap { sh.rec_dropped.fetch_add(1, Ordering::Relaxed); continue; }
+                    out.push_back((now, it));
+                }
                 sh.out_cv.notify_all();
             }
         }
@@ -563,6 +613,14 @@ fn run_file(sh: Arc<Shared>, path: String, loops: u64, speed: f64) {
     flush_batch(&sh, &mut batch);
     sh.finished.store(true, Ordering::SeqCst);
     sh.running.store(false, Ordering::SeqCst);
+}
+
+fn hits_to_list(py: Python<'_>, hits: Vec<(Hit, LiveConnRecord)>) -> PyResult<PyObject> {
+    let list = PyList::empty_bound(py);
+    for (h, rec) in &hits {
+        list.append((h.engine, crate::live_conn_to_dict(py, rec)?, flow_hit_to_py(py, h)?))?;
+    }
+    Ok(list.into())
 }
 
 // ------------------------------------------------------------------ Python class
@@ -593,7 +651,7 @@ impl NativeCapture {
         let sh = Arc::new(Shared {
             stop: AtomicBool::new(false), running: AtomicBool::new(false), finished: AtomicBool::new(false),
             asm: Mutex::new(LiveFlowAssembler::new(idle_timeout_s)),
-            out: Mutex::new(VecDeque::new()), out_cv: Condvar::new(), out_cap: max_pending_records,
+            out: Mutex::new(VecDeque::new()), engines: Mutex::new(None), out_cv: Condvar::new(), out_cap: max_pending_records,
             ring: Mutex::new(PacketRing { q: VecDeque::new(), next_id: 0, cap: ring_packets, snap: ring_snap.max(64) }),
             err: Mutex::new(None),
             recv: AtomicU64::new(0), bytes: AtomicU64::new(0), kern_recv: AtomicU64::new(0), kern_drop: AtomicU64::new(0),
@@ -674,9 +732,69 @@ impl NativeCapture {
                     let d = crate::live_conn_to_dict(py, rec)?;
                     list.append(("conn", d))?;
                 }
+                Item::Hit(h, rec) => {
+                    let d = PyDict::new_bound(py);
+                    d.set_item("engine", h.engine)?;
+                    d.set_item("rec", crate::live_conn_to_dict(py, rec)?)?;
+                    d.set_item("hit", flow_hit_to_py(py, h)?)?;
+                    list.append(("hit", d))?;
+                }
             }
         }
         Ok(list.into())
+    }
+
+    /// Turn the native flow engines on (ENG-01/02/05/06/13 evaluated in Rust). After this,
+    /// `snapshot_scored` / `expire_scored` / `flush_scored` return only hits; the plain
+    /// snapshot/expire/flush keep returning raw flow records for the Python path.
+    #[pyo3(signature = (single_flow_min_bytes=1048576.0))]
+    fn enable_flow_engines(&self, single_flow_min_bytes: f64) {
+        *self.sh.engines.lock().unwrap() = Some(FlowEngines::new(single_flow_min_bytes));
+    }
+
+    /// Snapshot active flows through ENG-01/05/13 in Rust: -> [(engine, conn_dict, hit_dict), ...]
+    #[pyo3(signature = (limit=4000))]
+    fn snapshot_scored(&self, py: Python<'_>, limit: usize) -> PyResult<PyObject> {
+        let recs = { self.sh.asm.lock().unwrap().snapshot(limit) };
+        let sh = self.sh.clone();
+        let hits = py.allow_threads(move || {
+            let mut guard = sh.engines.lock().unwrap();
+            let mut out: Vec<(Hit, LiveConnRecord)> = Vec::new();
+            if let Some(eng) = guard.as_mut() {
+                for r in &recs {
+                    let mut hs: Vec<Hit> = Vec::new();
+                    eng.snapshot(r, &mut hs);
+                    for h in hs { out.push((h, clone_conn(r))); }
+                }
+            }
+            out
+        });
+        hits_to_list(py, hits)
+    }
+
+    /// Expire idle flows (or, with `flush=True`, every flow) through all five engines in Rust.
+    /// -> (hits [(engine, conn_dict, hit_dict)], sample [conn_dict] for the baseline, total_ended)
+    #[pyo3(signature = (now=None, sample_max=2000, flush=false))]
+    fn expire_scored(&self, py: Python<'_>, now: Option<f64>, sample_max: usize, flush: bool) -> PyResult<PyObject> {
+        let recs = {
+            let mut a = self.sh.asm.lock().unwrap();
+            if flush { a.flush() } else { a.expire(now.unwrap_or_else(now_unix)) }
+        };
+        let total = recs.len();
+        let sh = self.sh.clone();
+        let items = py.allow_threads(move || score_ended(&sh, recs, sample_max));
+        let hits = PyList::empty_bound(py);
+        let sample = PyList::empty_bound(py);
+        for it in &items {
+            match it {
+                Item::Hit(h, rec) => {
+                    hits.append((h.engine, crate::live_conn_to_dict(py, rec)?, flow_hit_to_py(py, h)?))?;
+                }
+                Item::Conn(rec) => sample.append(crate::live_conn_to_dict(py, rec)?)?,
+                Item::Imm(_) => {}
+            }
+        }
+        Ok((hits, sample, total).into_py(py))
     }
 
     #[pyo3(signature = (limit=4000))]

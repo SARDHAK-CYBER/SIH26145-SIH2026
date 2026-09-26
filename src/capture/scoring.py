@@ -30,6 +30,9 @@ except Exception:
     _ML_OK = False
     MIN_ML_CONFIDENCE = 0.6
 
+    def standalone_threshold(_family: str) -> float:      # no models -> nothing ML can alert alone
+        return 99.0
+
 # log_type -> engine keys (mirrors src/api/pcap_analysis.py). For `conn`
 # the engine set depends on the phase: a mid-flight SNAPSHOT feeds only
 # the rate/fan-out engines that genuinely benefit from an incremental
@@ -247,6 +250,29 @@ class ScoringEngine:
             if alert is not None:
                 out.append(alert.model_dump(mode="json"))
         return out
+
+    def alerts_from_native_hits(self, hits: list) -> list[dict]:
+        """(engine_key, conn_record, hit_dict) triples from NativeCapture.*_scored -> alert dicts.
+        Only the rare positives ever reach Python; this builds their typed Alerts."""
+        out: list[dict] = []
+        for engine_key, rec, hit in hits:
+            eng = self._engines.get(engine_key)
+            if eng is None:
+                continue
+            try:
+                alert = eng.alert_from_native_hit(map_record(rec, "conn"), hit)
+            except Exception:
+                continue
+            if alert is not None:
+                out.append(alert.model_dump(mode="json"))
+        return out
+
+    @property
+    def flow_ml_can_alert(self) -> bool:
+        """The `flow` model may only alert alone above this confidence (fusion policy: >1.0 means
+        never). When it can't alert alone, scoring every expired flow with it on the LIVE path
+        (no rule corroboration available there) is pure cost."""
+        return standalone_threshold("flow") <= 1.0
 
     async def ml_batch_conn(self, conn_recs: list[dict]) -> list[dict]:
         """One batched ONNX call for the `flow` family over all conn flows

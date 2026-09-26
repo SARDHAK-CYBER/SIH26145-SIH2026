@@ -140,3 +140,30 @@ def test_packet_detail_dissects_layers_and_hex():
     assert d["layers"][0]["start"] == 0 and d["layers"][1]["start"] == 14
     ip = d["layers"][1]
     assert any(f["name"] == "src" for f in ip["fields"])
+
+
+# ------------------------------------------------------------------ native flow engines
+def _alert_signature(alerts):
+    return sorted((a["threat_class"], a["flow_identifier"]["src_ip"], a["flow_identifier"]["dst_ip"]) for a in alerts)
+
+
+@pytest.mark.parametrize("rel", ["samples/netbios_ssn2.pcap", "simulated_attack_traffic.pcap", "samples/modbus_iti_test.pcap"])
+def test_native_flow_engines_match_the_python_engines(rel, monkeypatch):
+    """The Rust batch runner (flow_engines.rs) must raise exactly the alerts the per-flow Python engines do."""
+    import src  # noqa: F401
+    from src.capture.live_agent import LiveAgent
+    path = ROOT / rel
+    if not path.exists():
+        pytest.skip("sample capture not present")
+
+    def run(py_engines):
+        monkeypatch.setenv("STEALTHTAP_PY_FLOW_ENGINES", "1" if py_engines else "0")
+        a = LiveAgent("pcap-replay", None)
+        a.start_replay(str(path), loops=1, speed=0.0)
+        a._loop_thread.join()
+        assert a._native_flow_engines is (not py_engines)
+        out = _alert_signature(a.recent_alerts(10_000))
+        a.stop()
+        return out
+
+    assert run(py_engines=False) == run(py_engines=True)

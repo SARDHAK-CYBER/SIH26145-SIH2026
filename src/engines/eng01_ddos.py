@@ -204,6 +204,12 @@ class VolumetricDDoSDetector(Detector):
             pass  # Redis unavailable -- fail open, same failsafe pattern as the CMS check
         return None
 
+    def alert_from_native_hit(self, flow: dict, hit: dict) -> Optional[Alert]:
+        """Build the typed Alert for a hit the native flow-engine batch runner
+        (native/.../flow_engines.rs) already decided on -- same construction the
+        per-flow native branch of score() uses."""
+        return self._build_alert(flow, hit["threat_class"], hit["confidence"], evidence=hit["evidence"])
+
     async def score(self, flow: dict) -> Optional[Alert]:
         if self._native is not None:
             hit = self._native.check(

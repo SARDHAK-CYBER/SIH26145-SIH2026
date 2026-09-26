@@ -34,6 +34,8 @@ pub struct ConnRecord {
     pub duration: f64,
     pub orig_bytes: u64,
     pub resp_bytes: u64,
+    pub orig_pkts: u64,
+    pub resp_pkts: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -333,6 +335,8 @@ struct FlowState {
     last_ts: f64,
     orig_bytes: u64,
     resp_bytes: u64,
+    orig_pkts: u64,
+    resp_pkts: u64,
     uid: String,
 }
 
@@ -403,13 +407,15 @@ pub fn parse_packets(linktype: u32, packets: impl Iterator<Item = (f64, Vec<u8>)
                 };
             let uid = flow_uid(&orig_ip, orig_port, &resp_ip, resp_port, l4.proto);
             FlowState { orig_ip, orig_port, resp_ip, resp_port, proto: l4.proto,
-                       first_ts: ts, last_ts: ts, orig_bytes: 0, resp_bytes: 0, uid }
+                       first_ts: ts, last_ts: ts, orig_bytes: 0, resp_bytes: 0, orig_pkts: 0, resp_pkts: 0, uid }
         });
         entry.last_ts = entry.last_ts.max(ts);
         if src_ip == entry.orig_ip && l4.sport == entry.orig_port {
             entry.orig_bytes += payload_len;
+            entry.orig_pkts += 1;
         } else {
             entry.resp_bytes += payload_len;
+            entry.resp_pkts += 1;
         }
     }
 
@@ -431,6 +437,7 @@ pub fn parse_packets(linktype: u32, packets: impl Iterator<Item = (f64, Vec<u8>)
         resp_h: f.resp_ip, resp_p: f.resp_port, proto: f.proto,
         duration: (f.last_ts - f.first_ts).max(0.0),
         orig_bytes: f.orig_bytes, resp_bytes: f.resp_bytes,
+        orig_pkts: f.orig_pkts, resp_pkts: f.resp_pkts,
     }).collect();
 
     ParseResult { conn, dns }

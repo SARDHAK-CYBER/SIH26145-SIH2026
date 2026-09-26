@@ -23,16 +23,19 @@ pub struct NativeEng05 {
     since_prune: u32,
 }
 
-#[pymethods]
+pub struct Eng05Hit {
+    pub distinct_targets: usize,
+    pub confidence: f64,
+}
+
 impl NativeEng05 {
-    #[new]
-    fn new() -> Self {
+    pub fn new_core() -> Self {
         NativeEng05 { seen: HashMap::new(), since_prune: 0 }
     }
 
-    fn check(&mut self, py: Python<'_>, src_ip: &str, dst_ip: &str, dst_port: u16, ts: f64, orig_bytes: f64, resp_bytes: f64) -> PyResult<Option<PyObject>> {
+    pub fn core(&mut self, src_ip: &str, dst_ip: &str, dst_port: u16, ts: f64, orig_bytes: f64, resp_bytes: f64) -> Option<Eng05Hit> {
         if EXCLUDED_FANOUT_PORTS.contains(&dst_port) {
-            return Ok(None);
+            return None;
         }
         let is_probe = resp_bytes == 0.0 && orig_bytes <= PROBE_MAX_ORIG_BYTES;
 
@@ -46,7 +49,7 @@ impl NativeEng05 {
         }
 
         if !is_probe {
-            return Ok(None);
+            return None;
         }
 
         let entries = self.seen.entry(src_ip.to_string()).or_default();
@@ -59,11 +62,30 @@ impl NativeEng05 {
         if count >= FANOUT_THRESHOLD {
             let confidence = (50.0 + count as f64).min(95.0);
             self.seen.remove(src_ip);
-            let out = PyDict::new_bound(py);
-            out.set_item("distinct_targets", count)?;
-            out.set_item("confidence", confidence)?;
-            return Ok(Some(out.into()));
+            return Some(Eng05Hit { distinct_targets: count, confidence });
         }
-        Ok(None)
+        None
+    }
+}
+
+pub fn hit_to_py(py: Python<'_>, h: &Eng05Hit) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("distinct_targets", h.distinct_targets)?;
+    out.set_item("confidence", h.confidence)?;
+    Ok(out.into())
+}
+
+#[pymethods]
+impl NativeEng05 {
+    #[new]
+    fn new() -> Self {
+        NativeEng05::new_core()
+    }
+
+    fn check(&mut self, py: Python<'_>, src_ip: &str, dst_ip: &str, dst_port: u16, ts: f64, orig_bytes: f64, resp_bytes: f64) -> PyResult<Option<PyObject>> {
+        match self.core(src_ip, dst_ip, dst_port, ts, orig_bytes, resp_bytes) {
+            Some(h) => Ok(Some(hit_to_py(py, &h)?)),
+            None => Ok(None),
+        }
     }
 }

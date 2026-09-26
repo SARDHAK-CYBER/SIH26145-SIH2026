@@ -90,6 +90,15 @@ class ReconDetector(Detector):
             return c[1], True
         return None
 
+    def alert_from_native_hit(self, flow: dict, hit: dict) -> Optional[Alert]:
+        """Build the typed Alert for a hit the native flow-engine batch runner
+        (native/.../flow_engines.rs) already decided on -- same construction the
+        per-flow native branch of score() uses."""
+        rep = self._campaign_report(flow["src_ip"], flow["ts"], hit["distinct_targets"])
+        if rep is None:
+            return None
+        return self._build_alert(flow, rep[0], hit["confidence"], escalation=rep[1])
+
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip = flow["src_ip"]
         now = flow["ts"]

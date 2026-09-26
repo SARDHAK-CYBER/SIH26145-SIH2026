@@ -46,7 +46,12 @@ PER_FLOW_RATIO_THRESHOLD = 20.0  # a single flow's own outbound:inbound ratio --
 # is a 26:1 "ratio" and was flagged as exfiltration on benign traffic). A
 # single flow must also move a meaningful amount of data outbound.
 # Sub-threshold volumes are still caught by the accumulated check below.
-MIN_SINGLE_FLOW_BYTES = 262_144
+#
+# 256 KB -> 1 MiB (2026-09-26, from REAL data): a benign desktop capture (normal.pcap) produced a
+# DATA_EXFILTRATION alert on a single 601,527-byte upload to a Microsoft endpoint (26.5:1, i.e.
+# ordinary telemetry/sync). Modern benign uploads routinely reach hundreds of KB; genuine bulk
+# exfiltration is far larger, and drip-fed exfiltration is caught by the accumulated check below.
+MIN_SINGLE_FLOW_BYTES = int(os.environ.get("EXFIL_MIN_SINGLE_FLOW_BYTES", str(1_048_576)))
 
 # Accumulated window: deliberately much longer than any single flow,
 # since low-and-slow exfiltration is specifically designed to spread
@@ -61,6 +66,10 @@ ACCUMULATION_TTL_SECONDS = int(ACCUMULATION_WINDOW_SECONDS * 2)
 # how loud any single flow was.
 ACCUMULATED_RATIO_THRESHOLD = 10.0
 MIN_ACCUMULATED_OUTBOUND_BYTES = 500_000  # ignore trivial cumulative volume -- avoids false positives on small, normal sessions
+# "Low-and-slow" means MANY flows: one ordinary upload that fits under the single-flow floor would
+# otherwise also trip the accumulated check (cumulative 601 KB, ratio 26 -- the same real benign
+# upload as above). Real drip exfiltration in the corpus spans hundreds of flows (unreallrcd: 1,363).
+MIN_ACCUMULATED_FLOWS = 5
 
 
 class ExfiltrationDetector(Detector):
@@ -77,6 +86,12 @@ class ExfiltrationDetector(Detector):
     def _bucket_key(self, src_ip: str, dst_ip: str, ts: float) -> str:
         bucket_id = int(ts // ACCUMULATION_WINDOW_SECONDS)
         return f"{self.key_prefix}eng06:accum:{src_ip}:{dst_ip}:{bucket_id}"
+
+    def alert_from_native_hit(self, flow: dict, hit: dict) -> Optional[Alert]:
+        """Build the typed Alert for a hit the native flow-engine batch runner
+        (native/.../flow_engines.rs) already decided on -- same construction the
+        per-flow native branch of score() uses."""
+        return self._build_alert(flow, confidence=90.0 if hit.get("single") else 82.0, evidence=hit["evidence"])
 
     async def score(self, flow: dict) -> Optional[Alert]:
         orig_bytes = float(flow.get("orig_bytes", 0))
@@ -118,7 +133,7 @@ class ExfiltrationDetector(Detector):
         except Exception:
             return None  # Redis unavailable -- fail open, same pattern as ENG-01/ENG-02
 
-        if cumulative_orig < MIN_ACCUMULATED_OUTBOUND_BYTES:
+        if cumulative_orig < MIN_ACCUMULATED_OUTBOUND_BYTES or flow_count < MIN_ACCUMULATED_FLOWS:
             return None
         if cumulative_resp <= 0:
             return None

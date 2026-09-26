@@ -17,7 +17,16 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
 // Live capture can run as its own host-side service (see
 // `python -m src.capture.live_agent serve`). Defaults to the main API.
-export const LIVE_BASE = import.meta.env.VITE_LIVE_API_BASE ?? 'http://localhost:8100';
+const LIVE_DEFAULT = import.meta.env.VITE_LIVE_API_BASE ?? 'http://localhost:8100';
+const LIVE_KEY = 'stealthtap-live-base';
+/** The live sensor endpoint. Defaults to this server; can be pointed at a separate (e.g. elevated) sensor process. */
+export function liveBase(): string {
+  try { return localStorage.getItem(LIVE_KEY) ?? LIVE_DEFAULT; } catch { return LIVE_DEFAULT; }
+}
+export function setLiveBase(url: string | null): void {
+  try { if (url === null) localStorage.removeItem(LIVE_KEY); else localStorage.setItem(LIVE_KEY, url.replace(/\/+$/, '')); } catch { /* ignore */ }
+}
+export const LIVE_DEFAULT_BASE = LIVE_DEFAULT;
 
 export class ApiError extends Error {}
 
@@ -143,15 +152,15 @@ function dbRowToAlert(r: Record<string, any>): Alert {
 // ── Live capture pipeline (kernel-level NIC tap) ───────────────────────
 export const live = {
   interfaces: () =>
-    fetch(`${LIVE_BASE}/capture/interfaces`).then((r) => j<CaptureInterface[]>(r, 'interface list failed')),
+    fetch(`${liveBase()}/capture/interfaces`).then((r) => j<CaptureInterface[]>(r, 'interface list failed')),
   capabilities: () =>
-    fetch(`${LIVE_BASE}/capture/capabilities`).then((r) => j<Record<string, unknown>>(r, 'capabilities failed')),
+    fetch(`${liveBase()}/capture/capabilities`).then((r) => j<Record<string, unknown>>(r, 'capabilities failed')),
   status: () =>
-    fetch(`${LIVE_BASE}/capture/status`).then((r) => j<CaptureStatus>(r, 'status failed')),
+    fetch(`${liveBase()}/capture/status`).then((r) => j<CaptureStatus>(r, 'status failed')),
   alerts: (limit = 200) =>
-    fetch(`${LIVE_BASE}/capture/alerts?limit=${limit}`).then((r) => (r.ok ? r.json() : [])) as Promise<Alert[]>,
+    fetch(`${liveBase()}/capture/alerts?limit=${limit}`).then((r) => (r.ok ? r.json() : [])) as Promise<Alert[]>,
   start: (interfaceName: string, bpf: string, preferKernel: boolean, bufferMb = 64) =>
-    fetch(`${LIVE_BASE}/capture/start`, {
+    fetch(`${liveBase()}/capture/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -159,29 +168,29 @@ export const live = {
         prefer_kernel: preferKernel, buffer_mb: bufferMb,
       }),
     }).then((r) => j<CaptureStatus>(r, 'could not start capture')),
-  stop: () => fetch(`${LIVE_BASE}/capture/stop`, { method: 'POST' }).then((r) => j<CaptureStatus>(r, 'stop failed')),
+  stop: () => fetch(`${liveBase()}/capture/stop`, { method: 'POST' }).then((r) => j<CaptureStatus>(r, 'stop failed')),
   replay: (path: string, loops: number, speed: number) =>
-    fetch(`${LIVE_BASE}/capture/replay`, {
+    fetch(`${liveBase()}/capture/replay`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path, loops, speed }),
     }).then((r) => j<CaptureStatus>(r, 'could not start replay')),
   series: (seconds = 300) =>
-    fetch(`${LIVE_BASE}/capture/series?seconds=${seconds}`).then((r) => (r.ok ? (r.json() as Promise<SeriesPoint[]>) : [])),
+    fetch(`${liveBase()}/capture/series?seconds=${seconds}`).then((r) => (r.ok ? (r.json() as Promise<SeriesPoint[]>) : [])),
   summary: () =>
-    fetch(`${LIVE_BASE}/capture/summary`).then((r) => (r.ok ? (r.json() as Promise<AlertSummary>) : { alerts_by_class: {}, alerts_by_severity: {} })),
+    fetch(`${liveBase()}/capture/summary`).then((r) => (r.ok ? (r.json() as Promise<AlertSummary>) : { alerts_by_class: {}, alerts_by_severity: {} })),
   hosts: (limit = 500) =>
-    fetch(`${LIVE_BASE}/capture/hosts?limit=${limit}`).then((r) => (r.ok ? (r.json() as Promise<HostRow[]>) : [])),
+    fetch(`${liveBase()}/capture/hosts?limit=${limit}`).then((r) => (r.ok ? (r.json() as Promise<HostRow[]>) : [])),
   protocols: () =>
-    fetch(`${LIVE_BASE}/capture/protocols`).then((r) => (r.ok ? (r.json() as Promise<ProtoRow[]>) : [])),
+    fetch(`${liveBase()}/capture/protocols`).then((r) => (r.ok ? (r.json() as Promise<ProtoRow[]>) : [])),
   flows: (n = 60) =>
-    fetch(`${LIVE_BASE}/capture/flows?n=${n}`).then((r) => (r.ok ? (r.json() as Promise<FlowRow[]>) : [])),
+    fetch(`${liveBase()}/capture/flows?n=${n}`).then((r) => (r.ok ? (r.json() as Promise<FlowRow[]>) : [])),
   packets: (after: number, limit: number, filter: string) =>
-    fetch(`${LIVE_BASE}/capture/packets?after=${after}&limit=${limit}&filter=${encodeURIComponent(filter)}`)
+    fetch(`${liveBase()}/capture/packets?after=${after}&limit=${limit}&filter=${encodeURIComponent(filter)}`)
       .then((r) => j<PacketRow[]>(r, 'packet list failed')),
-  packet: (id: number) => fetch(`${LIVE_BASE}/capture/packet/${id}`).then((r) => j<PacketDetail>(r, 'packet detail failed')),
-  exportUrl: (filter: string) => `${LIVE_BASE}/capture/export.pcap?filter=${encodeURIComponent(filter)}`,
-  streamUrl: () => `${LIVE_BASE}/capture/stream`,
+  packet: (id: number) => fetch(`${liveBase()}/capture/packet/${id}`).then((r) => j<PacketDetail>(r, 'packet detail failed')),
+  exportUrl: (filter: string) => `${liveBase()}/capture/export.pcap?filter=${encodeURIComponent(filter)}`,
+  streamUrl: () => `${liveBase()}/capture/stream`,
 };
 
 export type { Alert };

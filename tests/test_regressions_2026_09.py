@@ -287,3 +287,32 @@ def test_recon_new_campaign_after_silence_and_independent_sources():
         return a1, a2, other
     a1, a2, other = asyncio.run(run())
     assert len(a1) == 1 and len(a2) == 1 and len(other) == 1
+
+
+# ------------------------------------------------------------------ ENG-06 real-data tuning
+def _flow(orig, resp, uid="X1", src="10.0.0.9", dst="150.171.27.11", ts=1.0):
+    from src.flow_mapping import map_record
+    return map_record({"uid": uid, "ts": ts, "id.orig_h": src, "id.resp_h": dst, "id.orig_p": 5000,
+                       "id.resp_p": 443, "proto": "tcp", "orig_bytes": orig, "resp_bytes": resp}, "conn")
+
+
+def test_exfil_ordinary_desktop_upload_is_not_flagged():
+    """Real benign capture (normal.pcap): one 601,527 B upload, 22,742 B back (26.5:1), to a Microsoft
+    endpoint was flagged DATA_EXFILTRATION at the old 256 KB floor -- by both the single-flow and the
+    accumulated check. Neither may fire for a single ordinary upload."""
+    from src.engines.eng06_exfiltration import ExfiltrationDetector
+    det = ExfiltrationDetector(redis_client=None)
+    assert asyncio.run(det.score(_flow(601_527, 22_742))) is None
+
+
+def test_exfil_still_catches_bulk_and_drip_feed():
+    from src.engines.eng06_exfiltration import ExfiltrationDetector
+    det = ExfiltrationDetector(redis_client=None)
+    bulk = asyncio.run(det.score(_flow(5_000_000, 100)))
+    assert bulk is not None and bulk.evidence["detection_type"] == "single_flow"
+    drip = ExfiltrationDetector(redis_client=None)
+    hit = None
+    for i in range(60):       # 60 flows x 20 KB out, tiny replies, same destination, one window
+        hit = asyncio.run(drip.score(_flow(20_000, 200, uid=f"D{i}", ts=1000.0 + i))) or hit
+    assert hit is not None and hit.evidence["detection_type"] == "accumulated_low_and_slow"
+    assert hit.evidence["contributing_flow_count"] >= 5

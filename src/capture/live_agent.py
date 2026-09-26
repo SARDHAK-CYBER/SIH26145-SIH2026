@@ -86,6 +86,7 @@ ALERT_COOLDOWN_S = float(os.environ.get("LIVE_ALERT_COOLDOWN", "30.0"))
 HIGHSPEED_PPS = float(os.environ.get("LIVE_HIGHSPEED_PPS", "50000"))
 HIGHSPEED_MBPS = float(os.environ.get("LIVE_HIGHSPEED_MBPS", "200"))
 DEFAULT_ENGINE_WORKERS = int(os.environ.get("LIVE_ENGINE_WORKERS", "1"))
+BASELINE_SAMPLE_MAX = int(os.environ.get("LIVE_BASELINE_MAX_PER_TICK", "2000"))   # flows/tick fed to the online baseline
 _IMMEDIATE = set(_DISPATCH_IMMEDIATE)   # latency measurable end-to-end
 
 
@@ -213,6 +214,7 @@ class LiveAgent:
         self._class_counts: dict[str, int] = {}
         self._sev_counts: dict[str, int] = {}
         self._replay_done = False
+        self._native_flow_engines = False     # ENG-01/02/05/06/13 evaluated in Rust (flow_engines.rs)
 
     # ---------------- engine wiring ----------------
     def _build_engines(self):
@@ -353,6 +355,11 @@ class LiveAgent:
             raise CaptureError(str(exc))
         self._ncap = cap
         self._assembler = _NativeAssembler(cap)
+        if (self._scoring is not None and hasattr(cap, "enable_flow_engines")
+                and os.environ.get("STEALTHTAP_PY_FLOW_ENGINES") != "1"):
+            from src.engines.eng06_exfiltration import MIN_SINGLE_FLOW_BYTES
+            cap.enable_flow_engines(float(MIN_SINGLE_FLOW_BYTES))
+            self._native_flow_engines = True
         self._replay_source = bool(pcap)
         self._backend = _NativeBackendInfo()
         self.stats["backend"] = "native-pcap-replay" if pcap else "native-pcap"
@@ -505,10 +512,19 @@ class LiveAgent:
 
     async def _tick(self, expire_now: Optional[float] = None) -> None:
         """Every SNAPSHOT_INTERVAL_S: re-score active flows, expire idle ones, sample rates."""
-        for _lt, rec in self._assembler.snapshot():
-            await self._dispatch_conn("conn_snapshot", rec, _DISPATCH_CONN_SNAPSHOT)
-        expire_kw = {} if expire_now is None else {"now": expire_now}
-        await self._handle_expired([r for lt, r in self._assembler.expire(**expire_kw) if lt == "conn"])
+        if self._native_flow_engines:
+            cap = self._ncap
+            for a in self._scoring.alerts_from_native_hits(cap.snapshot_scored(200_000)):
+                self._emit(a, None)
+            hits, sample, _total = cap.expire_scored(expire_now, BASELINE_SAMPLE_MAX)
+            for a in self._scoring.alerts_from_native_hits(hits):
+                self._emit(a, None)
+            await self._handle_sample(sample)
+        else:
+            for _lt, rec in self._assembler.snapshot():
+                await self._dispatch_conn("conn_snapshot", rec, _DISPATCH_CONN_SNAPSHOT)
+            expire_kw = {} if expire_now is None else {"now": expire_now}
+            await self._handle_expired([r for lt, r in self._assembler.expire(**expire_kw) if lt == "conn"])
         # pool mode: each worker batches its own shard's ML call and
         # observes its own shard's baseline, draining every loop
         # iteration -- no extra drain needed here.
@@ -518,6 +534,21 @@ class LiveAgent:
         else:
             kstats = self._backend.kernel_stats() if hasattr(self._backend, "kernel_stats") else None
             self._rate_view = self._rate.sample(self._assembler.stats["packets"], self._bytes, kstats)
+
+    async def _handle_sample(self, sample: list) -> None:
+        """Flows the native engines already scored (only hits crossed into Python): what is left
+        for Python is the online baseline -- fed an evenly-strided sample when flow rates are
+        extreme -- and the flow ML model, which the fusion policy only lets alert above a
+        confidence it can't reach alone (so it is skipped unless configured otherwise)."""
+        if self._scoring is None or not sample:
+            return
+        if self._scoring.flow_ml_can_alert:
+            for alert in await self._scoring.ml_batch_conn(sample):
+                self._emit(alert, None)
+        for rec in sample:
+            b_alert = self._scoring.observe_baseline(rec)
+            if b_alert is not None:
+                self._emit(b_alert, None)
 
     async def _handle_expired(self, expired: list) -> None:
         """Flows that ended: final conn-scoring, batched ML, live baseline."""
@@ -564,15 +595,22 @@ class LiveAgent:
             if recs:
                 mono, wall = time.monotonic(), time.time()
                 ended = []
+                hits = []
                 for log_type, rec in recs:
+                    if log_type == "hit":           # native engine hit on a replayed loop's ended flow
+                        hits.append((rec["engine"], rec["rec"], rec["hit"]))
+                        continue
                     if log_type == "conn":          # a replayed loop's flows ended
                         ended.append(rec)
                         continue
                     arr = rec.pop("_arr", None)
                     t_arr = mono - (wall - arr) if arr else None
                     await self._dispatch_immediate(log_type, rec, t_arr)
+                if hits and self._scoring is not None:
+                    for a in self._scoring.alerts_from_native_hits(hits):
+                        self._emit(a, None)
                 if ended:
-                    await self._handle_expired(ended)
+                    await (self._handle_sample(ended) if self._native_flow_engines else self._handle_expired(ended))
             await self._flush_ml_immediate()
             if self._pool is not None:
                 self._pool.flush()
@@ -585,20 +623,33 @@ class LiveAgent:
                 await self._tick(cap.stats()["last_ts"] if self._replay_source else None)
             if self._replay_source and cap.finished() and cap.pending() == 0 and not recs:
                 break            # a replayed file is exhausted and fully dispatched
-        while True:              # final drain (stop() halts the capture thread first)
+        drain_deadline = time.monotonic() + float(os.environ.get("LIVE_STOP_DRAIN_S", "5"))
+        while time.monotonic() < drain_deadline:   # bounded final drain (stop() halts capture first)
             recs = cap.poll(0, 4000)
             if not recs:
                 break
             ended = []
+            hits = []
             for log_type, rec in recs:
+                if log_type == "hit":
+                    hits.append((rec["engine"], rec["rec"], rec["hit"]))
+                    continue
                 if log_type == "conn":
                     ended.append(rec)
                     continue
                 rec.pop("_arr", None)
                 await self._dispatch_immediate(log_type, rec, None)
+            if hits and self._scoring is not None:
+                for a in self._scoring.alerts_from_native_hits(hits):
+                    self._emit(a, None)
             if ended:
-                await self._handle_expired(ended)
-        for _lt, rec in self._assembler.flush():
+                await (self._handle_sample(ended) if self._native_flow_engines else self._handle_expired(ended))
+        if self._native_flow_engines:
+            hits, sample, _t = cap.expire_scored(None, BASELINE_SAMPLE_MAX, True)
+            for a in self._scoring.alerts_from_native_hits(hits):
+                self._emit(a, None)
+            await self._handle_sample(sample)
+        for _lt, rec in ([] if self._native_flow_engines else self._assembler.flush()):
             await self._dispatch_conn("conn_flush", rec, _DISPATCH_CONN_EXPIRE)
         await self._flush_ml_immediate()
         if self._pool is not None:

@@ -1,84 +1,84 @@
 {
-  "generated_at": 1790421137.7232678,
+  "generated_at": 1790429336.9095197,
   "threats": [
     {
       "category": "benign_baseline",
-      "start_ts": 1790417537.7232678,
-      "end_ts": 1790417542.8760152,
+      "start_ts": 1790425736.9095197,
+      "end_ts": 1790425742.062267,
       "expected_alert": null,
       "note": "should NOT trigger any alert -- false-positive check"
     },
     {
       "category": "ddos_single_source_flood",
-      "start_ts": 1790417550.5,
-      "end_ts": 1790417552.9999976,
+      "start_ts": 1790425750.5,
+      "end_ts": 1790425752.9999976,
       "expected_alert": "VOLUMETRIC_DDOS",
       "engine": "ENG01",
       "note": "250 SYNs from one source IP -- should trigger ENG01's flood threshold"
     },
     {
       "category": "ddos_spoofed_source_flood",
-      "start_ts": 1790417560.5,
-      "end_ts": 1790417562.9999976,
+      "start_ts": 1790425760.5,
+      "end_ts": 1790425762.9999976,
       "expected_alert": "VOLUMETRIC_DDOS",
       "engine": "ENG01",
       "note": "spoofed multi-source flood -- caught by ENG01's per-destination distinct-source (HyperLogLog uniqueness) check, not the per-source counter; this used to be labelled a known gap but the check exists and fires (92% confidence, spoofed_source_pattern=true)"
     },
     {
       "category": "slowloris",
-      "start_ts": 1790417564.9999976,
-      "end_ts": 1790417725.9999976,
+      "start_ts": 1790425764.9999976,
+      "end_ts": 1790425925.9999976,
       "expected_alert": "SLOWLORIS",
       "engine": "ENG01",
       "note": "one ESTABLISHED connection, 161s duration, 4 payload bytes total"
     },
     {
       "category": "c2_beaconing",
-      "start_ts": 1790417567.9999976,
-      "end_ts": 1790418766.266689,
+      "start_ts": 1790425767.9999976,
+      "end_ts": 1790426966.266689,
       "expected_alert": "C2_BEACONING",
       "engine": "ENG02",
       "note": "40 periodic check-ins at ~30.0s intervals"
     },
     {
       "category": "dga_domains",
-      "start_ts": 1790417574.9999976,
-      "end_ts": 1790417579.499997,
+      "start_ts": 1790425774.9999976,
+      "end_ts": 1790425779.499997,
       "expected_alert": "DGA_DOMAIN",
       "engine": "ENG03",
       "note": "15 high-entropy A-record queries"
     },
     {
       "category": "dns_tunnelling",
-      "start_ts": 1790417581.499997,
-      "end_ts": 1790417585.499997,
+      "start_ts": 1790425781.499997,
+      "end_ts": 1790425785.499997,
       "expected_alert": "DNS_TUNNELING",
       "engine": "ENG03",
       "note": "8 long high-entropy TXT queries"
     },
     {
       "category": "encrypted_malware",
-      "start_ts": 1790417587.499997,
-      "end_ts": 1790417587.5399969,
+      "start_ts": 1790425787.499997,
+      "end_ts": 1790425787.5399969,
       "expected_alert": "ENCRYPTED_MALWARE (verify actual JA4 against allow-list -- see note)",
       "engine": "ENG04",
       "note": "crafted TLS ClientHello, narrow/unusual cipher suite list"
     },
     {
       "category": "reconnaissance",
-      "start_ts": 1790417589.6399968,
-      "end_ts": 1790417591.1399953,
+      "start_ts": 1790425789.6399968,
+      "end_ts": 1790425791.1399953,
       "expected_alert": "RECONNAISSANCE",
       "engine": "ENG05",
       "note": "30 distinct destination ports, threshold is 25"
     },
     {
       "category": "data_exfiltration",
-      "start_ts": 1790417593.1399953,
-      "end_ts": 1790417595.589993,
+      "start_ts": 1790425793.1399953,
+      "end_ts": 1790425802.1899867,
       "expected_alert": "DATA_EXFILTRATION",
       "engine": "ENG06",
-      "note": "~336000 bytes out, ~2 bytes back -- over both the 20:1 ratio and the 256KB single-flow volume floor"
+      "note": "~1.26 MB out, ~2 bytes back -- over both the 20:1 ratio and the 1 MiB single-flow volume floor"
     }
   ]
 }

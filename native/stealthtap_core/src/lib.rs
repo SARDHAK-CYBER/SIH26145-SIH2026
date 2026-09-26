@@ -17,6 +17,7 @@ mod eng02;
 mod eng05;
 mod eng06;
 mod eng13;
+mod flow_engines;
 mod inventory;
 mod ja4;
 mod live;
@@ -58,6 +59,8 @@ fn parse_pcap(py: Python<'_>, path: &str, max_packets: Option<usize>) -> PyResul
         d.set_item("duration", r.duration)?;
         d.set_item("orig_bytes", r.orig_bytes)?;
         d.set_item("resp_bytes", r.resp_bytes)?;
+        d.set_item("orig_pkts", r.orig_pkts)?;
+        d.set_item("resp_pkts", r.resp_pkts)?;
         conn_list.append(d)?;
     }
     out.set_item("conn", conn_list)?;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, LIVE_BASE, live } from '../../api/client';
+import { ApiError, LIVE_DEFAULT_BASE, liveBase, live, setLiveBase } from '../../api/client';
 import type { CaptureInterface, CaptureStatus } from '../../types/alert';
 import { fmtDuration, fmtNum } from '../../lib/format';
 
@@ -30,19 +30,20 @@ export function CaptureControl({ status, reachable, onChanged, onStarted }: Prop
   const [realtime, setRealtime] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [sensorUrl, setSensorUrl] = useState(liveBase());
 
   const load = useCallback(async () => {
     try {
       const [list, c, f] = await Promise.all([
         live.interfaces(), live.capabilities(),
-        fetch(`${LIVE_BASE}/capture/replay-files`).then((r) => (r.ok ? r.json() : [])) as Promise<ReplayFile[]>,
+        fetch(`${liveBase()}/capture/replay-files`).then((r) => (r.ok ? r.json() : [])) as Promise<ReplayFile[]>,
       ]);
       setIfaces(list); setCaps(c); setFiles(f);
       setSelected((cur) => cur || list.find((i) => i.is_up && !i.is_loopback && i.ipv4.length)?.name || list[0]?.name || '');
       setReplayPath((cur) => cur || f[0]?.path || '');
       setErr(null);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : `Could not reach the sensor at ${LIVE_BASE}. Start it with:  python stealthtap_app.py  (or python -m src.capture.live_agent serve --port 8100)`);
+      setErr(e instanceof ApiError ? e.message : `Could not reach the sensor at ${liveBase()}. Start it with:  python stealthtap_app.py  (or python -m src.capture.live_agent serve --port 8100)`);
     }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -63,10 +64,18 @@ export function CaptureControl({ status, reachable, onChanged, onStarted }: Prop
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       {!reachable && (
         <div className="glass" style={{ padding: 14, fontSize: 13, color: 'var(--sev-critical)', border: '1px solid rgba(255,51,102,.35)' }}>
-          The live sensor is not reachable at <span className="mono">{LIVE_BASE}</span>. Start it with <span className="mono">python stealthtap_app.py</span>.
+          The live sensor is not reachable at <span className="mono">{liveBase()}</span>. Start it with <span className="mono">python stealthtap_app.py</span>.
         </div>
       )}
       {err && reachable && <div className="glass" style={{ padding: 14, fontSize: 13, color: 'var(--sev-critical)', border: '1px solid rgba(255,51,102,.35)' }}>{err}</div>}
+
+      <div className="glass" style={{ padding: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12.5 }}>
+        <span style={lbl}>Sensor endpoint</span>
+        <input className="mono" style={{ ...inp, maxWidth: 320 }} value={sensorUrl} onChange={(e) => setSensorUrl(e.target.value)} placeholder="(this server)" />
+        <button className="btn-ghost" onClick={() => { setLiveBase(sensorUrl); window.location.reload(); }}>Connect</button>
+        {sensorUrl !== LIVE_DEFAULT_BASE && <button className="btn-ghost" onClick={() => { setLiveBase(null); window.location.reload(); }}>Reset</button>}
+        <span style={{ color: 'var(--text-dim)', fontSize: 11.5 }}>Point at a dedicated (e.g. elevated) sensor process, such as http://127.0.0.1:8101</span>
+      </div>
 
       {running && (
         <div className="glass" style={{ padding: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>

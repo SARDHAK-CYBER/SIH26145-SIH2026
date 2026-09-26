@@ -78,6 +78,12 @@ class C2BeaconingDetector(Detector):
     def _key(self, src_ip: str, dst_ip: str) -> str:
         return f"{self.key_prefix}eng02:beacon_ts:{src_ip}:{dst_ip}"
 
+    def alert_from_native_hit(self, flow: dict, hit: dict) -> Optional[Alert]:
+        """Build the typed Alert for a hit the native flow-engine batch runner
+        (native/.../flow_engines.rs) already decided on -- same construction the
+        per-flow native branch of score() uses."""
+        return self._build_alert(flow, confidence=hit["confidence"], evidence=hit["evidence"])
+
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip, dst_ip = flow.get("src_ip", ""), flow.get("dst_ip", "")
         ts = float(flow.get("ts", 0.0))

@@ -51,7 +51,7 @@ def _placeholder_ja4(tls_client_hello_bytes: bytes) -> str:
 
 class _Flow:
     __slots__ = ("orig_ip", "orig_port", "resp_ip", "resp_port", "proto",
-                 "first_ts", "last_ts", "orig_bytes", "resp_bytes", "uid")
+                 "first_ts", "last_ts", "orig_bytes", "resp_bytes", "orig_pkts", "resp_pkts", "uid")
 
     def __init__(self, orig_ip, orig_port, resp_ip, resp_port, proto, ts):
         self.orig_ip, self.orig_port = orig_ip, orig_port
@@ -59,14 +59,17 @@ class _Flow:
         self.proto = proto
         self.first_ts = self.last_ts = ts
         self.orig_bytes = self.resp_bytes = 0
+        self.orig_pkts = self.resp_pkts = 0
         self.uid = _flow_uid(orig_ip, orig_port, resp_ip, resp_port, proto)
 
     def add(self, src_ip: str, src_port: int, payload_len: int, ts: float) -> None:
         self.last_ts = max(self.last_ts, ts)
         if src_ip == self.orig_ip and src_port == self.orig_port:
             self.orig_bytes += payload_len
+            self.orig_pkts += 1
         else:
             self.resp_bytes += payload_len
+            self.resp_pkts += 1
 
     def to_dict(self) -> dict:
         return {
@@ -75,6 +78,7 @@ class _Flow:
             "id.resp_h": self.resp_ip, "id.resp_p": self.resp_port,
             "proto": self.proto, "duration": self.last_ts - self.first_ts,
             "orig_bytes": self.orig_bytes, "resp_bytes": self.resp_bytes,
+            "orig_pkts": self.orig_pkts, "resp_pkts": self.resp_pkts,
         }
 
 

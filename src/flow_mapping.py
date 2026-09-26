@@ -58,6 +58,11 @@ def map_record(rec: dict[str, Any], log_type: str) -> dict[str, Any]:
         flow["duration_s"] = rec.get("duration", 0.0)
         flow["orig_bytes"] = rec.get("orig_bytes", 0)
         flow["resp_bytes"] = rec.get("resp_bytes", 0)
+        # packets per direction (Zeek conn.log, the native parsers and the live assembler all provide
+        # them): lets engines tell an ANSWERED connection from an unanswered probe.
+        if rec.get("orig_pkts") is not None:
+            flow["orig_pkts"] = rec.get("orig_pkts")
+            flow["resp_pkts"] = rec.get("resp_pkts", 0)
     elif log_type == "dns":
         flow["dns_query"] = rec.get("query", "")
         flow["dns_qtype"] = rec.get("qtype_name", "")

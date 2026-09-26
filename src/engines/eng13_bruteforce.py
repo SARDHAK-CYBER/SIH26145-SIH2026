@@ -67,6 +67,14 @@ class BruteForceDetector(Detector):
         bucket_id = int(ts // WINDOW_SECONDS)
         return f"{self.key_prefix}eng13:auth_attempts:{src_ip}:{dst_ip}:{dst_port}:{bucket_id}"
 
+    def alert_from_native_hit(self, flow: dict, hit: dict) -> Optional[Alert]:
+        """Build the typed Alert for a hit the native flow-engine batch runner
+        (native/.../flow_engines.rs) already decided on -- same construction the
+        per-flow native branch of score() uses."""
+        src_ip, dst_ip = flow.get("src_ip", ""), flow.get("dst_ip", "")
+        return self._build_alert(flow, src_ip, dst_ip, int(flow.get("dst_port", 0)), float(flow.get("ts", 0.0)),
+                                 hit["confidence"], hit["evidence"])
+
     async def score(self, flow: dict) -> Optional[Alert]:
         dst_port = int(flow.get("dst_port", 0))
         src_ip, dst_ip = flow.get("src_ip", ""), flow.get("dst_ip", "")

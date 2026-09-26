@@ -145,41 +145,52 @@ impl NativeEng01 {
 
     #[pyo3(name = "check")]
     fn py_check(&mut self, py: Python<'_>, src_ip: &str, dst_ip: &str, ts: f64, duration_s: f64, bytes_total: f64) -> PyResult<Option<PyObject>> {
-        let hit = self.check(src_ip, dst_ip, ts, duration_s, bytes_total);
-        let Some(hit) = hit else { return Ok(None) };
-        let evidence = PyDict::new_bound(py);
-        let (threat_class, confidence): (&str, f64) = match hit {
-            Eng01Hit::Slowloris { duration_s, bytes_total } => {
-                evidence.set_item("duration_s", duration_s)?;
-                evidence.set_item("bytes_total", bytes_total)?;
-                ("SLOWLORIS", 85.0)
-            }
-            Eng01Hit::Flood { count, distinct_destinations, concentration_ratio } => {
-                evidence.set_item("src_ip_flow_count", count)?;
-                evidence.set_item("distinct_destinations", distinct_destinations)?;
-                evidence.set_item("concentration_ratio", (concentration_ratio * 10.0).round() / 10.0)?;
-                evidence.set_item("window_seconds", WINDOW_SECONDS)?;
-                evidence.set_item("threshold", FLOOD_THRESHOLD)?;
-                let confidence = (60.0 + (count as f64 - FLOOD_THRESHOLD as f64) * 0.5).min(99.0);
-                ("VOLUMETRIC_DDOS", confidence)
-            }
-            Eng01Hit::Spoofed { packets_to_destination, distinct_source_ips, uniqueness_ratio } => {
-                evidence.set_item("packets_to_destination", packets_to_destination)?;
-                evidence.set_item("distinct_source_ips_estimate", distinct_source_ips)?;
-                evidence.set_item("uniqueness_ratio", (uniqueness_ratio * 1000.0).round() / 1000.0)?;
-                evidence.set_item("window_seconds", WINDOW_SECONDS)?;
-                evidence.set_item("spoofed_source_pattern", true)?;
-                ("VOLUMETRIC_DDOS", 92.0)
-            }
-        };
-        let out = PyDict::new_bound(py);
-        out.set_item("threat_class", threat_class)?;
-        out.set_item("confidence", confidence)?;
-        out.set_item("evidence", evidence)?;
-        Ok(Some(out.into()))
+        match self.check(src_ip, dst_ip, ts, duration_s, bytes_total) {
+            Some(hit) => Ok(Some(hit_to_py(py, &hit)?)),
+            None => Ok(None),
+        }
     }
 
     fn active_buckets(&self) -> usize {
         self.src.len() + self.dst.len()
     }
+}
+
+impl NativeEng01 {
+    pub fn new_core() -> Self {
+        NativeEng01 { src: HashMap::new(), dst: HashMap::new(), max_bucket_seen: i64::MIN }
+    }
+}
+
+/// Same dict shape the Python detector consumes ({threat_class, confidence, evidence}).
+pub fn hit_to_py(py: Python<'_>, hit: &Eng01Hit) -> PyResult<PyObject> {
+    let evidence = PyDict::new_bound(py);
+    let (threat_class, confidence): (&str, f64) = match hit {
+        Eng01Hit::Slowloris { duration_s, bytes_total } => {
+            evidence.set_item("duration_s", duration_s)?;
+            evidence.set_item("bytes_total", bytes_total)?;
+            ("SLOWLORIS", 85.0)
+        }
+        Eng01Hit::Flood { count, distinct_destinations, concentration_ratio } => {
+            evidence.set_item("src_ip_flow_count", count)?;
+            evidence.set_item("distinct_destinations", distinct_destinations)?;
+            evidence.set_item("concentration_ratio", (concentration_ratio * 10.0).round() / 10.0)?;
+            evidence.set_item("window_seconds", WINDOW_SECONDS)?;
+            evidence.set_item("threshold", FLOOD_THRESHOLD)?;
+            ("VOLUMETRIC_DDOS", (60.0 + (*count as f64 - FLOOD_THRESHOLD as f64) * 0.5).min(99.0))
+        }
+        Eng01Hit::Spoofed { packets_to_destination, distinct_source_ips, uniqueness_ratio } => {
+            evidence.set_item("packets_to_destination", packets_to_destination)?;
+            evidence.set_item("distinct_source_ips_estimate", distinct_source_ips)?;
+            evidence.set_item("uniqueness_ratio", (uniqueness_ratio * 1000.0).round() / 1000.0)?;
+            evidence.set_item("window_seconds", WINDOW_SECONDS)?;
+            evidence.set_item("spoofed_source_pattern", true)?;
+            ("VOLUMETRIC_DDOS", 92.0)
+        }
+    };
+    let out = PyDict::new_bound(py);
+    out.set_item("threat_class", threat_class)?;
+    out.set_item("confidence", confidence)?;
+    out.set_item("evidence", evidence)?;
+    Ok(out.into())
 }
