@@ -177,6 +177,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://stealthtap:${POSTGRES_PASSWORD:?set a real password in .env}@postgres:5432/stealthtap
       - STEALTHTAP_API_KEY=${STEALTHTAP_API_KEY:?set STEALTHTAP_API_KEY (>=16 random chars) in .env}
+      - STEALTHTAP_CORS_ORIGINS=${STEALTHTAP_CORS_ORIGINS:-http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,http://127.0.0.1:4173,https://localhost}
       - STEALTHTAP_TENANT_KEYS=${STEALTHTAP_TENANT_KEYS:-}    # optional multi-tenant: "acme=<key>,globex=<key>"
       - MODELS_DIR=/models
       - ZEEK_INCOMING_DIR=/incoming
@@ -184,7 +185,7 @@ services:
       - SURICATA_INCOMING_DIR=/suricata_incoming
       - SURICATA_OUTGOING_DIR=/suricata_outgoing
     ports:
-      - "${STEALTHTAP_BIND:-127.0.0.1}:8000:8000"   # set STEALTHTAP_BIND=0.0.0.0 only behind TLS
+      - "127.0.0.1:8000:8000"     # plaintext stays on loopback; remote clients use the TLS proxy (:8443)
     volumes:
       - ./models:/models:ro
       - ./samples:/opt/stealthtap/samples:ro   # bundled pcap for GET /api/sample/analysis
@@ -213,12 +214,31 @@ services:
     build:
       context: ./dashboard-app
       args:
-        VITE_API_BASE: http://localhost:8000
+        VITE_API_BASE: ${STEALTHTAP_PUBLIC_API:-http://localhost:8000}   # behind the proxy: https://<STEALTHTAP_HOST>:8443
         VITE_LIVE_API_BASE: http://localhost:8100
     ports:
-      - "${STEALTHTAP_BIND:-127.0.0.1}:4173:4173"
+      - "127.0.0.1:4173:4173"     # plaintext stays on loopback; remote clients use the TLS proxy (:443)
     depends_on:
       - api
+
+  # TLS termination for remote access. Publishes ONLY on ${STEALTHTAP_BIND} (loopback by default): set STEALTHTAP_BIND=0.0.0.0,
+  # STEALTHTAP_HOST=<dns name>, STEALTHTAP_PUBLIC_API=https://<dns name>:8443 and STEALTHTAP_CORS_ORIGINS=https://<dns name> to serve the LAN.
+  proxy:
+    image: caddy:2
+    environment:
+      - STEALTHTAP_HOST=${STEALTHTAP_HOST:-localhost}
+      - STEALTHTAP_TLS=${STEALTHTAP_TLS:-internal}
+    ports:
+      - "${STEALTHTAP_BIND:-127.0.0.1}:443:443"
+      - "${STEALTHTAP_BIND:-127.0.0.1}:8443:8443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - stealthtap_proxy_data:/data
+      - stealthtap_proxy_config:/config
+    depends_on:
+      - api
+      - dashboard
+    restart: unless-stopped
 
   # ── LIVE TAP ──────────────────────────────────────────────────────────
   # Enable with:  docker compose --profile tap up -d sensor
@@ -256,6 +276,8 @@ services:
     command: ["run", "--iface", "${CAPTURE_IFACE:-eth0}", "--bpf", "${CAPTURE_BPF:-ip or ip6}", "--buffer-mb", "128", "--json"]
 
 volumes:
+  stealthtap_proxy_data:
+  stealthtap_proxy_config:
   stealthtap_backups:
   stealthtap_sensor_spool:
   stealthtap_zeek_logs:

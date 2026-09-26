@@ -2,3 +2,4 @@
 *.service text eol=lf
 Dockerfile* text eol=lf
 *.Dockerfile text eol=lf
+deploy/Caddyfile text eol=lf

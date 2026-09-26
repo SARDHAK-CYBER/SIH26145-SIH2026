@@ -174,7 +174,7 @@ cp .env.example .env   # set real passwords AND STEALTHTAP_API_KEY (>=16 random 
 docker compose up -d --build     # services restart on failure and are health-gated
 python scripts/system_check.py   # full-stack check -> docs/reports/LATEST.md
 ```
-Dashboard: http://localhost:4173 (asks for the API key) · API: http://localhost:8000 (`X-API-Key` header). Ports bind to 127.0.0.1; see `docs/OPERATIONS.md` before exposing them.
+Dashboard: **https://localhost** (asks for the API key; Caddy's local CA, so the browser warns until you trust it) · API: **https://localhost:8443** (`X-API-Key` header). Plaintext ports 4173/8000 stay on 127.0.0.1. To serve a LAN or the internet set `STEALTHTAP_BIND`/`STEALTHTAP_HOST`/`STEALTHTAP_PUBLIC_API`/`STEALTHTAP_TLS` — `docs/OPERATIONS.md` §1. Windows sensor as an auto-restarting SYSTEM task: `packaging\windows\install_sensor_task.ps1`.
 
 ## Quick start — bare service (no Docker)
 

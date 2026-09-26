@@ -1,0 +1,34 @@
+# TLS front for the dashboard (:443) and the API (:8443). Everything behind it stays on loopback / the compose network.
+#   STEALTHTAP_HOST  name clients use (default localhost). A public DNS name gets a real certificate automatically.
+#   STEALTHTAP_TLS   "internal" (default): Caddy's own local CA -- browsers warn until you trust it (see docs/OPERATIONS.md)
+#                    or an e-mail address: obtain a public Let's Encrypt certificate (needs ports 80/443 reachable from the internet)
+(secure) {
+	tls {$STEALTHTAP_TLS:internal}
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}
+
+{$STEALTHTAP_HOST:localhost} {
+	import secure
+	reverse_proxy dashboard:4173
+}
+
+{$STEALTHTAP_HOST:localhost}:8443 {
+	import secure
+	request_body {
+		max_size 1GB      # pcap uploads
+	}
+	# flush_interval -1: Server-Sent-Events (live alert stream) must not be buffered
+	reverse_proxy api:8000 {
+		flush_interval -1
+		transport http {
+			response_header_timeout 15m
+		}
+	}
+}

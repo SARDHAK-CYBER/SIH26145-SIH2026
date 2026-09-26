@@ -14,7 +14,16 @@ What is implemented and verified, what is a documented design only, and how to c
 
 Generate a key: `python -c "import secrets;print(secrets.token_urlsafe(32))"` and put it in `.env` as `STEALTHTAP_API_KEY`.
 
-**Not provided:** TLS. Put a TLS-terminating reverse proxy (Caddy/nginx/Traefik) in front before setting `STEALTHTAP_BIND=0.0.0.0`; the API key travels in a header and must not cross a network in clear text. There is no per-user login or role model: a key is a bearer credential for a whole tenant.
+### TLS (Caddy proxy, `deploy/Caddyfile`)
+The compose stack includes a `proxy` service (Caddy 2): dashboard on **https://HOST/** (443), API on **https://HOST:8443**, HSTS + `nosniff` + `X-Frame-Options: DENY`, `Server` header removed, uploads up to 1 GB, SSE not buffered. The plaintext API/dashboard ports stay bound to `127.0.0.1` only; the proxy publishes on `${STEALTHTAP_BIND:-127.0.0.1}`.
+
+| Goal | Settings in `.env` |
+|---|---|
+| Local use (default) | nothing: `https://localhost` with Caddy's own CA (browsers warn until you trust it: `docker compose cp proxy:/data/caddy/pki/authorities/local/root.crt .` and import it) |
+| Serve the LAN | `STEALTHTAP_BIND=0.0.0.0`, `STEALTHTAP_HOST=<dns name>`, `STEALTHTAP_PUBLIC_API=https://<dns name>:8443`, `STEALTHTAP_CORS_ORIGINS=https://<dns name>` |
+| Public certificate | additionally `STEALTHTAP_TLS=<your e-mail>` (Let's Encrypt; ports 80/443 must be reachable from the internet) |
+
+Verified 2026-09-27 on the Docker stack: TLS 200, API 401 without / 200 with key over TLS, a pcap upload through the proxy analysed, headers present, and both TLS ports refuse connections addressed to the machine's LAN IP while bound to loopback. Not verified: a Let's Encrypt issuance, and the browser trust-store step. The live **sensor** (host process, port 8100) is not behind this proxy: it binds loopback by default and refuses to bind elsewhere without a key; put it behind the same proxy if a remote dashboard must reach it. There is no per-user login or role model: a key is a bearer credential for a whole tenant.
 
 ## 2. Multi-tenant isolation (implemented at the storage/API layer)
 
@@ -40,7 +49,7 @@ A sensor forwards with its tenant's key (`STEALTHTAP_SENSOR_KEY` in compose, oth
 ## 4. Resilience of the alert path
 
 * **Alert spool.** If the API/DB is down, the sensor's forwarder writes each failed batch to an on-disk spool (`STEALTHTAP_SPOOL_DIR`, default `data/spool`; a named volume in the compose sensor; capped by `STEALTHTAP_SPOOL_MAX_MB`, oldest evicted first) and re-sends in order when the API answers, never letting a new batch overtake older ones. Tested with a fake API that is down, then up (`tests/test_forwarder_spool.py`).
-* **Auto-restart of the sensor.** Docker: `restart: unless-stopped`. Linux: `packaging/systemd/stealthtap-sensor.service` (capabilities `CAP_NET_RAW`+`CAP_NET_ADMIN` only, `Restart=always`). Windows: `packaging/windows/install_sensor_task.ps1` registers an elevated, at-boot, restart-on-failure scheduled task (runs as SYSTEM so Npcap's Administrators-only mode never prompts). The Windows installer and the systemd unit were syntax-checked but **not executed** in this environment (they need an elevated install).
+* **Auto-restart of the sensor.** Docker: `restart: unless-stopped`. Linux: `packaging/systemd/stealthtap-sensor.service` (capabilities `CAP_NET_RAW`+`CAP_NET_ADMIN` only, `Restart=always`). Windows: `packaging/windows/install_sensor_task.ps1` registers an at-boot scheduled task that runs as SYSTEM (so Npcap's Administrators-only mode never prompts) and supervises the sensor itself in a loop (relaunch 3 s after any exit; Task Scheduler alone did not restart it when the wrapper exited cleanly, which the first install on 2026-09-27 showed). **Executed and proved on this machine:** installed with one UAC approval; the sensor on port 8100 ran as `NT AUTHORITY\SYSTEM`, captured on Wi-Fi without any prompt, and after `Stop-Process -Force` on it was back within ~15 s under a new PID. Not verified: behaviour across an actual reboot. The systemd unit was only syntax-checked (no Linux host here).
 * Containers use `restart: unless-stopped`; the API has a health check; Postgres/Redis/Redpanda health-gate their dependents.
 
 ## 5. High availability: design (not built here)

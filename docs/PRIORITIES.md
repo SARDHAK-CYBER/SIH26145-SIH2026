@@ -112,7 +112,7 @@ Root cause of the repeated "sensor never starts": every extra sensor tried to wr
 | 30 | OPC UA channel security | **Partly** | Policy None / SHA-1 policies flagged; SignAndEncrypt bodies cannot be read without keys (permanent limit) |
 | 31 | Multi-tenant isolation | **Done for stored alerts/captures/jobs** | Per-tenant keys; not compute-isolated, OpenSearch path shared: `docs/OPERATIONS.md` §2 |
 | 32 | Backups / alert loss during outages | **Done** | Scheduled `pg_dump` + restore drill (identical rows), on-disk alert spool (`tests/test_forwarder_spool.py`) |
-| 33 | Sensor auto-restart | **Written, not executed** | systemd unit + Windows scheduled-task installer (syntax-checked; need an elevated install) |
+| 33 | Sensor auto-restart | **Done (Windows), systemd untested** | Windows task installed and proved: runs as SYSTEM, no UAC for capture, killed sensor relaunched in ~15 s (`docs/OPERATIONS.md` §4). Reboot persistence not yet observed; systemd unit only syntax-checked |
 | 34 | High availability | Design only | `docs/OPERATIONS.md` §5; never run multi-node |
 | 35 | 24-72 h soak on a mirrored production link | Open | 4 h replay soak done (`docs/reports/soak_mixed_4h.json`); needs the real link |
-| 36 | TLS in front of API/dashboard | Open (deployment) | Reverse proxy required before `STEALTHTAP_BIND=0.0.0.0` |
+| 36 | TLS in front of API/dashboard | **Done (local CA)** | Caddy `proxy` service, HTTPS 443/8443, HSTS etc., plaintext ports loopback-only (`docs/OPERATIONS.md` §1). Public certificate issuance and the live sensor behind the proxy not verified |
