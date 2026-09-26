@@ -28,19 +28,22 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from redis import Redis
 
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.eng01_ddos import VolumetricDDoSDetector
 from src.engines.eng13_bruteforce import BruteForceDetector
 from src.engines.eng02_c2_beaconing import C2BeaconingDetector
-from src.engines.eng03_dga_dns import DGADetector
+from src.engines.eng03_dga_dns import DGADetector, TlsSniDetector
 from src.engines.eng04_encrypted_malware import EncryptedMalwareDetector
 from src.engines.eng05_recon import ReconDetector
 from src.engines.eng06_exfiltration import ExfiltrationDetector
@@ -78,6 +81,28 @@ SURICATA_OUTGOING_DIR = Path(os.environ.get("SURICATA_OUTGOING_DIR", "/suricata_
 SURICATA_TIMEOUT_SECONDS = float(os.environ.get("SURICATA_TIMEOUT_SECONDS", "90"))
 SURICATA_POLL_INTERVAL = 1.0
 
+# --- availability limits -------------------------------------------------
+# One 93MB upload (564,832 flows) used to freeze the ENTIRE API -- /health
+# included -- for minutes, because the CPU-heavy stages below ran ON the
+# asyncio event loop with no concurrency cap and no deadline. Now:
+#   * heavy stages run in a small dedicated thread pool (event loop stays free)
+#   * at most MAX_CONCURRENT_ANALYSES run at once; up to MAX_QUEUED_ANALYSES
+#     wait; beyond that the caller gets 429 + Retry-After instead of piling on
+#   * every analysis has a hard wall-clock deadline (-> 504, not an open socket)
+#   * files too large for the single-worker Suricata queue skip Suricata
+#     rather than stall every later upload behind them (measured: one 93.8MB
+#     file kept that queue busy for minutes)
+MAX_CONCURRENT_ANALYSES = int(os.environ.get("MAX_CONCURRENT_ANALYSES", "2"))
+MAX_QUEUED_ANALYSES = int(os.environ.get("MAX_QUEUED_ANALYSES", "8"))
+ANALYSIS_TIMEOUT_SECONDS = float(os.environ.get("ANALYSIS_TIMEOUT_SECONDS", "600"))
+SURICATA_MAX_BYTES = int(os.environ.get("SURICATA_MAX_BYTES", str(40 * 1024 * 1024)))
+JOB_TTL_SECONDS = 3600
+
+_ANALYSIS_POOL = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_ANALYSES, thread_name_prefix="analysis")
+_inflight = 0
+_inflight_lock = threading.Lock()
+_JOBS: dict[str, dict] = {}
+
 # ML alerting threshold and per-family MITRE mapping now live in
 # src/inference/ (model_server.MIN_ML_CONFIDENCE, ml_alerts.ML_THREAT_MAPPING)
 # so the upload and live paths share one definition. The record->flow
@@ -114,23 +139,30 @@ async def _parse_via_zeek(pcap_bytes: bytes) -> Optional[dict[str, list[dict]]]:
         await asyncio.sleep(ZEEK_POLL_INTERVAL)
     else:
         print(f"[pcap_analysis] zeek-batch job {job_id} timed out after {ZEEK_TIMEOUT_SECONDS}s -- falling back")
+        incoming_path.unlink(missing_ok=True)
         return None
 
+    # Reading + json-parsing multi-hundred-MB Zeek logs is CPU/IO-heavy: off the loop.
+    parsed = await asyncio.to_thread(_read_zeek_logs, outgoing_path)
+    parsed["_job_id"] = job_id  # not a real log type -- used by the caller to locate extracted_files/
+    return parsed
+
+
+def _read_zeek_logs(outgoing_path: Path) -> dict[str, list[dict]]:
     parsed: dict[str, list[dict]] = {"conn": [], "dns": [], "ssl": [], "modbus": [], "dnp3": [], "http": [], "kerberos": [], "notice": [], "cip": []}
     for log_type in parsed:
         log_path = outgoing_path / f"{log_type}.log"
         if not log_path.exists():
             continue
-        for line in log_path.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                parsed[log_type].append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-
-    parsed["_job_id"] = job_id  # not a real log type -- used by the caller to locate extracted_files/
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    parsed[log_type].append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
     return parsed
 
 
@@ -171,6 +203,10 @@ async def _run_suricata(pcap_bytes: bytes) -> list[dict]:
     services are fully independent."""
     if STANDALONE:
         return []
+    if len(pcap_bytes) > SURICATA_MAX_BYTES:
+        print(f"[pcap_analysis] skipping suricata: {len(pcap_bytes)/1e6:.0f}MB exceeds SURICATA_MAX_BYTES "
+              f"({SURICATA_MAX_BYTES/1e6:.0f}MB) -- one huge file would stall the single-worker queue for every later upload")
+        return []
     job_id = str(uuid.uuid4())
     incoming_path = SURICATA_INCOMING_DIR / f"{job_id}.pcap"
     outgoing_path = SURICATA_OUTGOING_DIR / job_id
@@ -195,21 +231,25 @@ async def _run_suricata(pcap_bytes: bytes) -> list[dict]:
         await asyncio.sleep(SURICATA_POLL_INTERVAL)
     else:
         print(f"[pcap_analysis] suricata-batch job {job_id} timed out after {SURICATA_TIMEOUT_SECONDS}s")
+        incoming_path.unlink(missing_ok=True)   # not started yet? then don't let it clog the queue later
         return []
 
-    eve_path = outgoing_path / "eve.json"
-    records: list[dict] = []
-    if eve_path.exists():
-        for line in eve_path.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-
-    shutil.rmtree(outgoing_path, ignore_errors=True)
+    def _read_eve() -> list[dict]:
+        recs: list[dict] = []
+        eve_path = outgoing_path / "eve.json"
+        if eve_path.exists():
+            with open(eve_path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        recs.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        shutil.rmtree(outgoing_path, ignore_errors=True)
+        return recs
+    records = await asyncio.to_thread(_read_eve)
     try:
         return parse_suricata_alerts(records)
     except Exception as exc:
@@ -259,6 +299,7 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
         # lexical heuristic when no dns model is loaded). This retires
         # the old parallel "ml_dns" path the PRD flagged as duplication.
         "eng03": DGADetector(model_server=model_server),
+        "eng03s": TlsSniDetector(model_server=model_server),
         "eng04": EncryptedMalwareDetector(),
         "eng05": ReconDetector(),
         "eng06": ExfiltrationDetector(redis_client=redis_client, key_prefix=state_prefix),
@@ -332,6 +373,13 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
         alert = await rule_engines["eng04"].score(flow)
         if alert:
             coverage["eng04"]["alerts_fired"] += 1
+            alerts.append(alert.model_dump(mode="json"))
+        # TLS has no trained model of its own (no labeled data) -- the SNI is a
+        # domain, so the trained DNS/DGA model scores it (ENG-03, SNI variant)
+        _run_rule("eng03s", flow)
+        alert = await rule_engines["eng03s"].score(flow)
+        if alert:
+            coverage["eng03s"]["alerts_fired"] += 1
             alerts.append(alert.model_dump(mode="json"))
         _maybe_ml_score(flow, "tls")
 
@@ -426,15 +474,41 @@ async def _run_engines(parsed: dict[str, list[dict]], model_server: Optional[Hyb
     return alerts, coverage
 
 
-@router.post("/analyze/pcap")
-async def analyze_pcap(request: Request, file: UploadFile = File(...)):
-    if not file.filename.lower().endswith((".pcap", ".pcapng")):
-        raise HTTPException(400, "expected a .pcap or .pcapng file")
+def _run_engines_blocking(parsed, model_server, redis_client):
+    """The engine stage is CPU-bound Python/Rust (+ Redis when the native module
+    is absent); run it in a worker thread with its own event loop so the API's
+    loop keeps answering /health while a big capture is scored."""
+    return asyncio.run(_run_engines(parsed, model_server, redis_client))
 
-    contents = await file.read()
-    if len(contents) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, f"file exceeds {MAX_UPLOAD_BYTES} byte cap")
 
+def _parse_fallback(contents: bytes) -> dict:
+    with tempfile.NamedTemporaryFile(suffix=".pcap", delete=False) as tmp:
+        tmp.write(contents)
+        tmp_path = tmp.name
+    try:
+        return parse_pcap(tmp_path)
+    finally:
+        os.unlink(tmp_path)
+
+
+def _admit() -> None:
+    """Backpressure: refuse (429) rather than queue unboundedly."""
+    global _inflight
+    with _inflight_lock:
+        if _inflight >= MAX_CONCURRENT_ANALYSES + MAX_QUEUED_ANALYSES:
+            raise HTTPException(429, f"analysis queue full ({_inflight} in flight, cap "
+                                     f"{MAX_CONCURRENT_ANALYSES}+{MAX_QUEUED_ANALYSES}); retry shortly",
+                                headers={"Retry-After": "15"})
+        _inflight += 1
+
+
+def _release() -> None:
+    global _inflight
+    with _inflight_lock:
+        _inflight = max(0, _inflight - 1)
+
+
+async def _analyze_contents(contents: bytes, filename: str, app_state) -> dict:
     parser_used = "zeek"
     t0 = time.time()
     # Zeek parsing and Suricata signature matching are fully
@@ -449,28 +523,26 @@ async def analyze_pcap(request: Request, file: UploadFile = File(...)):
 
     if parsed is None:
         parser_used = "scapy_fallback"
-        with tempfile.NamedTemporaryFile(suffix=".pcap", delete=False) as tmp:
-            tmp.write(contents)
-            tmp_path = tmp.name
         try:
-            parsed = parse_pcap(tmp_path)
+            parsed = await asyncio.to_thread(_parse_fallback, contents)
         except Exception as exc:
             raise HTTPException(422, f"could not parse pcap via either Zeek or the fallback parser: {exc}")
-        finally:
-            os.unlink(tmp_path)
     parse_time = time.time() - t0
 
-    model_server = getattr(request.app.state, "model_server", None)
-    yara_scanner = getattr(request.app.state, "yara_scanner", None)
-    redis_client = getattr(request.app.state, "redis", None)
+    model_server = getattr(app_state, "model_server", None)
+    yara_scanner = getattr(app_state, "yara_scanner", None)
+    redis_client = getattr(app_state, "redis", None)
 
     t0 = time.time()
-    alerts, engine_coverage = await _run_engines(parsed, model_server, redis_client)
+    loop = asyncio.get_running_loop()
+    alerts, engine_coverage = await loop.run_in_executor(
+        _ANALYSIS_POOL, _run_engines_blocking, parsed, model_server, redis_client)
     yara_alerts: list[dict] = []
     files_extracted = 0
     if zeek_job_id:
-        files_extracted = len(list((ZEEK_OUTGOING_DIR / zeek_job_id / "extracted_files").iterdir())) if (ZEEK_OUTGOING_DIR / zeek_job_id / "extracted_files").is_dir() else 0
-        yara_alerts = _scan_extracted_files(zeek_job_id, yara_scanner)
+        extracted = ZEEK_OUTGOING_DIR / zeek_job_id / "extracted_files"
+        files_extracted = len(list(extracted.iterdir())) if extracted.is_dir() else 0
+        yara_alerts = await asyncio.to_thread(_scan_extracted_files, zeek_job_id, yara_scanner)
         alerts.extend(yara_alerts)
         _cleanup_zeek_job(zeek_job_id)
     alerts.extend(suricata_alerts)
@@ -490,14 +562,15 @@ async def analyze_pcap(request: Request, file: UploadFile = File(...)):
     # service is Up" (which doesn't prove it processed this file).
     pipeline_coverage = {
         "zeek": {"ran": parser_used == "zeek", "records_parsed": sum(len(parsed.get(k, [])) for k in ("conn", "dns", "ssl", "modbus", "http"))},
-        "suricata": {"ran": parser_used == "zeek", "alerts_fired": len(suricata_alerts)},  # submitted alongside zeek; "ran" here means the job queue accepted it, not that it necessarily returned before timeout
+        "suricata": {"ran": parser_used == "zeek" and len(contents) <= SURICATA_MAX_BYTES, "alerts_fired": len(suricata_alerts),
+                     **({"skipped": f"file larger than {SURICATA_MAX_BYTES // (1024 * 1024)}MB -- would stall the single-worker Suricata queue"} if len(contents) > SURICATA_MAX_BYTES else {})},  # submitted alongside zeek; "ran" here means the job queue accepted it, not that it necessarily returned before timeout
         "yara": {"ran": zeek_job_id is not None, "files_scanned": files_extracted, "alerts_fired": len(yara_alerts)},
         **engine_coverage,
     }
 
     return {
         "analysis_id": str(uuid.uuid4()),
-        "filename": file.filename,
+        "filename": filename,
         "parser_used": parser_used,  # "zeek" or "scapy_fallback" -- tells you which path actually ran
         "packet_summary": {
             "conn_flows": len(parsed.get("conn", [])),
@@ -521,3 +594,74 @@ async def analyze_pcap(request: Request, file: UploadFile = File(...)):
         "detection_mode_counts": detection_mode_counts,
         "alerts": alerts,
     }
+
+
+async def _guarded_analysis(contents: bytes, filename: str, app_state) -> dict:
+    try:
+        return await asyncio.wait_for(_analyze_contents(contents, filename, app_state), ANALYSIS_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, f"analysis exceeded {ANALYSIS_TIMEOUT_SECONDS:.0f}s; use POST /analyze/pcap/async "
+                                 f"and poll GET /analyze/jobs/<id> for large captures")
+
+
+@router.post("/analyze/pcap")
+async def analyze_pcap(request: Request, file: UploadFile = File(...)):
+    if not file.filename.lower().endswith((".pcap", ".pcapng")):
+        raise HTTPException(400, "expected a .pcap or .pcapng file")
+    contents = await file.read()
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"file exceeds {MAX_UPLOAD_BYTES} byte cap")
+    _admit()
+    try:
+        return await _guarded_analysis(contents, file.filename, request.app.state)
+    finally:
+        _release()
+
+
+def _sweep_jobs() -> None:
+    cutoff = time.time() - JOB_TTL_SECONDS
+    for jid in [j for j, v in _JOBS.items() if v["created"] < cutoff]:
+        _JOBS.pop(jid, None)
+
+
+@router.post("/analyze/pcap/async", status_code=202)
+async def analyze_pcap_async(request: Request, file: UploadFile = File(...)):
+    """Submit-and-poll variant for large captures: returns immediately with a
+    job id; the analysis runs in the background under the same concurrency cap
+    and deadline. Poll GET /analyze/jobs/{job_id}."""
+    if not file.filename.lower().endswith((".pcap", ".pcapng")):
+        raise HTTPException(400, "expected a .pcap or .pcapng file")
+    contents = await file.read()
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"file exceeds {MAX_UPLOAD_BYTES} byte cap")
+    _admit()
+    _sweep_jobs()
+    job_id = uuid.uuid4().hex
+    _JOBS[job_id] = {"status": "running", "created": time.time(), "filename": file.filename}
+    app_state = request.app.state
+    filename = file.filename
+
+    async def _run():
+        try:
+            _JOBS[job_id].update(status="done", result=await _guarded_analysis(contents, filename, app_state))
+        except HTTPException as exc:
+            _JOBS[job_id].update(status="error", error=exc.detail, http_status=exc.status_code)
+        except Exception as exc:  # never let a background task die silently
+            _JOBS[job_id].update(status="error", error=f"{type(exc).__name__}: {exc}", http_status=500)
+        finally:
+            _release()
+
+    asyncio.create_task(_run())
+    return {"job_id": job_id, "status": "running", "poll": f"/analyze/jobs/{job_id}"}
+
+
+@router.get("/analyze/jobs/{job_id}")
+async def analyze_job(job_id: str):
+    job = _JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, "unknown or expired job id")
+    if job["status"] == "done":
+        return {"job_id": job_id, "status": "done", "result": job["result"]}
+    if job["status"] == "error":
+        return JSONResponse({"job_id": job_id, "status": "error", "error": job["error"]}, status_code=job.get("http_status", 500))
+    return {"job_id": job_id, "status": "running", "elapsed_s": round(time.time() - job["created"], 1)}

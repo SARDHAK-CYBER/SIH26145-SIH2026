@@ -37,7 +37,7 @@ except Exception:
 # (ENG-02) run when the flow is COMPLETE (expire), so a half-finished
 # TLS handshake snapshot can't false-positive as exfiltration.
 DISPATCH_IMMEDIATE = {
-    "dns": ("eng03",), "ssl": ("eng04",),
+    "dns": ("eng03",), "ssl": ("eng04", "eng03s"),
     "modbus": ("eng07",), "dnp3": ("eng07",),
     "http": ("eng09",), "kerberos": ("eng11",),
 }
@@ -95,7 +95,7 @@ class ScoringEngine:
     def _build(self) -> None:
         from src.engines.eng01_ddos import VolumetricDDoSDetector
         from src.engines.eng02_c2_beaconing import C2BeaconingDetector
-        from src.engines.eng03_dga_dns import DGADetector
+        from src.engines.eng03_dga_dns import DGADetector, TlsSniDetector
         from src.engines.eng04_encrypted_malware import EncryptedMalwareDetector
         from src.engines.eng05_recon import ReconDetector
         from src.engines.eng06_exfiltration import ExfiltrationDetector
@@ -155,6 +155,7 @@ class ScoringEngine:
             "eng01": VolumetricDDoSDetector(redis_client=r, allow_native=self.worker_id is None),
             "eng02": C2BeaconingDetector(redis_client=r),
             "eng03": DGADetector(model_server=self._model_server),
+            "eng03s": TlsSniDetector(model_server=self._model_server),
             "eng04": EncryptedMalwareDetector(),
             "eng05": ReconDetector(),
             "eng06": ExfiltrationDetector(redis_client=r),

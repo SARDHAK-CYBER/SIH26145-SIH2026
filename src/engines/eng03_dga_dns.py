@@ -26,6 +26,7 @@ duck-typed: anything with `.score_flow(flow, "dns")` returning
 None simply forces the heuristic fallback.
 """
 from __future__ import annotations
+import os
 
 from typing import Optional
 
@@ -269,3 +270,39 @@ class DGADetector(Detector):
             detection_mode=detection_mode,
             model_scores=model_scores,
         )
+
+
+
+# TLS SNI is a real domain name in every ClientHello, so the trained DNS/DGA
+# model applies to it directly -- which gives TLS traffic genuine ML coverage
+# without inventing a labeled TLS dataset (none exists locally; a `tls` model
+# cannot be trained honestly). Stricter than DNS by default: an SNI has no
+# query-type/answer context, and CDN/telemetry hostnames look random.
+TLS_SNI_MIN_CONFIDENCE = float(os.environ.get("TLS_SNI_MIN_CONFIDENCE", "90"))
+
+
+class TlsSniDetector(Detector):
+    """ENG-03's DGA decision applied to the TLS Server Name Indication."""
+    name = "ENG-03-SNI"
+
+    def __init__(self, model_server=None):
+        self._dga = DGADetector(model_server=model_server)
+
+    async def score(self, flow: dict) -> Optional[Alert]:
+        sni = (flow.get("sni") or "").strip().lower()
+        if not sni:
+            return None
+        pseudo = dict(flow, dns_query=sni, dns_qtype="A")
+        alert = await self._dga.score(pseudo)
+        if alert is None or alert.threat_class != "DGA_DOMAIN":
+            return None
+        if alert.confidence_score < TLS_SNI_MIN_CONFIDENCE:
+            return None
+        alert.evidence = {**alert.evidence, "source": "tls_sni", "sni": sni, "ja4": flow.get("ja4", "")}
+        # the borrowed DNS alert is stamped UDP/53 -- this one is a TLS flow
+        alert.flow_identifier = FlowIdentifier(
+            src_ip=flow.get("src_ip", "0.0.0.0"), src_port=int(flow.get("src_port", 0) or 0),
+            dst_ip=flow.get("dst_ip", "0.0.0.0"), dst_port=int(flow.get("dst_port", 0) or 443),
+            protocol="TCP",
+        )
+        return alert

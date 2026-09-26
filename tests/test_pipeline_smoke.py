@@ -86,7 +86,12 @@ def test_no_torch_dependency_in_eng03():
 # ENG-03: deterministic, model-free DGA heuristic
 # --------------------------------------------------------------------------
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # own loop: other tests use asyncio.run(), which leaves the thread with no current loop
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def test_eng03_deterministic_and_fires_on_dga_lexical():

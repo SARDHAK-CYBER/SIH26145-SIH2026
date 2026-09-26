@@ -40,12 +40,28 @@ _EXCLUDED_FANOUT_PORTS = {7680}
 # of the window.
 _PRUNE_EVERY = 5000
 
+# One alert per scanning CAMPAIGN, not one per 25 probes. After firing, this
+# engine resets a source's fan-out state (correct for the detector: it needs
+# 25 NEW distinct targets to fire again) -- so a single Mirai-style scanner
+# probing 565,012 hosts produced 22,588 RECONNAISSANCE alerts from one
+# capture, burying the analyst and bloating every API response. Now: the
+# first crossing alerts; further probing from the same source stays one
+# campaign (suppressed) for as long as it keeps probing, with an ESCALATION
+# alert each time the campaign's cumulative distinct targets grows 10x
+# (25 -> 250 -> 2,500 ...) so a scan that becomes a sweep is still surfaced.
+# A source silent for RECON_ALERT_COOLDOWN_S starts a fresh campaign.
+RECON_ALERT_COOLDOWN_S = float(os.environ.get("RECON_ALERT_COOLDOWN_S", str(WINDOW_SECONDS)))
+_ESCALATION_FACTOR = 10
+_MAX_CAMPAIGNS = 50_000
+
 class ReconDetector(Detector):
     name = "ENG-05"
 
     def __init__(self):
         self._seen: dict[str, list[tuple[float, str, int]]] = defaultdict(list)
         self._since_prune = 0
+        # src_ip -> [last_probe_ts, cumulative_distinct_targets, next_escalation_at]
+        self._campaign: dict[str, list] = {}
         self._native = None
         if _NATIVE_ENG05_AVAILABLE and not _FORCE_PYTHON_ENG05:
             self._native = stealthtap_core.NativeEng05()
@@ -56,6 +72,23 @@ class ReconDetector(Detector):
                  if not entries or entries[-1][0] < cutoff]
         for ip in stale:
             del self._seen[ip]
+
+    def _campaign_report(self, src_ip: str, ts: float, targets: int) -> Optional[tuple[int, bool]]:
+        """None -> suppress (same campaign, no 10x growth). Else (cumulative
+        targets to report, is_escalation)."""
+        c = self._campaign.get(src_ip)
+        if c is None or ts - c[0] > RECON_ALERT_COOLDOWN_S or ts < c[0] - RECON_ALERT_COOLDOWN_S:
+            if len(self._campaign) >= _MAX_CAMPAIGNS:
+                cutoff = ts - RECON_ALERT_COOLDOWN_S
+                self._campaign = {k: v for k, v in self._campaign.items() if v[0] >= cutoff}
+            self._campaign[src_ip] = [ts, targets, targets * _ESCALATION_FACTOR]
+            return targets, False
+        c[0] = max(c[0], ts)          # still probing -> the campaign stays alive
+        c[1] += targets
+        if c[1] >= c[2]:
+            c[2] = c[1] * _ESCALATION_FACTOR
+            return c[1], True
+        return None
 
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip = flow["src_ip"]
@@ -68,7 +101,10 @@ class ReconDetector(Detector):
             )
             if hit is None:
                 return None
-            return self._build_alert(flow, hit["distinct_targets"], hit["confidence"])
+            rep = self._campaign_report(src_ip, now, hit["distinct_targets"])
+            if rep is None:
+                return None
+            return self._build_alert(flow, rep[0], hit["confidence"], escalation=rep[1])
 
         if int(flow.get("dst_port", 0) or 0) in _EXCLUDED_FANOUT_PORTS:
             return None
@@ -105,10 +141,13 @@ class ReconDetector(Detector):
         if len(distinct_targets) >= FANOUT_THRESHOLD:
             confidence = min(95.0, 50.0 + len(distinct_targets))
             self._seen.pop(src_ip, None)  # reset state for this source after firing
-            return self._build_alert(flow, len(distinct_targets), confidence)
+            rep = self._campaign_report(src_ip, now, len(distinct_targets))
+            if rep is None:
+                return None
+            return self._build_alert(flow, rep[0], confidence, escalation=rep[1])
         return None
 
-    def _build_alert(self, flow: dict, fanout_count: int, confidence: float) -> Alert:
+    def _build_alert(self, flow: dict, fanout_count: int, confidence: float, escalation: bool = False) -> Alert:
         return Alert(
             alert_id=flow["flow_uid"], timestamp=flow["ts"], severity="MEDIUM",
             confidence_score=confidence, threat_class="RECONNAISSANCE",
@@ -117,6 +156,9 @@ class ReconDetector(Detector):
                 dst_ip=flow["dst_ip"], dst_port=flow["dst_port"], protocol=flow["proto"],
             ),
             mitre_attack=MitreAttack(tactic="Discovery", technique_id="T1046", technique_name="Network Service Discovery"),
-            evidence={"distinct_targets": fanout_count, "window_s": WINDOW_SECONDS},
+            evidence=({"distinct_targets": fanout_count, "window_s": WINDOW_SECONDS}
+                      if not escalation else
+                      {"distinct_targets": fanout_count, "window_s": WINDOW_SECONDS,
+                       "escalation": True, "note": "cumulative distinct targets in this scanning campaign grew 10x"}),
             forensics={"raw_segment_hash_sha256": flow.get("segment_hash", "")},
         )
