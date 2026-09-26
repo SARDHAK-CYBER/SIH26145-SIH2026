@@ -109,12 +109,20 @@ pub struct HttpOut { pub uid: String, pub ts: f64, pub orig_h: String, pub orig_
     pub resp_h: String, pub resp_p: u16, pub method: String, pub uri: String,
     pub user_agent: String, pub request_body_len: u64, pub segment_hash: String }
 
-pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out), Http(HttpOut) }
+pub struct KerberosOut { pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p: u16,
+    pub resp_h: String, pub resp_p: u16, pub proto: &'static str, pub request_type: String,
+    pub client: String, pub service: String, pub cipher: String, pub segment_hash: String }
+
+/// Other OT protocols (S7comm, IEC 60870-5-104): `kind` is the log type Python dispatches on.
+pub struct OtOut { pub kind: &'static str, pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p: u16,
+    pub resp_h: String, pub resp_p: u16, pub function: String, pub detail: String, pub code: u32, pub segment_hash: String }
+
+pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out), Http(HttpOut), Kerberos(KerberosOut), Ot(OtOut) }
 
 #[derive(Default, Clone)]
 pub struct Stats {
     pub packets: u64, pub non_ip: u64, pub flows_seen: u64,
-    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub conn: u64,
+    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub conn: u64,
 }
 
 // Function-code name tables -- identical to flow_assembler.py's _MODBUS_FC / _DNP3_FC.
@@ -152,6 +160,71 @@ fn parse_modbus(p: &[u8], s_ip: &str, s_p: u16, d_ip: &str, d_p: u16, ts: f64, u
         func: name.to_string(), register,
         segment_hash: seg_hash(&[uid.to_string(), name.to_string(), register.to_string()]),
     })
+}
+
+fn s7_function_name(code: u8) -> Option<&'static str> {
+    Some(match code {
+        0x00 => "CPU_SERVICES", 0xF0 => "SETUP_COMMUNICATION", 0x04 => "READ_VAR", 0x05 => "WRITE_VAR",
+        0x1A => "REQUEST_DOWNLOAD", 0x1B => "DOWNLOAD_BLOCK", 0x1C => "DOWNLOAD_ENDED",
+        0x1D => "START_UPLOAD", 0x1E => "UPLOAD", 0x1F => "END_UPLOAD",
+        0x28 => "PLC_CONTROL", 0x29 => "PLC_STOP",
+        _ => return None,
+    })
+}
+
+/// S7comm request (client -> PLC, TCP/102): TPKT | COTP DT | S7 header | parameter (function code first).
+/// Same shape as Zeek's ICSNPP s7comm `function`. Returns (function, detail, code).
+fn parse_s7comm(p: &[u8]) -> Option<(String, String, u32)> {
+    if p.len() < 17 || p[0] != 0x03 || p[1] != 0x00 { return None; }
+    let cotp_len = p[4] as usize;
+    if p[5] != 0xF0 { return None; }               // COTP DT (data) only, not connection setup
+    let s7 = p.get(5 + cotp_len..)?;
+    if s7.len() < 10 || s7[0] != 0x32 { return None; }
+    let rosctr = s7[1];
+    if rosctr != 0x01 && rosctr != 0x07 { return None; }    // Job / Userdata are requests; acks are not
+    let plen = u16::from_be_bytes([s7[6], s7[7]]) as usize;
+    let param = s7.get(10..10 + plen.max(1))?;
+    if rosctr == 0x01 {
+        let code = param[0];
+        let name = s7_function_name(code)?;
+        Some((name.to_string(), "job".to_string(), code as u32))
+    } else {
+        // userdata: 00 01 12 plen method | type/group | subfunction | seq
+        if param.len() < 8 { return None; }
+        let group = param[5] & 0x0f;
+        let sub = param[6];
+        let gname = match group { 1 => "PROGRAMMER", 2 => "CYCLIC_DATA", 3 => "BLOCK_FUNCTIONS", 4 => "CPU_FUNCTIONS", 5 => "SECURITY", 7 => "TIME", _ => "OTHER" };
+        Some(("USERDATA".to_string(), format!("{gname}/{sub}"), 0x100 | (group as u32) << 4 | sub as u32 & 0xf))
+    }
+}
+
+/// IEC 60870-5-104 I-frames in the CONTROL direction (client -> outstation, TCP/2404): the ASDU type id
+/// says what is being commanded (45.. single/double command, 48-50 setpoints, 105 reset process ...).
+fn parse_iec104(p: &[u8]) -> Option<(String, String, u32)> {
+    let mut off = 0usize;
+    let mut best: Option<(u8, u8)> = None;   // most severe (type_id, cot) among the APDUs in this segment
+    while off + 6 <= p.len() && p[off] == 0x68 {
+        let len = p[off + 1] as usize;
+        if len < 4 || off + 2 + len > p.len() { break; }
+        let ctrl1 = p[off + 2];
+        if ctrl1 & 1 == 0 && len >= 4 + 6 {                    // I-format with an ASDU
+            let asdu = &p[off + 6..off + 2 + len];
+            let (tid, cot) = (asdu[0], asdu[2] & 0x3f);
+            let is_cmd = (45..=64).contains(&tid) || tid == 105;
+            if best.is_none() || is_cmd { best = Some((tid, cot)); }
+            if is_cmd { break; }
+        }
+        off += 2 + len;
+    }
+    let (tid, cot) = best?;
+    let name = match tid {
+        45 => "C_SC_NA_1", 46 => "C_DC_NA_1", 47 => "C_RC_NA_1", 48 => "C_SE_NA_1", 49 => "C_SE_NB_1", 50 => "C_SE_NC_1",
+        51 => "C_BO_NA_1", 58 => "C_SC_TA_1", 59 => "C_DC_TA_1", 60 => "C_RC_TA_1", 61 => "C_SE_TA_1", 62 => "C_SE_TB_1",
+        63 => "C_SE_TC_1", 64 => "C_BO_TA_1", 100 => "C_IC_NA_1", 101 => "C_CI_NA_1", 102 => "C_RD_NA_1",
+        103 => "C_CS_NA_1", 104 => "C_TS_NA_1", 105 => "C_RP_NA_1", 106 => "C_CD_NA_1", 107 => "C_TS_TA_1",
+        _ => return None,
+    };
+    Some((name.to_string(), format!("type={tid} cot={cot}"), tid as u32))
 }
 
 fn parse_dnp3(p: &[u8], s_ip: &str, s_p: u16, d_ip: &str, d_p: u16, ts: f64, uid: &str) -> Option<Dnp3Out> {
@@ -318,6 +391,21 @@ impl LiveFlowAssembler {
             }
         }
 
+        // Kerberos KDC reply (AS-REP / TGS-REP): who asked for a ticket, for which service, sealed
+        // with which cipher -- the inputs ENG-11 (Kerberoasting) needs. Replies come FROM port 88.
+        if l4.sport == 88 && !l4.payload.is_empty() {
+            if let Some(k) = crate::krb::parse_kdc_reply(l4.payload, l4.proto == "tcp") {
+                self.stats.kerberos += 1;
+                // orient like Zeek: originator = the client (this packet's destination)
+                out.push(Immediate::Kerberos(KerberosOut {
+                    uid: uid.clone(), ts, orig_h: dst_ip.clone(), orig_p: l4.dport,
+                    resp_h: src_ip.clone(), resp_p: l4.sport, proto: if l4.proto == "tcp" { "tcp" } else { "udp" },
+                    segment_hash: seg_hash(&[uid.clone(), k.client.clone(), k.service.clone(), k.cipher.clone()]),
+                    request_type: k.request_type.to_string(), client: k.client, service: k.service, cipher: k.cipher,
+                }));
+            }
+        }
+
         // Modbus / DNP3 (immediate)
         if l4.proto == "tcp" && !l4.payload.is_empty() {
             if l4.sport == 502 || l4.dport == 502 {
@@ -329,6 +417,20 @@ impl LiveFlowAssembler {
                 if let Some(d) = parse_dnp3(l4.payload, &src_ip, l4.sport, &dst_ip, l4.dport, ts, &uid) {
                     self.stats.dnp3 += 1;
                     out.push(Immediate::Dnp3(d));
+                }
+            } else if l4.dport == 102 {
+                if let Some((function, detail, code)) = parse_s7comm(l4.payload) {
+                    self.stats.s7comm += 1;
+                    out.push(Immediate::Ot(OtOut { kind: "s7comm", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                        resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
+                        function, detail, code }));
+                }
+            } else if l4.dport == 2404 {
+                if let Some((function, detail, code)) = parse_iec104(l4.payload) {
+                    self.stats.iec104 += 1;
+                    out.push(Immediate::Ot(OtOut { kind: "iec104", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                        resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
+                        function, detail, code }));
                 }
             }
         }

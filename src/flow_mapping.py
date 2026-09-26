@@ -22,7 +22,7 @@ from typing import Any
 
 # Log types this mapper understands. Anything else falls through to the
 # common flow fields only.
-KNOWN_LOG_TYPES = ("conn", "dns", "ssl", "modbus", "dnp3", "http", "kerberos", "cip")
+KNOWN_LOG_TYPES = ("conn", "dns", "ssl", "modbus", "dnp3", "http", "kerberos", "cip", "s7comm", "iec104")
 
 
 def compute_segment_hash(rec: dict[str, Any]) -> str:
@@ -101,6 +101,15 @@ def map_record(rec: dict[str, Any], log_type: str) -> dict[str, Any]:
         # TGS-REQ carrying this field is cleartext, so this is a real,
         # directly-observed identity, not an inference.
         flow["krb_client"] = rec.get("client", "")
+    elif log_type == "s7comm":
+        flow["protocol_analyzed"] = "s7comm"
+        flow["s7_function"] = rec.get("function", "")
+        flow["s7_detail"] = rec.get("detail", "")
+    elif log_type == "iec104":
+        flow["protocol_analyzed"] = "iec104"
+        flow["iec104_type"] = rec.get("function", "")
+        flow["iec104_detail"] = rec.get("detail", "")
+        flow["iec104_type_id"] = rec.get("code", 0)
     elif log_type == "cip":
         flow["protocol_analyzed"] = "enip"
         flow["cip_service"] = rec.get("service")

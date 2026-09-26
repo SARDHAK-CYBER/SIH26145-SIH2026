@@ -51,11 +51,60 @@ DNP3_HIGH_FUNCTIONS = {
 }
 
 
+# Siemens S7comm job functions (validated against real captures: Wireshark's s7comm_downloading_block_db1,
+# s7comm_reading_plc_status, s7comm_varservice_libnodavedemo). Program download and PLC stop/control are the
+# operations that change what a controller does or whether it runs; a variable WRITE changes a live value.
+# READ_VAR / SETUP_COMMUNICATION / userdata SZL reads are ordinary engineering-station traffic and never alert.
+S7_CRITICAL_FUNCTIONS = {"PLC_STOP", "PLC_CONTROL", "REQUEST_DOWNLOAD", "DOWNLOAD_BLOCK", "DOWNLOAD_ENDED"}
+S7_HIGH_FUNCTIONS = {"WRITE_VAR", "START_UPLOAD", "UPLOAD", "END_UPLOAD"}
+_S7_MITRE = {  # ATT&CK for ICS
+    "PLC_STOP": ("T0858", "Change Operating Mode"), "PLC_CONTROL": ("T0858", "Change Operating Mode"),
+    "REQUEST_DOWNLOAD": ("T0843", "Program Download"), "DOWNLOAD_BLOCK": ("T0843", "Program Download"),
+    "DOWNLOAD_ENDED": ("T0843", "Program Download"), "WRITE_VAR": ("T0836", "Modify Parameter"),
+    "START_UPLOAD": ("T0845", "Program Upload"), "UPLOAD": ("T0845", "Program Upload"), "END_UPLOAD": ("T0845", "Program Upload"),
+}
+
+# IEC 60870-5-104 control-direction ASDU types (IEC 60870-5-101 Table): commands that operate equipment or
+# change setpoints are CRITICAL; reset-process and clock synchronisation are HIGH. Interrogation (100), read
+# (102), counter interrogation (101) are ordinary master polling and never alert.
+IEC104_CRITICAL_TYPES = set(range(45, 52)) | set(range(58, 65))   # C_SC/DC/RC/SE/BO (+ time-tagged)
+IEC104_HIGH_TYPES = {103, 105}                                     # clock sync, reset process
+
+
 class OTIndustrialAnomalyDetector(Detector):
     name = "ENG-07-OT"
 
+    def _ics_alert(self, flow: dict, protocol: str, severity: str, confidence: float, mitre: tuple, evidence: dict) -> Alert:
+        return Alert(
+            alert_id=flow["flow_uid"], timestamp=flow["ts"], severity=severity, confidence_score=confidence,
+            threat_class="ICS_UNAUTHORIZED_CONTROL_COMMAND",
+            flow_identifier=FlowIdentifier(src_ip=flow["src_ip"], src_port=flow["src_port"],
+                                           dst_ip=flow["dst_ip"], dst_port=flow["dst_port"], protocol="TCP"),
+            mitre_attack=MitreAttack(tactic="Impair Process Control", technique_id=mitre[0], technique_name=mitre[1]),
+            evidence={"protocol": protocol, **evidence},
+            forensics={"raw_segment_hash_sha256": flow.get("segment_hash", "")},
+        )
+
     async def score(self, flow: dict) -> Optional[Alert]:
         proto = flow.get("protocol_analyzed", "")
+
+        if proto == "s7comm":
+            fn = str(flow.get("s7_function", "")).upper()
+            if fn in S7_CRITICAL_FUNCTIONS or fn in S7_HIGH_FUNCTIONS:
+                critical = fn in S7_CRITICAL_FUNCTIONS
+                return self._ics_alert(flow, "S7comm", "CRITICAL" if critical else "HIGH", 92.0 if critical else 80.0,
+                                       _S7_MITRE.get(fn, ("T0855", "Unauthorized Command Message")),
+                                       {"function_code": fn, "impact": "controller program/mode change" if critical else "live value write / program upload"})
+            return None
+
+        if proto == "iec104":
+            tid = int(flow.get("iec104_type_id", 0) or 0)
+            if tid in IEC104_CRITICAL_TYPES or tid in IEC104_HIGH_TYPES:
+                critical = tid in IEC104_CRITICAL_TYPES
+                return self._ics_alert(flow, "IEC 60870-5-104", "CRITICAL" if critical else "HIGH", 92.0 if critical else 78.0,
+                                       ("T0855", "Unauthorized Command Message"),
+                                       {"function_code": flow.get("iec104_type", ""), "asdu_type_id": tid, "detail": flow.get("iec104_detail", "")})
+            return None
 
         if proto == "dnp3":
             fc = str(flow.get("dnp3_func", "")).upper()

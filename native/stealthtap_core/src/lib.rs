@@ -20,6 +20,7 @@ mod eng13;
 mod flow_engines;
 mod inventory;
 mod ja4;
+mod krb;
 mod live;
 mod parse;
 mod pcap;
@@ -156,6 +157,22 @@ pub(crate) fn immediate_to_dict<'py>(py: Python<'py>, rec: &Immediate) -> PyResu
             d.set_item("segment_hash", &r.segment_hash)?;
             "dnp3"
         }
+        Immediate::Kerberos(r) => {
+            base(&d, &r.uid, r.ts, &r.orig_h, r.orig_p, &r.resp_h, r.resp_p)?;
+            d.set_item("proto", r.proto)?; d.set_item("request_type", &r.request_type)?;
+            d.set_item("client", &r.client)?; d.set_item("service", &r.service)?;
+            d.set_item("cipher", &r.cipher)?; d.set_item("segment_hash", &r.segment_hash)?;
+            "kerberos"
+        }
+        Immediate::Ot(r) => {
+            base(&d, &r.uid, r.ts, &r.orig_h, r.orig_p, &r.resp_h, r.resp_p)?;
+            d.set_item("proto", "tcp")?;
+            d.set_item("function", &r.function)?;
+            d.set_item("detail", &r.detail)?;
+            d.set_item("code", r.code)?;
+            d.set_item("segment_hash", &r.segment_hash)?;
+            r.kind
+        }
         Immediate::Http(r) => {
             base(&d, &r.uid, r.ts, &r.orig_h, r.orig_p, &r.resp_h, r.resp_p)?;
             d.set_item("proto", "tcp")?; d.set_item("method", &r.method)?;
@@ -240,6 +257,9 @@ impl LiveFlowAssembler {
         d.set_item("modbus", s.modbus)?;
         d.set_item("dnp3", s.dnp3)?;
         d.set_item("http", s.http)?;
+        d.set_item("kerberos", s.kerberos)?;
+        d.set_item("s7comm", s.s7comm)?;
+        d.set_item("iec104", s.iec104)?;
         d.set_item("conn", s.conn)?;
         Ok(d.into())
     }

@@ -21,6 +21,7 @@ Windows environments negotiate AES by default, so seeing RC4 at all is
 itself unusual, not just the request pattern alone.
 """
 from __future__ import annotations
+import os
 import uuid
 from typing import Optional
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
@@ -29,6 +30,8 @@ from src.engines.base import Detector
 # Confirmed from Zeek's own KRB::cipher_name const table -- these are
 # the real RC4 cipher identifiers, not guessed strings.
 WEAK_CIPHERS = {"rc4-hmac", "rc4-hmac-exp"}
+MACHINE_SPN_CLASSES = set(os.environ.get("KRB_MACHINE_SPN_CLASSES",
+                          "host,cifs,ldap,dns,gc,rpcss,wsman,termsrv,restrictedkrbhost,exchangemdb,exchangerfr,exchangeab,imap,smtp,pop,ftp").split(","))
 
 
 class KerberosAttackDetector(Detector):
@@ -45,7 +48,18 @@ class KerberosAttackDetector(Detector):
         # krbtgt is the ticket-granting service itself, not a "service
         # account" in the Kerberoasting sense -- excluding it avoids
         # flagging completely normal initial ticket-granting exchanges.
-        if service.lower() in ("krbtgt", ""):
+        # Zeek logs the TGT service as "krbtgt/REALM" (not bare "krbtgt"), so match on the principal's first
+        # component -- the exact-string test let every ordinary RC4 TGT renewal through as "Kerberoasting".
+        svc_class = service.lower().split("/")[0]
+        if svc_class in ("krbtgt", ""):
+            return None
+        # SPNs of the built-in machine-service classes belong to COMPUTER accounts, whose passwords are
+        # 120-character random values rotated automatically -- not crackable, so not Kerberoasting
+        # targets. Measured on a REAL legacy-AD capture (Wireshark krb-816, Windows Server 2003): every
+        # one of its RC4 TGS replies was for host/, cifs/ or ldap/ -- firing on them would flag every
+        # ordinary login on any domain that still negotiates RC4. Kerberoasting targets SERVICE accounts
+        # (MSSQLSvc/, http/, custom classes), which is what remains.
+        if svc_class in MACHINE_SPN_CLASSES:
             return None
 
         return Alert(

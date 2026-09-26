@@ -17,6 +17,8 @@ import hashlib
 import time
 from typing import Any, Iterator, Optional
 
+from src.capture.kerberos import parse_kdc_reply
+from src.capture.ot import parse_iec104, parse_s7comm
 from src.capture.ja4 import ja4_from_client_hello, sni_from_client_hello
 from src.flow_orientation import sender_is_originator
 
@@ -103,7 +105,7 @@ class FlowAssembler:
         self._dirty: set = set()   # flow keys that got new packets since the last snapshot()
         self._idle = idle_timeout_s
         self.stats = {"packets": 0, "non_ip": 0, "flows_seen": 0,
-                      "dns": 0, "ssl": 0, "modbus": 0, "dnp3": 0, "http": 0, "conn": 0}
+                      "dns": 0, "ssl": 0, "modbus": 0, "dnp3": 0, "http": 0, "kerberos": 0, "conn": 0}
 
     # ---------------- packet ingest ----------------
     def process(self, pkt) -> list[tuple[str, dict]]:
@@ -194,11 +196,33 @@ class FlowAssembler:
                 flow.emitted_http = True
                 out.append(rec)
 
+        # ---- Kerberos KDC reply (AS-REP / TGS-REP): input for ENG-11 (Kerberoasting) ----
+        if sport == 88 and payload:
+            k = parse_kdc_reply(payload, proto == "tcp")
+            if k is not None:
+                out.append(("kerberos", {
+                    "uid": flow.uid, "ts": ts, "id.orig_h": dst_ip, "id.orig_p": dport,
+                    "id.resp_h": src_ip, "id.resp_p": sport, "proto": proto, **k,
+                    "segment_hash": _seg_hash(flow.uid, k["client"], k["service"], k["cipher"]),
+                }))
+                self.stats["kerberos"] = self.stats.get("kerberos", 0) + 1
+
         # ---- Modbus / DNP3 (immediate) ----
         if proto == "tcp" and payload:
             rec = self._modbus(payload, src_ip, sport, dst_ip, dport, ts, flow.uid) if 502 in (sport, dport) else None
             if rec is None and 20000 in (sport, dport):
                 rec = self._dnp3(payload, src_ip, sport, dst_ip, dport, ts, flow.uid)
+            if rec is None and dport in (102, 2404):
+                kind, parsed = (("s7comm", parse_s7comm(payload)) if dport == 102 else ("iec104", parse_iec104(payload)))
+                if parsed is not None:
+                    function, detail, code = parsed
+                    self.stats[kind] = self.stats.get(kind, 0) + 1
+                    rec = (kind, {
+                        "uid": flow.uid, "ts": ts, "id.orig_h": src_ip, "id.orig_p": sport,
+                        "id.resp_h": dst_ip, "id.resp_p": dport, "proto": "tcp",
+                        "function": function, "detail": detail, "code": code,
+                        "segment_hash": _seg_hash(flow.uid, function, detail),
+                    })
             if rec is not None:
                 out.append(rec)
 
