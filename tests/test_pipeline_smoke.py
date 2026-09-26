@@ -464,5 +464,8 @@ def test_fusion_policy_and_flow_mapping():
     from src.inference.ml_alerts import ML_THREAT_MAPPING
     assert standalone_threshold("flow") >= 0.95 > MIN_ML_CONFIDENCE
     assert effective_threshold("flow", corroborated=True) == MIN_ML_CONFIDENCE
-    assert effective_threshold("modbus", corroborated=False) == MIN_ML_CONFIDENCE
+    # Modbus ML flags exactly the write function codes on real plant traffic (13.8% of requests), duplicating ENG-07's rule:
+    # corroboration-only, like flow (docs/PRD.md section 14.6)
+    assert effective_threshold("modbus", corroborated=False) > 1.0
+    assert effective_threshold("modbus", corroborated=True) == MIN_ML_CONFIDENCE
     assert ML_THREAT_MAPPING["flow"][0] == "VOLUMETRIC_DDOS"   # DDoS-trained model must not claim "scan"

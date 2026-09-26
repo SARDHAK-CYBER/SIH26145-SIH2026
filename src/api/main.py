@@ -63,6 +63,8 @@ app.add_middleware(
 )
 
 app.include_router(pcap_router)
+from src.api.auth import router as auth_router
+app.include_router(auth_router)
 if live_capture_router is not None:
     app.include_router(live_capture_router)
 try:

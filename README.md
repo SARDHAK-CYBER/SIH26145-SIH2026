@@ -62,6 +62,9 @@ Methodology note: this dev machine showed real, substantial throughput swings (n
 * **OPC UA SignAndEncrypt.** Ciphertext bodies remain uninspectable (a passive sensor has no keys), but the security policy is negotiated in clear: channels using policy `None` or deprecated SHA-1 policies now raise `INSECURE_CONFIGURATION` findings (LOW/MEDIUM, once per client/server/policy per hour; `OPCUA_POLICY_ALERTS=0` disables).
 * **Resilience.** Alert spool on disk if the API/DB is down (re-sent in order), scheduled `pg_dump` backups with a restore drill (row counts identical), systemd unit and Windows auto-restart task for the sensor, CI (`.github/workflows/ci.yml`).
 * **Real benign network test.** A 20-minute live Wi-Fi capture (7.0M packets) exposed 23 false positives the small benign files could not; fixed (ENG-01/02/06/09) → 1 alert. The flow model, whose false-positive rate was 23.7% on real flows, was retrained with real benign flows (0% on held-out minutes, 0.8% on other networks, DDoS recall 99.9%). Details: `docs/PRD.md` §14.
+* **Accounts and roles:** named users (scrypt) with signed login tokens, roles viewer/analyst/sensor/admin, audit log, per-tenant rate and analysis limits, dashboard sign-in; tenant isolation verified end to end through the TLS proxy (`docs/OPERATIONS.md` §1b).
+* **New networks:** `scripts/site_calibration.py` groups a site's alerts into triage rows; `config/allowlist.json` suppresses verified-benign patterns with guard rails and an audit trail; procedure in `docs/SITE_ONBOARDING.md`. 343 real ICS captures raised 1 generic-engine alert in 5,497 flows; the Modbus ML model (13.8% of real writes, duplicating the rule) is now corroboration-only.
+* **ENG-14 out of sample (HTTP rules):** real nmap/curl attacks against a real Tomcat in an isolated Docker network: 3/3 detected, benign control clean, one gap found and fixed. SMTP/distcc rules remain in-sample.
 * Fixed: ICS alerts reused the flow uid as `alert_id`, so a second ICS alert on the same flow was silently dropped by the database's `ON CONFLICT DO NOTHING`.
 
 ### Update 2026-09-26 (second pass) — separate dashboards, native capture engine, real-data live path
@@ -190,7 +193,7 @@ The PyInstaller single-executable path is retired in favour of the service deplo
 ## Verify it yourself
 
 ```bash
-python -m pytest tests/ -q                                             # 242 unit/integration tests
+python -m pytest tests/ -q                                             # 266 unit/integration tests
 python scripts/system_check.py [--accuracy]                            # full stack: infra, native, engines, models, perf, accuracy
 python scripts/update_priorities.py                                    # refresh docs/PRIORITIES.md from a real check
 python scripts/analyze_local.py samples/simulated_attack_traffic.pcap  # full pipeline, no Docker
@@ -208,6 +211,7 @@ Zeek (BSD), Suricata (GPLv2), YARA (BSD), ICSNPP (BSD-3), XGBoost/scikit-learn/O
 
 - `docs/PRIORITIES.md` — living priority list (auto-refreshed status block + hand-maintained items)
 - `docs/reports/LATEST.md` — latest full system-check report; `docs/reports/history.csv` — trend
+- `docs/SITE_ONBOARDING.md` — calibrating a new network: observe, triage groups, allowlist, decide the ML question
 - `docs/OPERATIONS.md` — access control, tenancy, backup/restore drill, alert spool, sensor auto-restart, HA design and its limits
 - `docs/PRD.md` — full requirements, methodology, root-cause analysis, roadmap
 - `native/README.md` — native Rust core: scope, validation methodology, measured performance, what's still Python-only

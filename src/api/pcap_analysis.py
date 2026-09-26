@@ -112,6 +112,9 @@ _INDEX_LOCK = threading.Lock()
 _ANALYSIS_POOL = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_ANALYSES, thread_name_prefix="analysis")
 _inflight = 0
 _inflight_lock = threading.Lock()
+# noisy-neighbour guard: one tenant may hold at most this many of the analysis slots (running + queued) at a time
+TENANT_MAX_ANALYSES = int(os.environ.get("STEALTHTAP_TENANT_MAX_ANALYSES", "3"))
+_tenant_inflight: dict[str, int] = {}
 _JOBS: dict[str, dict] = {}
 
 # ML alerting threshold and per-family MITRE mapping now live in
@@ -575,7 +578,7 @@ def _parse_fallback(contents: bytes) -> dict:
         os.unlink(tmp_path)
 
 
-def _admit() -> None:
+def _admit(tenant: str = "default") -> None:
     """Backpressure: refuse (429) rather than queue unboundedly."""
     global _inflight
     with _inflight_lock:
@@ -583,13 +586,18 @@ def _admit() -> None:
             raise HTTPException(429, f"analysis queue full ({_inflight} in flight, cap "
                                      f"{MAX_CONCURRENT_ANALYSES}+{MAX_QUEUED_ANALYSES}); retry shortly",
                                 headers={"Retry-After": "15"})
+        if _tenant_inflight.get(tenant, 0) >= TENANT_MAX_ANALYSES:
+            raise HTTPException(429, f"tenant '{tenant}' already has {TENANT_MAX_ANALYSES} analyses in flight; retry when one finishes",
+                                headers={"Retry-After": "15"})
+        _tenant_inflight[tenant] = _tenant_inflight.get(tenant, 0) + 1
         _inflight += 1
 
 
-def _release() -> None:
+def _release(tenant: str = "default") -> None:
     global _inflight
     with _inflight_lock:
         _inflight = max(0, _inflight - 1)
+        _tenant_inflight[tenant] = max(0, _tenant_inflight.get(tenant, 0) - 1)
 
 
 _CLASSIC_PCAP_MAGICS = (bytes.fromhex("d4c3b2a1"), bytes.fromhex("a1b2c3d4"),
@@ -702,6 +710,12 @@ async def _analyze_contents(contents: bytes, filename: str, app_state, tenant: s
         alerts.extend(yara_alerts)
         _cleanup_zeek_job(zeek_job_id)
     alerts.extend(suricata_alerts)
+    from src import allowlist as _al
+    _wl = _al.default()
+    suppressed_alerts, kept = [], []
+    for a in alerts:
+        (suppressed_alerts if _wl.match(a) else kept).append(a)
+    alerts = kept
     detect_time = time.time() - t0
 
     severity_counts: dict[str, int] = {}
@@ -753,6 +767,7 @@ async def _analyze_contents(contents: bytes, filename: str, app_state, tenant: s
         "threat_class_counts": threat_class_counts,
         "detection_mode_counts": detection_mode_counts,
         "alerts": alerts,
+        "suppressed_by_allowlist": len(suppressed_alerts),
     }
 
 
@@ -771,11 +786,12 @@ async def analyze_pcap(request: Request, file: UploadFile = File(...)):
     contents = await file.read()
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, f"file exceeds {MAX_UPLOAD_BYTES} byte cap")
-    _admit()
+    tenant = getattr(request.state, "tenant", None) or "default"
+    _admit(tenant)
     try:
-        return await _guarded_analysis(contents, file.filename, request.app.state, getattr(request.state, "tenant", None) or "default")
+        return await _guarded_analysis(contents, file.filename, request.app.state, tenant)
     finally:
-        _release()
+        _release(tenant)
 
 
 def _sweep_jobs() -> None:
@@ -794,13 +810,13 @@ async def analyze_pcap_async(request: Request, file: UploadFile = File(...)):
     contents = await file.read()
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, f"file exceeds {MAX_UPLOAD_BYTES} byte cap")
-    _admit()
+    tenant = getattr(request.state, "tenant", None) or "default"
+    _admit(tenant)
     _sweep_jobs()
     job_id = uuid.uuid4().hex
     _JOBS[job_id] = {"status": "running", "created": time.time(), "filename": file.filename}
     app_state = request.app.state
     filename = file.filename
-    tenant = getattr(request.state, "tenant", None) or "default"
     _JOBS[job_id]["tenant"] = tenant
 
     async def _run():
@@ -811,7 +827,7 @@ async def analyze_pcap_async(request: Request, file: UploadFile = File(...)):
         except Exception as exc:  # never let a background task die silently
             _JOBS[job_id].update(status="error", error=f"{type(exc).__name__}: {exc}", http_status=500)
         finally:
-            _release()
+            _release(tenant)
 
     asyncio.create_task(_run())
     return {"job_id": job_id, "status": "running", "poll": f"/analyze/jobs/{job_id}"}

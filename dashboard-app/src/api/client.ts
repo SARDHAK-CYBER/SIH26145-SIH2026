@@ -45,6 +45,17 @@ async function j<T>(resp: Response, fallbackMsg: string): Promise<T> {
   return resp.json();
 }
 
+// ── Accounts ────────────────────────────────────────────────────────────
+export const auth = {
+  login: async (username: string, password: string) => {
+    const resp = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }),
+    });
+    return j<{ token: string; role: string; tenant: string; expires: number; user: string }>(resp, 'sign-in failed');
+  },
+  me: () => fetch(`${API_BASE}/auth/me`).then((r) => j<{ user: string | null; role: string | null; tenant: string | null }>(r, 'session lookup failed')),
+};
+
 // ── PCAP analysis pipeline ──────────────────────────────────────────────
 export async function analyzePcap(file: File): Promise<AnalysisResponse> {
   const formData = new FormData();

@@ -178,7 +178,11 @@ services:
       - DATABASE_URL=postgresql://stealthtap:${POSTGRES_PASSWORD:?set a real password in .env}@postgres:5432/stealthtap
       - STEALTHTAP_API_KEY=${STEALTHTAP_API_KEY:?set STEALTHTAP_API_KEY (>=16 random chars) in .env}
       - STEALTHTAP_CORS_ORIGINS=${STEALTHTAP_CORS_ORIGINS:-http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,http://127.0.0.1:4173,https://localhost}
-      - STEALTHTAP_TENANT_KEYS=${STEALTHTAP_TENANT_KEYS:-}    # optional multi-tenant: "acme=<key>,globex=<key>"
+      - STEALTHTAP_TENANT_KEYS=${STEALTHTAP_TENANT_KEYS:-}    # optional tenant[/role]=key list, e.g. acme=<key>,globex/viewer=<key>
+      - STEALTHTAP_TOKEN_SECRET=${STEALTHTAP_TOKEN_SECRET:-}  # signs login tokens (>=32 chars); unset = tokens die on restart
+      - STEALTHTAP_USERS=/config/users.json
+      - STEALTHTAP_ALLOWLIST=/config/allowlist.json
+      - STEALTHTAP_AUDIT_LOG=/audit/audit.jsonl
       - MODELS_DIR=/models
       - ZEEK_INCOMING_DIR=/incoming
       - ZEEK_OUTGOING_DIR=/outgoing
@@ -188,6 +192,8 @@ services:
       - "127.0.0.1:8000:8000"     # plaintext stays on loopback; remote clients use the TLS proxy (:8443)
     volumes:
       - ./models:/models:ro
+      - ./config:/config:ro
+      - stealthtap_audit:/audit
       - ./samples:/opt/stealthtap/samples:ro   # bundled pcap for GET /api/sample/analysis
       - stealthtap_zeek_incoming:/incoming
       - stealthtap_zeek_outgoing:/outgoing
@@ -276,6 +282,7 @@ services:
     command: ["run", "--iface", "${CAPTURE_IFACE:-eth0}", "--bpf", "${CAPTURE_BPF:-ip or ip6}", "--buffer-mb", "128", "--json"]
 
 volumes:
+  stealthtap_audit:
   stealthtap_proxy_data:
   stealthtap_proxy_config:
   stealthtap_backups:

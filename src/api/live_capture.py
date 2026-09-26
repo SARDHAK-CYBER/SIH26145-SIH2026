@@ -275,6 +275,20 @@ def packet(pid: int):
     return d
 
 
+@router.get("/allowlist")
+def allowlist_status():
+    """Active allowlist rules (with how many alerts each suppressed) and any rule that was ignored and why."""
+    from src import allowlist
+    return allowlist.default().status()
+
+
+@router.get("/suppressed")
+def suppressed(limit: int = Query(100, le=200)):
+    """The newest alerts an allowlist rule suppressed -- suppression is auditable, not silent."""
+    from src import allowlist
+    return allowlist.default().recent(limit)
+
+
 @router.get("/export.pcap")
 def export_pcap(ids: str = "", filter: str = "", limit: int = 5000):
     agent = _need_agent()
@@ -356,6 +370,8 @@ def build_app():
     security.install(app)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.include_router(router)
+    from src.api.auth import router as auth_router
+    app.include_router(auth_router)
     from src.api.discovery import router as discovery_router
     app.include_router(discovery_router)
 

@@ -35,6 +35,10 @@ from src.inference.model_server import MIN_ML_CONFIDENCE
 _STANDALONE = {
     "flow": float(os.environ.get("ML_FLOW_STANDALONE_CONFIDENCE", "2.0")),
     "tls": float(os.environ.get("ML_TLS_STANDALONE_CONFIDENCE", "2.0")),   # no trained model exists
+    # Measured on 79,154 real Modbus records from 343 public ICS captures (many plants): the model flags exactly the WRITE
+    # function codes -- 13.8% of requests, plus their echoed responses -- which ENG-07's rule already reports with the function
+    # named. Standalone it only duplicates the rule (and alerts on the response direction too), so it is off by default.
+    "modbus": float(os.environ.get("ML_MODBUS_STANDALONE_CONFIDENCE", "2.0")),
 }
 
 

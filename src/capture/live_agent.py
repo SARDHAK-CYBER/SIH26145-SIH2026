@@ -45,6 +45,7 @@ if ROOT not in sys.path:
 from src.capture.backends import select_backend, capabilities, CaptureError
 from src.capture.flow_assembler import FlowAssembler
 from src.capture.interfaces import list_interfaces, resolve_capture_name
+from src import allowlist as _allowlist
 
 try:
     # Native Rust flow assembler (native/stealthtap_core) -- byte-for-byte
@@ -703,6 +704,10 @@ class LiveAgent:
                        "krb_service", "bzar_note")
 
     def _emit(self, alert: dict, t_arr: Optional[float]) -> None:
+        rule = _allowlist.default().match(alert)
+        if rule is not None:                      # operator-verified benign: counted and reviewable, never silently lost
+            self.stats["suppressed"] = self.stats.get("suppressed", 0) + 1
+            return
         fi = alert.get("flow_identifier", {})
         ev = alert.get("evidence", {}) or {}
         disc = next((str(ev[k]) for k in self._DISCRIMINATORS if ev.get(k)), None)

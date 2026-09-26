@@ -77,8 +77,6 @@ def _request(p: bytes) -> Optional[tuple[str, str, int]]:
         path = parts[1].decode("ascii")
     except UnicodeDecodeError:
         return None
-    if _admin_deploy(parts[0], path):
-        return ("http_admin_deploy", _clean(path.encode(), 96), 1)
     auth = None
     for line in head[nl:].split(b"\n"):
         line = line.rstrip(b"\r")
@@ -86,15 +84,20 @@ def _request(p: bytes) -> Optional[tuple[str, str, int]]:
         if sep and k.strip().lower() == b"authorization" and k == k.strip():
             auth = v.strip()
             break
-    if auth is None or auth[:6].lower() != b"basic ":
+    cs = None
+    if auth is not None and auth[:6].lower() == b"basic ":
+        tok = auth[6:].strip().split(b"=", 1)[0]          # the Rust twin stops at the first '='
+        try:
+            cs = base64.b64decode(tok + b"=" * (-len(tok) % 4), validate=True).decode("utf-8", "replace")
+        except (binascii.Error, ValueError):
+            cs = None
+    default = cs is not None and cs in DEFAULT_CREDS
+    if _admin_deploy(parts[0], path):
+        # code bit 0: deployment endpoint; bit 1: the same request presented a vendor-default credential
+        return ("http_admin_deploy", _clean(path.encode(), 96), 1 | (int(default) << 1))
+    if cs is None:
         return None
-    tok = auth[6:].strip().split(b"=", 1)[0]          # the Rust twin stops at the first '='
-    try:
-        cred = base64.b64decode(tok + b"=" * (-len(tok) % 4), validate=True)
-    except (binascii.Error, ValueError):
-        return None
-    cs = cred.decode("utf-8", "replace")
-    return ("http_basic", "".join(c for c in cs.split(":", 1)[0] if c >= " ")[:64], int(cs in DEFAULT_CREDS))
+    return ("http_basic", "".join(c for c in cs.split(":", 1)[0] if c >= " ")[:64], int(default))
 
 
 def parse_appsvc(p: bytes, sport: int, dport: int) -> Optional[tuple[str, str, int]]:

@@ -147,6 +147,8 @@ class AppServiceAttackDetector(Detector):
                 st["r401"].append(ts)
             else:
                 self._trim(st["r401"], ts, ENUM_WINDOW_S)
+                if code & 2:                                     # this very request authenticated with a vendor-default credential
+                    st["default_ts"] = ts
                 recent_bad = ts - st["default_ts"] < ENUM_WINDOW_S or len(st["r401"]) > 0
                 if self._once("web_deploy", client, server, ts):
                     return self._alert(flow, severity="HIGH" if recent_bad else "MEDIUM", conf=85.0 if recent_bad else 65.0,
@@ -154,7 +156,8 @@ class AppServiceAttackDetector(Detector):
                                        tname="Server Software Component: Web Shell", evidence={
                                            "service": "http", "endpoint": detail,
                                            "why": "request to a code-deployment endpoint (uploads server-side code)",
-                                           "preceded_by_default_credentials_or_refusals": recent_bad})
+                                           "preceded_by_default_credentials_or_refusals": recent_bad,
+                                           "default_credential_in_same_request": bool(code & 2)})
                 return None
             self._trim(st["basic"], ts, GUESS_WINDOW_S)
             self._trim(st["r401"], ts, GUESS_WINDOW_S)

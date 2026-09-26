@@ -19,3 +19,14 @@ eval_results*/
 build/
 docs/reports/
 *.pdf
+
+# never send captures, runtime data or credentials to the build daemon
+data/
+**/*.pcap
+**/*.pcapng
+**/*.cap
+sensor*.log
+config/users.json
+config/allowlist.json
+wheels_tmp/
+simulated_attack_traffic.pcap

@@ -1,0 +1,1 @@
+Real traffic from scripts/lab/tomcat_lab.sh: nmap NSE http-default-accounts / http-brute and a curl WAR deployment against a real Tomcat 8.5 in an isolated Docker network, plus a benign control (browsing, one mistyped password, operator with a strong credential). Not used to write the ENG-14 rules.

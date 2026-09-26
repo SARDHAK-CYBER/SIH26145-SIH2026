@@ -48,6 +48,9 @@ CASES = {
                    40000, 8080, ("http_basic", "alice", 0)),
     "war_upload": (b"POST /manager/html/upload?path=x HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\n", 40000, 8180,
                    ("http_admin_deploy", "/manager/html/upload?path=x", 1)),
+    "deploy_default_cred": (b"PUT /manager/text/deploy?path=/x&update=true HTTP/1.1\r\nHost: h\r\nAuthorization: Basic "
+                            + base64.b64encode(b"tomcat:tomcat") + b"\r\nContent-Length: 400\r\n\r\n",
+                            40000, 8080, ("http_admin_deploy", "/manager/text/deploy?path=/x&update=true", 3)),
     "distcc_shell": (b"DIST00000001ARGC00000003ARGV00000002shARGV00000002-cARGV00000006id;ls\n", 40000, 3632,
                      ("distcc:sh", "-c id;ls", 1)),
     "distcc_gcc": (b"DIST00000001ARGC00000004ARGV00000003gccARGV00000002-cARGV00000006main.cARGV00000002-o", 40000, 3632,
@@ -166,6 +169,12 @@ def test_http_default_credentials_and_deployment():
     assert quiet == []
 
 
+def test_deployment_with_a_default_credential_in_the_same_request_is_high():
+    """Found with REAL tools (curl PUT of a WAR to /manager/text/deploy with tomcat:tomcat): the request is both a deployment and a default login."""
+    alerts = _score(_events([CASES["deploy_default_cred"][:3]]))
+    assert [a.severity for a in alerts] == ["HIGH"] and alerts[0].evidence["default_credential_in_same_request"] is True
+
+
 def test_http_credential_guessing_needs_repeated_refusals():
     seq = []
     for i in range(6):
@@ -222,3 +231,30 @@ def test_rust_equals_python_on_real_capture(name):
                 py.append(r)
     _, evs = _real_alerts(name)
     assert sorted((e["function"], e["detail"], e["code"]) for e in evs) == sorted(py)
+
+
+# ---- out-of-sample: REAL tools (nmap NSE, curl) against a real Tomcat in an isolated Docker network (scripts/lab/tomcat_lab.sh).
+# The ENG-14 rules were derived from Metasploit captures; none of these tools or captures were used to write them.
+LAB = Path(__file__).resolve().parent.parent / "samples" / "lab_eng14"
+
+
+@pytest.mark.parametrize("name,technique", [("attack_nmap_default_accounts.pcap", "T1078.001"), ("attack_nmap_http_brute.pcap", "T1078.001"),
+                                            ("attack_curl_war_deploy.pcap", "T1505.003")])
+def test_lab_attack_captures_are_detected(name, technique):
+    from src.capture.rawpcap import iter_raw_pcap
+    f = LAB / name
+    if not f.exists():
+        pytest.skip("lab capture not present")
+    asm = core.LiveFlowAssembler(60.0)
+    evs = [r for ts, raw in iter_raw_pcap(str(f)) for k, r in asm.process(ts, raw) if k == "appsvc"]
+    assert technique in {a.mitre_attack.technique_id for a in _score(evs)}
+
+
+def test_lab_benign_control_stays_quiet():
+    from src.capture.rawpcap import iter_raw_pcap
+    f = LAB / "benign.pcap"
+    if not f.exists():
+        pytest.skip("lab capture not present")
+    asm = core.LiveFlowAssembler(60.0)
+    evs = [r for ts, raw in iter_raw_pcap(str(f)) for k, r in asm.process(ts, raw) if k == "appsvc"]
+    assert len(evs) >= 5 and _score(evs) == []           # authenticated operator traffic + a typo, not an attack

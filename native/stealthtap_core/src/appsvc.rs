@@ -109,16 +109,18 @@ fn request(p: &[u8]) -> Option<(String, String, u32)> {
     if !it.next()?.starts_with(b"HTTP/1.") || !matches!(method, b"GET" | b"POST" | b"PUT" | b"HEAD" | b"DELETE") {
         return None;
     }
+    // Basic credentials, if any: decoded in memory only; the deployment check below reports the default-credential flag too
+    let cred = header(&head[line_end..], b"authorization")
+        .filter(|a| starts_ci(a, b"basic "))
+        .and_then(|a| b64(&a[6..]))
+        .map(|c| String::from_utf8_lossy(&c).to_string());
+    let default = cred.as_deref().map(|c| DEFAULT_CREDS.contains(&c)).unwrap_or(false);
     if admin_deploy(method, path) {
-        return Some(("http_admin_deploy".to_string(), lossy(path.as_bytes(), 96), 1));
+        // code bit 0: deployment endpoint; bit 1: the same request presented a vendor-default credential
+        return Some(("http_admin_deploy".to_string(), lossy(path.as_bytes(), 96), 1 | ((default as u32) << 1)));
     }
-    let auth = header(&head[line_end..], b"authorization")?;
-    if !starts_ci(auth, b"basic ") {
-        return None;
-    }
-    let cs = String::from_utf8_lossy(&b64(&auth[6..])?).to_string();
+    let cs = cred?;
     let user: String = cs.split(':').next().unwrap_or("").chars().take(64).collect();
-    let default = DEFAULT_CREDS.contains(&cs.as_str());
     Some(("http_basic".to_string(), user, default as u32))
 }
 

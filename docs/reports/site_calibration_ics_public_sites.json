@@ -1,0 +1,4057 @@
+{
+ "summary": {
+  "name": "ics_public_sites",
+  "captures_replayed": 343,
+  "captures_failed": 0,
+  "pcapng_skipped": 16,
+  "flows": 5497,
+  "alerts": 441,
+  "alerts_per_1000_flows": 80.23,
+  "captures_with_alerts": 159,
+  "alerts_by_class": {
+   "ICS_UNAUTHORIZED_CONTROL_COMMAND": 440,
+   "C2_BEACONING": 1
+  }
+ },
+ "groups": [
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 502,
+   "signature": "",
+   "alerts": 55,
+   "captures": 11,
+   "src_hosts": 8,
+   "dst_hosts": 19,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.9",
+     "src_port": 3082,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 502,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.98,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": -0.22
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "SELECT",
+   "alerts": 36,
+   "captures": 7,
+   "src_hosts": 4,
+   "dst_hosts": 4,
+   "example": {
+    "file": "dnp3.pcap",
+    "flow": {
+     "src_ip": "192.168.66.33",
+     "src_port": 1167,
+     "dst_ip": "192.168.66.34",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "SELECT",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 3.56
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "OPERATE",
+   "alerts": 29,
+   "captures": 5,
+   "src_hosts": 4,
+   "dst_hosts": 4,
+   "example": {
+    "file": "dnp3_select_operate.pcap",
+    "flow": {
+     "src_ip": "130.126.142.250",
+     "src_port": 49404,
+     "dst_ip": "130.126.140.229",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "OPERATE",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 0.64
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "WRITE",
+   "alerts": 28,
+   "captures": 15,
+   "src_hosts": 8,
+   "dst_hosts": 7,
+   "example": {
+    "file": "dnp3.pcap",
+    "flow": {
+     "src_ip": "10.0.0.9",
+     "src_port": 1080,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "WRITE",
+     "impact": "outstation write / master blinding",
+     "detection_latency_ms": 3.56
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 44818,
+   "signature": "EtherNet/IP (CIP)",
+   "alerts": 28,
+   "captures": 28,
+   "src_hosts": 3,
+   "dst_hosts": 4,
+   "example": {
+    "file": "cip_only.pcap",
+    "flow": {
+     "src_ip": "192.168.0.65",
+     "src_port": 49840,
+     "dst_ip": "192.168.0.30",
+     "dst_port": 44818,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 85.0,
+    "evidence": {
+     "protocol": "EtherNet/IP (CIP)",
+     "cip_service_code": "0x4b",
+     "class_id": 103,
+     "instance_id": 1,
+     "detection_latency_ms": 2.08
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 102,
+   "signature": "WRITE_VAR",
+   "alerts": 27,
+   "captures": 9,
+   "src_hosts": 5,
+   "dst_hosts": 14,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.10",
+     "src_port": 52605,
+     "dst_ip": "141.81.0.51",
+     "dst_port": 102,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "S7comm",
+     "function_code": "WRITE_VAR",
+     "impact": "live value write / program upload",
+     "detection_latency_ms": 14.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "ENABLE_UNSOLICITED",
+   "alerts": 16,
+   "captures": 7,
+   "src_hosts": 5,
+   "dst_hosts": 4,
+   "example": {
+    "file": "dnp3.pcap",
+    "flow": {
+     "src_ip": "10.0.0.9",
+     "src_port": 1080,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "ENABLE_UNSOLICITED",
+     "impact": "outstation write / master blinding",
+     "detection_latency_ms": 3.56
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "DIRECT_OPERATE",
+   "alerts": 16,
+   "captures": 6,
+   "src_hosts": 4,
+   "dst_hosts": 4,
+   "example": {
+    "file": "auth_control_challenge_response.pcap",
+    "flow": {
+     "src_ip": "192.168.1.2",
+     "src_port": 49159,
+     "dst_ip": "192.168.1.1",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "DIRECT_OPERATE",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 0.52
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "DISABLE_UNSOLICITED",
+   "alerts": 14,
+   "captures": 6,
+   "src_hosts": 4,
+   "dst_hosts": 3,
+   "example": {
+    "file": "dnp3.pcap",
+    "flow": {
+     "src_ip": "10.0.0.9",
+     "src_port": 1080,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "DISABLE_UNSOLICITED",
+     "impact": "outstation write / master blinding",
+     "detection_latency_ms": 3.56
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "COLD_RESTART",
+   "alerts": 10,
+   "captures": 5,
+   "src_hosts": 4,
+   "dst_hosts": 3,
+   "example": {
+    "file": "dnp3.pcap",
+    "flow": {
+     "src_ip": "10.0.0.9",
+     "src_port": 1080,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "COLD_RESTART",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 3.56
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 502,
+   "signature": "WRITE_SINGLE_REGISTER",
+   "alerts": 10,
+   "captures": 6,
+   "src_hosts": 4,
+   "dst_hosts": 4,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.9",
+     "src_port": 3082,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 502,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_SINGLE_REGISTER",
+     "target_register": 5,
+     "detection_latency_ms": -0.22
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 502,
+   "signature": "WRITE_SINGLE_COIL",
+   "alerts": 9,
+   "captures": 6,
+   "src_hosts": 3,
+   "dst_hosts": 3,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.9",
+     "src_port": 3082,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 502,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_SINGLE_COIL",
+     "target_register": 2,
+     "detection_latency_ms": -0.22
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "STOP_APPLICATION",
+   "alerts": 8,
+   "captures": 3,
+   "src_hosts": 2,
+   "dst_hosts": 1,
+   "example": {
+    "file": "dnp3.pcap",
+    "flow": {
+     "src_ip": "10.0.0.9",
+     "src_port": 1084,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "STOP_APPLICATION",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 3.56
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 502,
+   "signature": "DIAGNOSTICS",
+   "alerts": 8,
+   "captures": 5,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.57",
+     "src_port": 2578,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 502,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "DIAGNOSTICS",
+     "target_register": 0,
+     "detection_latency_ms": 2.76
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 502,
+   "signature": "WRITE_MULTIPLE_REGISTERS",
+   "alerts": 8,
+   "captures": 5,
+   "src_hosts": 2,
+   "dst_hosts": 3,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "192.168.66.235",
+     "src_port": 2582,
+     "dst_ip": "166.161.16.230",
+     "dst_port": 502,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_MULTIPLE_REGISTERS",
+     "target_register": 0,
+     "detection_latency_ms": 2.76
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "DIRECT_OPERATE_NR",
+   "alerts": 8,
+   "captures": 2,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "direct_operate_no_ack_crob.pcap",
+    "flow": {
+     "src_ip": "192.168.5.145",
+     "src_port": 1095,
+     "dst_ip": "192.168.5.165",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "DIRECT_OPERATE_NR",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 0.01
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 102,
+   "signature": "PLC_CONTROL",
+   "alerts": 8,
+   "captures": 8,
+   "src_hosts": 4,
+   "dst_hosts": 4,
+   "example": {
+    "file": "s7comm_downloading_block_db1.pcap",
+    "flow": {
+     "src_ip": "192.168.1.10",
+     "src_port": 4185,
+     "dst_ip": "192.168.1.40",
+     "dst_port": 102,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "S7comm",
+     "function_code": "PLC_CONTROL",
+     "impact": "controller program/mode change",
+     "detection_latency_ms": 0.21
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 102,
+   "signature": "REQUEST_DOWNLOAD",
+   "alerts": 6,
+   "captures": 6,
+   "src_hosts": 3,
+   "dst_hosts": 3,
+   "example": {
+    "file": "s7comm_downloading_block_db1.pcap",
+    "flow": {
+     "src_ip": "192.168.1.10",
+     "src_port": 4185,
+     "dst_ip": "192.168.1.40",
+     "dst_port": 102,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "S7comm",
+     "function_code": "REQUEST_DOWNLOAD",
+     "impact": "controller program/mode change",
+     "detection_latency_ms": 0.21
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 102,
+   "signature": "PLC_STOP",
+   "alerts": 6,
+   "captures": 6,
+   "src_hosts": 3,
+   "dst_hosts": 2,
+   "example": {
+    "file": "snap7_s300_everything.pcapng",
+    "flow": {
+     "src_ip": "134.217.61.131",
+     "src_port": 51212,
+     "dst_ip": "134.217.61.211",
+     "dst_port": 102,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "S7comm",
+     "function_code": "PLC_STOP",
+     "impact": "controller program/mode change",
+     "detection_latency_ms": 0.03
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "WARM_RESTART",
+   "alerts": 5,
+   "captures": 4,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "dnp3.pcap",
+    "flow": {
+     "src_ip": "10.0.0.8",
+     "src_port": 1086,
+     "dst_ip": "10.0.0.3",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "WARM_RESTART",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 3.56
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 3082,
+   "signature": "WRITE_SINGLE_COIL",
+   "alerts": 4,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.3",
+     "src_port": 502,
+     "dst_ip": "10.0.0.9",
+     "dst_port": 3082,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_SINGLE_COIL",
+     "target_register": 2,
+     "detection_latency_ms": -0.22
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 3082,
+   "signature": "WRITE_SINGLE_REGISTER",
+   "alerts": 4,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.3",
+     "src_port": 502,
+     "dst_ip": "10.0.0.9",
+     "dst_port": 3082,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_SINGLE_REGISTER",
+     "target_register": 5,
+     "detection_latency_ms": -0.22
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 3082,
+   "signature": "",
+   "alerts": 4,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.3",
+     "src_port": 502,
+     "dst_ip": "10.0.0.9",
+     "dst_port": 3082,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.98,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": -0.22
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 51411,
+   "signature": "",
+   "alerts": 4,
+   "captures": 4,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.10.5.85",
+     "src_port": 502,
+     "dst_ip": "10.1.1.234",
+     "dst_port": 51411,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.98,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": -0.22
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2578,
+   "signature": "DIAGNOSTICS",
+   "alerts": 4,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.3",
+     "src_port": 502,
+     "dst_ip": "10.0.0.57",
+     "dst_port": 2578,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "DIAGNOSTICS",
+     "target_register": 0,
+     "detection_latency_ms": 2.76
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2582,
+   "signature": "WRITE_SINGLE_COIL",
+   "alerts": 4,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "166.161.16.230",
+     "src_port": 502,
+     "dst_ip": "192.168.66.235",
+     "dst_port": 2582,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_SINGLE_COIL",
+     "target_register": 0,
+     "detection_latency_ms": 2.76
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2582,
+   "signature": "DIAGNOSTICS",
+   "alerts": 4,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "166.161.16.230",
+     "src_port": 502,
+     "dst_ip": "192.168.66.235",
+     "dst_port": 2582,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "DIAGNOSTICS",
+     "target_register": 0,
+     "detection_latency_ms": 2.76
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 2578,
+   "signature": "",
+   "alerts": 4,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.0.0.3",
+     "src_port": 502,
+     "dst_ip": "10.0.0.57",
+     "dst_port": 2578,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 96.36,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 17.76
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 2582,
+   "signature": "",
+   "alerts": 4,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "166.161.16.230",
+     "src_port": 502,
+     "dst_ip": "192.168.66.235",
+     "dst_port": 2582,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.91,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 17.76
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 64342,
+   "signature": "",
+   "alerts": 3,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.164",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 64342,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 64340,
+   "signature": "",
+   "alerts": 3,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.104",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 64340,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 64338,
+   "signature": "",
+   "alerts": 3,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.24",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 64338,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 64341,
+   "signature": "",
+   "alerts": 3,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.144",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 64341,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 59598,
+   "signature": "",
+   "alerts": 3,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.163",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 59598,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 53414,
+   "signature": "",
+   "alerts": 3,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.44",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 53414,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.12,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 64368,
+   "signature": "",
+   "alerts": 3,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.64",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 64368,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 50594,
+   "signature": "",
+   "alerts": 3,
+   "captures": 3,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.84",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 50594,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "DELETE_FILE",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "dnp3_file_del.pcap",
+    "flow": {
+     "src_ip": "130.126.142.250",
+     "src_port": 50301,
+     "dst_ip": "130.126.140.229",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "DELETE_FILE",
+     "impact": "outstation write / master blinding",
+     "detection_latency_ms": -0.09
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 20000,
+   "signature": "ASSIGN_CLASS",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "dnp3_rec_time.pcap",
+    "flow": {
+     "src_ip": "130.126.142.250",
+     "src_port": 49412,
+     "dst_ip": "130.126.140.229",
+     "dst_port": 20000,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "ASSIGN_CLASS",
+     "impact": "outstation write / master blinding",
+     "detection_latency_ms": -0.04
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 59599,
+   "signature": "",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.143",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 59599,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 59758,
+   "signature": "",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.46",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 59758,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.12,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 54138,
+   "signature": "",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.66",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 54138,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 61.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 57184,
+   "signature": "",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.86",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 57184,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 60.93
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 59758,
+   "signature": "WRITE_MULTIPLE_REGISTERS",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.46",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 59758,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_MULTIPLE_REGISTERS",
+     "target_register": 19,
+     "detection_latency_ms": 88.24
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 53414,
+   "signature": "WRITE_MULTIPLE_REGISTERS",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "Plant1.pcap",
+    "flow": {
+     "src_ip": "141.81.0.44",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 53414,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_MULTIPLE_REGISTERS",
+     "target_register": 2100,
+     "detection_latency_ms": 88.56
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2404,
+   "signature": "C_SC_NA_1",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "090813_diverse.pcap",
+    "flow": {
+     "src_ip": "10.0.0.10",
+     "src_port": 1075,
+     "dst_ip": "10.0.0.10",
+     "dst_port": 2404,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "IEC 60870-5-104",
+     "function_code": "C_SC_NA_1",
+     "asdu_type_id": 45,
+     "detail": "type=45 cot=6",
+     "detection_latency_ms": 0.53
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2404,
+   "signature": "C_DC_NA_1",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "090813_diverse.pcap",
+    "flow": {
+     "src_ip": "10.0.0.10",
+     "src_port": 1075,
+     "dst_ip": "10.0.0.10",
+     "dst_port": 2404,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "IEC 60870-5-104",
+     "function_code": "C_DC_NA_1",
+     "asdu_type_id": 46,
+     "detail": "type=46 cot=6",
+     "detection_latency_ms": 0.53
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 0,
+   "signature": "DCP_SET",
+   "alerts": 2,
+   "captures": 2,
+   "src_hosts": 2,
+   "dst_hosts": 2,
+   "example": {
+    "file": "ChangeIPUsingDCP.pcap",
+    "flow": {
+     "src_ip": "00:0c:29:ba:09:ea",
+     "src_port": 0,
+     "dst_ip": "08:00:06:93:cf:32",
+     "dst_port": 0,
+     "protocol": "UDP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "PROFINET-DCP",
+     "function_code": "DCP_SET",
+     "blocks": "IP",
+     "link_layer": "ethernet (MAC addresses, no IP)",
+     "detection_latency_ms": 0.52
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 51411,
+   "signature": "WRITE_SINGLE_REGISTER",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus.pcap",
+    "flow": {
+     "src_ip": "10.10.5.85",
+     "src_port": 502,
+     "dst_ip": "10.1.1.234",
+     "dst_port": 51411,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_SINGLE_REGISTER",
+     "target_register": 100,
+     "detection_latency_ms": -0.22
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 49226,
+   "signature": "WRITE_SINGLE_COIL",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbusBig.pcap",
+    "flow": {
+     "src_ip": "10.235.149.243",
+     "src_port": 502,
+     "dst_ip": "10.235.149.240",
+     "dst_port": 49226,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_SINGLE_COIL",
+     "target_register": 1,
+     "detection_latency_ms": 14.96
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 49226,
+   "signature": "",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbusBig.pcap",
+    "flow": {
+     "src_ip": "10.235.149.243",
+     "src_port": 502,
+     "dst_ip": "10.235.149.240",
+     "dst_port": 49226,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.98,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 76.96
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 49178,
+   "signature": "START_APPLICATION",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "file_list_directory.pcap",
+    "flow": {
+     "src_ip": "192.168.1.1",
+     "src_port": 20000,
+     "dst_ip": "192.168.1.2",
+     "dst_port": 49178,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "START_APPLICATION",
+     "impact": "outstation write / master blinding",
+     "detection_latency_ms": 0.02
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 1647,
+   "signature": "OPERATE",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "dump.pcap",
+    "flow": {
+     "src_ip": "127.0.0.1",
+     "src_port": 20000,
+     "dst_ip": "127.0.0.1",
+     "dst_port": 1647,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "OPERATE",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 0.02
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 1654,
+   "signature": "COLD_RESTART",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "dump.pcap",
+    "flow": {
+     "src_ip": "127.0.0.1",
+     "src_port": 20000,
+     "dst_ip": "127.0.0.1",
+     "dst_port": 1654,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 94.0,
+    "evidence": {
+     "protocol": "DNP3",
+     "function_code": "COLD_RESTART",
+     "impact": "actuator/device control",
+     "detection_latency_ms": 0.02
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2404,
+   "signature": "C_SC_TA_1",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "090813_diverse.pcap",
+    "flow": {
+     "src_ip": "10.0.0.10",
+     "src_port": 1075,
+     "dst_ip": "10.0.0.10",
+     "dst_port": 2404,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "IEC 60870-5-104",
+     "function_code": "C_SC_TA_1",
+     "asdu_type_id": 58,
+     "detail": "type=58 cot=6",
+     "detection_latency_ms": 0.53
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2404,
+   "signature": "C_SE_TC_1",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "090813_diverse.pcap",
+    "flow": {
+     "src_ip": "10.0.0.10",
+     "src_port": 1075,
+     "dst_ip": "10.0.0.10",
+     "dst_port": 2404,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "IEC 60870-5-104",
+     "function_code": "C_SE_TC_1",
+     "asdu_type_id": 63,
+     "detail": "type=63 cot=6",
+     "detection_latency_ms": 0.53
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2404,
+   "signature": "C_SE_NC_1",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "090813_diverse.pcap",
+    "flow": {
+     "src_ip": "10.0.0.10",
+     "src_port": 1075,
+     "dst_ip": "10.0.0.10",
+     "dst_port": 2404,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "IEC 60870-5-104",
+     "function_code": "C_SE_NC_1",
+     "asdu_type_id": 50,
+     "detail": "type=50 cot=6",
+     "detection_latency_ms": 0.53
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2404,
+   "signature": "C_DC_TA_1",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "090813_diverse.pcap",
+    "flow": {
+     "src_ip": "10.0.0.10",
+     "src_port": 1075,
+     "dst_ip": "10.0.0.10",
+     "dst_port": 2404,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "IEC 60870-5-104",
+     "function_code": "C_DC_TA_1",
+     "asdu_type_id": 59,
+     "detail": "type=59 cot=6",
+     "detection_latency_ms": 0.53
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2404,
+   "signature": "C_SE_TA_1",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "090813_diverse.pcap",
+    "flow": {
+     "src_ip": "10.0.0.10",
+     "src_port": 1075,
+     "dst_ip": "10.0.0.10",
+     "dst_port": 2404,
+     "protocol": "TCP"
+    },
+    "severity": "CRITICAL",
+    "confidence": 92.0,
+    "evidence": {
+     "protocol": "IEC 60870-5-104",
+     "function_code": "C_SE_TA_1",
+     "asdu_type_id": 61,
+     "detail": "type=61 cot=6",
+     "detection_latency_ms": 0.53
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 2404,
+   "signature": "C_CS_NA_1",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "TestDissectIec104.pcap",
+    "flow": {
+     "src_ip": "172.27.248.109",
+     "src_port": 1578,
+     "dst_ip": "172.27.248.79",
+     "dst_port": 2404,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 78.0,
+    "evidence": {
+     "protocol": "IEC 60870-5-104",
+     "function_code": "C_CS_NA_1",
+     "asdu_type_id": 103,
+     "detail": "type=103 cot=6",
+     "detection_latency_ms": 0.54
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 60116,
+   "signature": "",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "mb2.pcap",
+    "flow": {
+     "src_ip": "141.81.0.143",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 60116,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.12,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": -0.13
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 60759,
+   "signature": "",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "mb2.pcap",
+    "flow": {
+     "src_ip": "141.81.0.66",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 60759,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 0.87
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 60689,
+   "signature": "",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "mb2.pcap",
+    "flow": {
+     "src_ip": "141.81.0.86",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 60689,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 0.87
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 59796,
+   "signature": "",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "mb2.pcap",
+    "flow": {
+     "src_ip": "141.81.0.46",
+     "src_port": 502,
+     "dst_ip": "141.81.0.10",
+     "dst_port": 59796,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.93,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 1.67
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 53842,
+   "signature": "WRITE_SINGLE_REGISTER",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus_test.pcap",
+    "flow": {
+     "src_ip": "192.168.0.20",
+     "src_port": 502,
+     "dst_ip": "192.168.0.156",
+     "dst_port": 53842,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_SINGLE_REGISTER",
+     "target_register": 4,
+     "detection_latency_ms": -0.01
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 53842,
+   "signature": "",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus_test.pcap",
+    "flow": {
+     "src_ip": "192.168.0.20",
+     "src_port": 502,
+     "dst_ip": "192.168.0.156",
+     "dst_port": 53842,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.98,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": -0.01
+    }
+   }
+  },
+  {
+   "threat_class": "C2_BEACONING",
+   "detection_mode": "rule",
+   "dst_port": 502,
+   "signature": "",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modbus_test_2.pcap",
+    "flow": {
+     "src_ip": "192.168.0.21",
+     "src_port": 51368,
+     "dst_ip": "192.168.0.20",
+     "dst_port": 502,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 82.8,
+    "evidence": {
+     "coefficient_of_variation": 0.269,
+     "mean_interval_seconds": 5.71,
+     "sample_count": 8,
+     "estimated_jitter_percent": 46.6,
+     "clustering_ratio": 0.875
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 7718,
+   "signature": "WRITE_MULTIPLE_REGISTERS",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modicon_test.pcap",
+    "flow": {
+     "src_ip": "192.168.63.253",
+     "src_port": 502,
+     "dst_ip": "192.168.63.100",
+     "dst_port": 7718,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 95.0,
+    "evidence": {
+     "protocol": "Modbus",
+     "function_code": "WRITE_MULTIPLE_REGISTERS",
+     "target_register": 29875,
+     "detection_latency_ms": 0.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "xgboost",
+   "dst_port": 7718,
+   "signature": "",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "modicon_test.pcap",
+    "flow": {
+     "src_ip": "192.168.63.253",
+     "src_port": 502,
+     "dst_ip": "192.168.63.100",
+     "dst_port": 7718,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 99.96,
+    "evidence": {
+     "family": "modbus",
+     "detection_latency_ms": 0.55
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 102,
+   "signature": "START_UPLOAD",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "snap7_s300_everything.pcapng",
+    "flow": {
+     "src_ip": "134.217.61.131",
+     "src_port": 51212,
+     "dst_ip": "134.217.61.211",
+     "dst_port": 102,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "S7comm",
+     "function_code": "START_UPLOAD",
+     "impact": "live value write / program upload",
+     "detection_latency_ms": 0.03
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 102,
+   "signature": "UPLOAD",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "snap7_s300_everything.pcapng",
+    "flow": {
+     "src_ip": "134.217.61.131",
+     "src_port": 51212,
+     "dst_ip": "134.217.61.211",
+     "dst_port": 102,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "S7comm",
+     "function_code": "UPLOAD",
+     "impact": "live value write / program upload",
+     "detection_latency_ms": 0.03
+    }
+   }
+  },
+  {
+   "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+   "detection_mode": "rule",
+   "dst_port": 102,
+   "signature": "END_UPLOAD",
+   "alerts": 1,
+   "captures": 1,
+   "src_hosts": 1,
+   "dst_hosts": 1,
+   "example": {
+    "file": "snap7_s300_everything.pcapng",
+    "flow": {
+     "src_ip": "134.217.61.131",
+     "src_port": 51212,
+     "dst_ip": "134.217.61.211",
+     "dst_port": 102,
+     "protocol": "TCP"
+    },
+    "severity": "HIGH",
+    "confidence": 80.0,
+    "evidence": {
+     "protocol": "S7comm",
+     "function_code": "END_UPLOAD",
+     "impact": "live value write / program upload",
+     "detection_latency_ms": 0.03
+    }
+   }
+  }
+ ],
+ "captures": [
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\BACnet\\bacnet_test.pcap",
+   "packets": 26,
+   "flows": 5,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3.pcap",
+   "packets": 214,
+   "flows": 9,
+   "alerts": 12
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_del_measure.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_en_spon.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_file_del.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_file_read.pcap",
+   "packets": 30,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_file_write.pcap",
+   "packets": 22,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_link_only.pcap",
+   "packets": 35,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_read.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_read_p20001.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_rec_time.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_select_operate.pcap",
+   "packets": 13,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\dnp3\\dnp3_write.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\modbus\\fuzz-1011.pcap",
+   "packets": 6,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\modbus\\fuzz-72.pcap",
+   "packets": 36,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\modbus\\modbus.pcap",
+   "packets": 60227,
+   "flows": 8,
+   "alerts": 22
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\modbus\\modbusBig.pcap",
+   "packets": 13622,
+   "flows": 3,
+   "alerts": 4
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\bro\\modbus\\modbusSmall.pcap",
+   "packets": 166,
+   "flows": 19,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37.118_1PMU_TCP.pcap",
+   "packets": 417,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37.118_1PMU_UDP.pcap",
+   "packets": 361,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37.118_2PMUsInSync_TCP.pcap",
+   "packets": 4187,
+   "flows": 6,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37.118_4in1PMU_TCP.pcap",
+   "packets": 1032,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37118\\c37118_1100_unclean.pcap",
+   "packets": 2167,
+   "flows": 155,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37118\\c37_1100_clean_tcp.pcap",
+   "packets": 669,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37118\\c37_1100_fullclean.pcap",
+   "packets": 426,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37118\\c37_pmu_clean.pcap",
+   "packets": 7103,
+   "flows": 3,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\C37.118\\C37118\\c37_pmu_unclean.pcap",
+   "packets": 7309,
+   "flows": 10,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\CIP\\cip_only.pcap",
+   "packets": 18798,
+   "flows": 2,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\CIP\\cip_unclean.pcap",
+   "packets": 40356,
+   "flows": 94,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\Combined\\Plant1.pcap",
+   "packets": 55800,
+   "flows": 143,
+   "alerts": 40
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\assign_class.pcap",
+   "packets": 3,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\auth_change_session_keys.pcap",
+   "packets": 8,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\auth_control_challenge_response.pcap",
+   "packets": 5,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\cold_restart_and_response.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\dataset_exchange.pcap",
+   "packets": 6,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\direct_operate_analog_output.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\direct_operate_crob_malform_but_good_crc.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\direct_operate_no_ack_crob.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\directoperate_and_response.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\disable_unsolcited_and_response.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\dnp3_test_data_part1.pcap",
+   "packets": 181,
+   "flows": 8,
+   "alerts": 11
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\dnp3_test_data_part2.pcap",
+   "packets": 33,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\enable_unsolicited_and_response.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\file_delete.pcap",
+   "packets": 3,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\file_list_directory.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\file_read.pcap",
+   "packets": 7,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\file_write.pcap",
+   "packets": 7,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\full_exchange.pcap",
+   "packets": 22,
+   "flows": 1,
+   "alerts": 3
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\immediate_freeze.pcap",
+   "packets": 3,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\lan_time_sync.pcap",
+   "packets": 5,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\6.1.2\\dump.pcap",
+   "packets": 79,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\6.3.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\6.5.2\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\6.6.2.1\\dump.pcap",
+   "packets": 25,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\6.6.2.2\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\6.6.2.3\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\6.6.2.4\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\6.6.2.5\\dump.pcap",
+   "packets": 17,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\7.2\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.1.2\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.11.2.1\\dump.pcap",
+   "packets": 40,
+   "flows": 2,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.11.2.2\\dump.pcap",
+   "packets": 29,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.11.2.3\\dump.pcap",
+   "packets": 29,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.11.2.4\\dump.pcap",
+   "packets": 29,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.11.2.5\\dump.pcap",
+   "packets": 156,
+   "flows": 4,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.11.2.6\\dump.pcap",
+   "packets": 23,
+   "flows": 1,
+   "alerts": 3
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.13.2.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.13.2.3\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.10\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.11\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.12\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.13\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.14\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.15\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.2\\dump.pcap",
+   "packets": 25,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.3\\dump.pcap",
+   "packets": 23,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.4\\dump.pcap",
+   "packets": 23,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.5\\dump.pcap",
+   "packets": 25,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.6\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.7\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.8\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.14.2.9\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.15.2\\dump.pcap",
+   "packets": 53,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.16.1.2.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.16.1.2.3\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.16.2.2.2\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.16.2.2.3\\dump.pcap",
+   "packets": 23,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.16.2.2.4\\dump.pcap",
+   "packets": 23,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.16.2.2.5\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.17.2.2\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.17.2.3\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.17.2.4\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.17.2.5\\dump.pcap",
+   "packets": 25,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.18.2.2\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.19.2.1\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.19.2.2\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.1\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.10\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.11\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.12\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.13\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.14\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.15\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.3\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.4\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.5\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.6\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.7\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.8\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.1.2.9\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.2.2.1\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.2.2.2\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.2.2.3\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.3.2.1\\dump.pcap",
+   "packets": 9,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.3.2.2\\dump.pcap",
+   "packets": 9,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.3.2.3\\dump.pcap",
+   "packets": 9,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.4.2\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 3
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.5.2.1\\dump.pcap",
+   "packets": 39,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.2.5.2.2\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.20.2\\dump.pcap",
+   "packets": 13,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.21.2.1\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.21.2.2\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.10\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.11\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.12\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.13\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.14\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.15\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.2\\dump.pcap",
+   "packets": 25,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.3\\dump.pcap",
+   "packets": 23,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.4\\dump.pcap",
+   "packets": 23,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.5\\dump.pcap",
+   "packets": 25,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.6\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.7\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.8\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.22.2.9\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.3.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.1\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.10\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.11\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.12\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.3\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.4\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.5\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.6\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.7\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.8\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.1.2.9\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.2.2.1\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.2.2.2\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.2.2.3\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.3.2.1\\dump.pcap",
+   "packets": 9,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.3.2.2\\dump.pcap",
+   "packets": 9,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.3.2.3\\dump.pcap",
+   "packets": 9,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.4.4.2\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 3
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.1.2\\dump.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.2.2.1\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.2.2.2\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.2.2.3\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.2.2.4\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.3.2.1\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.3.2.2\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.3.2.3\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.3.2.4\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.4.2.1\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.4.2.2\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.4.2.3\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.4.2.4\\dump.pcap",
+   "packets": 27,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.5.2.1\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.5.2.2\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.5.6.2\\dump.pcap",
+   "packets": 45,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.1.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.2.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.3.2\\dump.pcap",
+   "packets": 15,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.4.2\\dump.pcap",
+   "packets": 22,
+   "flows": 2,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.4.3\\dump.pcap",
+   "packets": 22,
+   "flows": 2,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.5.2\\dump.pcap",
+   "packets": 25,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.5.3\\dump.pcap",
+   "packets": 17,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.5.4\\dump.pcap",
+   "packets": 60,
+   "flows": 2,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.6.2.1\\dump.pcap",
+   "packets": 31,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.6.2.2\\dump.pcap",
+   "packets": 37,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.6.2.3\\dump.pcap",
+   "packets": 37,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.6.6.2.4\\dump.pcap",
+   "packets": 31,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.7.1.2\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.7.2.2\\dump.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.8.2\\dump.pcap",
+   "packets": 19,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.9.1.2\\dump.pcap",
+   "packets": 51,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\opendnp3-3\\conformance\\8.9.2.2\\dump.pcap",
+   "packets": 73,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\operate_aggressive_mode.pcap",
+   "packets": 3,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\read_and_response.pcap",
+   "packets": 12,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\select_operate_and_responses.pcap",
+   "packets": 12,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\serial_time_sync.pcap",
+   "packets": 5,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\unsolcited_response_and_confirm.pcap",
+   "packets": 9,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\warm_restart_and_response.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\write_binary_output.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\write_iin_and_response.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\dnp3\\write_vto_empty_string.pcap",
+   "packets": 2,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\EthernetIP\\cip-eth-set-2.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\EthernetIP\\cip-multiple-1.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\EthernetIP\\cip-multiple-2.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\EthernetIP\\cip_start_plc.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\EthernetIP\\cip_stop_plc.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\EthernetIP\\cip_unlock_cpu.pcap",
+   "packets": 1,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\EthernetIP\\enip_test.pcap",
+   "packets": 11,
+   "flows": 2,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\EthernetIP\\EthernetIP-CIP.pcap",
+   "packets": 10880,
+   "flows": 4,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\fox\\fox_info.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC60870-5-104\\090813_diverse.pcap",
+   "packets": 173,
+   "flows": 2,
+   "alerts": 7
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC60870-5-104\\JavaRMI_and_IEC_Misc.pcap",
+   "packets": 357,
+   "flows": 3,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC60870-5-104\\TestDissectIec104.pcap",
+   "packets": 147,
+   "flows": 6,
+   "alerts": 3
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\8d7c7db0-9804-012b-b2a6-0016cb8cea27.pcap",
+   "packets": 498,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\GOOSE\\GOOSE.pcap",
+   "packets": 8,
+   "flows": 0,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\GOOSE\\GOOSE_DEMO.pcap",
+   "packets": 1,
+   "flows": 0,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\GOOSE\\Sample_File_GOOSE.pcap",
+   "packets": 451,
+   "flows": 0,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\m-send-req.mms.pcap",
+   "packets": 21,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\iec61850_get_name_list.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\iec61850_get_variable_access_attributes.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\iec61850_read.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\iec61850_release.pcap",
+   "packets": 16,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\iec61850_write.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-cancelRequest.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-confirmedRequestPDU.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-deleteProgramInvocation.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-getAlarmSummary.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-getDomainAttributes.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-initiateDownloadSequence.pcap",
+   "packets": 24,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-initiateUploadSequence.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-killRequest.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-readRequest.pcap",
+   "packets": 16,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-relinquishControl.pcap",
+   "packets": 24,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-resetRequest.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-resumeRequest.pcap",
+   "packets": 20,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-startRequest.pcap",
+   "packets": 24,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-stopRequest.pcap",
+   "packets": 24,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-takeControl.pcap",
+   "packets": 24,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\MMS - Specific Commands\\mms-terminateUploadSequence.pcap",
+   "packets": 24,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\piccolo.pcap",
+   "packets": 5,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\IEC61850\\Sample_File_MMS_and_GOOSE.pcap",
+   "packets": 301,
+   "flows": 24,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\MELSEC\\melsoft_129_clean.pcap",
+   "packets": 2041,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\MELSEC\\melsoft_tcp_2_159_pkt.pcap",
+   "packets": 39463,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\MELSEC\\melsoft_test.pcap",
+   "packets": 39450,
+   "flows": 4,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\MELSEC\\melsoft_UDP_clean_1.pcap",
+   "packets": 1214,
+   "flows": 1214,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\MELSEC\\melsoft_UDP_clean_2.pcap",
+   "packets": 432,
+   "flows": 432,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\MELSEC\\melsoft_UDP_clean_3.pcap",
+   "packets": 1214,
+   "flows": 1214,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\MELSEC\\melsoft_UDP_unclean_1.pcap",
+   "packets": 1778,
+   "flows": 1226,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\MELSEC\\melsoft_variant_clean.pcap",
+   "packets": 22744,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\ModbusTCP\\mb2.pcap",
+   "packets": 13472,
+   "flows": 83,
+   "alerts": 36
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\ModbusTCP\\Modbus\\modbus_test.pcap",
+   "packets": 2257,
+   "flows": 5,
+   "alerts": 4
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\ModbusTCP\\Modbus\\modbus_test_2.pcap",
+   "packets": 4901,
+   "flows": 122,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\ModbusTCP\\modbus_test_data_part1.pcap",
+   "packets": 118,
+   "flows": 6,
+   "alerts": 10
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\ModbusTCP\\modbus_test_data_part2.pcap",
+   "packets": 350,
+   "flows": 1,
+   "alerts": 8
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\ModbusTCP\\ModbusTCP.pcap",
+   "packets": 15387,
+   "flows": 14,
+   "alerts": 30
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\modicon\\modicon_test.pcap",
+   "packets": 191,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\omron\\omron_test.pcap",
+   "packets": 18,
+   "flows": 5,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\OPC\\opc-ua-ap-method-wireshark-freeze.pcap",
+   "packets": 90,
+   "flows": 2,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-Malformed.pcap",
+   "packets": 198,
+   "flows": 198,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-Read.pcap",
+   "packets": 8,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-ReadRequest.pcap",
+   "packets": 13,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-RequestLink.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-RequestLinkStatus.pcap",
+   "packets": 8,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-SelectOperate.pcap",
+   "packets": 12,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-SelectOperateRequest.pcap",
+   "packets": 10,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-TestDataPart1.pcap",
+   "packets": 181,
+   "flows": 8,
+   "alerts": 11
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-TestDataPart2.pcap",
+   "packets": 33,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-Write.pcap",
+   "packets": 8,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\DNP3-WriteRequest.pcap",
+   "packets": 11,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-ChangeDateAttempt.pcap",
+   "packets": 365,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-ChangePortConfigurationAttempt.pcap",
+   "packets": 3170,
+   "flows": 4,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-ChangeTimeAttempt.pcap",
+   "packets": 728,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-ControlProtocolChangeAttempt.pcap",
+   "packets": 3597,
+   "flows": 13,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-FirmwareChange.pcap",
+   "packets": 10727,
+   "flows": 6,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-FirmwareChangeFailure.pcap",
+   "packets": 10576,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-IPAddressChangeAttempt.pcap",
+   "packets": 4154,
+   "flows": 19,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-LockPLCAttempt.pcap",
+   "packets": 1749,
+   "flows": 2,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-RebootorRestart.pcap",
+   "packets": 972,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-RemoteModeChangeAttempt.pcap",
+   "packets": 727,
+   "flows": 10,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-SoftwareDownload.pcap",
+   "packets": 972,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-SoftwareDownloadFailure.pcap",
+   "packets": 93,
+   "flows": 0,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-SoftwareUpload.pcap",
+   "packets": 923,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-SoftwareUploadFailure.pcap",
+   "packets": 187,
+   "flows": 3,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-UnlockPLCAttempt.pcap",
+   "packets": 1749,
+   "flows": 2,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\EIP-ViewDeviceStatus.pcap",
+   "packets": 30,
+   "flows": 2,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\MODBUS-TestDataPart1.pcap",
+   "packets": 118,
+   "flows": 6,
+   "alerts": 10
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\openics\\MODBUS-TestDataPart2.pcap",
+   "packets": 350,
+   "flows": 1,
+   "alerts": 8
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\profinet\\PROFINET-RT-DCP\\ChangeIPUsingDCP.pcap",
+   "packets": 6,
+   "flows": 0,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\profinet\\PROFINET-RT-DCP\\PROFINET-RT.pcap",
+   "packets": 14,
+   "flows": 0,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\profinet\\profinet-wireshark-bug.pcap",
+   "packets": 4,
+   "flows": 0,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\profinet\\profinet.pcap",
+   "packets": 2,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\profinet\\Profinet_Failed.pcap",
+   "packets": 56,
+   "flows": 4,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Change Date Attempt.pcap",
+   "packets": 365,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Change Port Configuration Attempt.pcap",
+   "packets": 3170,
+   "flows": 4,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Change Time Attempt.pcap",
+   "packets": 728,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Control Protocol Change Attempt.pcap",
+   "packets": 3597,
+   "flows": 13,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Firmware Change Failure.pcap",
+   "packets": 10576,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Firmware Change.pcap",
+   "packets": 10727,
+   "flows": 6,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-IP Address Change Attempt.pcap",
+   "packets": 4154,
+   "flows": 19,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Lock PLC Attempt.pcap",
+   "packets": 1749,
+   "flows": 2,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Reboot or Restart.pcap",
+   "packets": 972,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Remote Mode Change Attempt.pcap",
+   "packets": 727,
+   "flows": 10,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Software Download Failure.pcap",
+   "packets": 93,
+   "flows": 0,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Software Download.pcap",
+   "packets": 972,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Software Upload Failure.pcap",
+   "packets": 187,
+   "flows": 3,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Software Upload.pcap",
+   "packets": 923,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-Unlock PLC Attempt.pcap",
+   "packets": 1749,
+   "flows": 2,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\CL5000EIP-View Device Status.pcap",
+   "packets": 30,
+   "flows": 2,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\dnp3_test_data_part1.pcap",
+   "packets": 181,
+   "flows": 8,
+   "alerts": 11
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\dnp3_test_data_part2.pcap",
+   "packets": 33,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\modbus_test_data_part1.pcap",
+   "packets": 118,
+   "flows": 6,
+   "alerts": 10
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\quickdraw\\modbus_test_data_part2.pcap",
+   "packets": 350,
+   "flows": 1,
+   "alerts": 8
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\s7-1200-hmi.pcap",
+   "packets": 79,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\S7-1200-Uploading-OB1-TIAV12.pcap",
+   "packets": 149,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\S7-1511-opc-request-all-types.pcap",
+   "packets": 67,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\S7-1511_db3_var1_HMI.pcap",
+   "packets": 49,
+   "flows": 6,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\S7Comm\\s7comm_clean.pcap",
+   "packets": 5447,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\s7comm_downloading_block_db1.pcap",
+   "packets": 93,
+   "flows": 4,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\s7comm_program_blocklist_onlineview.pcap",
+   "packets": 140,
+   "flows": 6,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\s7comm_reading_plc_status.pcap",
+   "packets": 240,
+   "flows": 3,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\s7comm_reading_setting_plc_time.pcap",
+   "packets": 55,
+   "flows": 2,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\s7comm_varservice_libnodavedemo.pcap",
+   "packets": 31,
+   "flows": 2,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\s7comm_varservice_libnodavedemo_bench.pcap",
+   "packets": 10171,
+   "flows": 3,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\snap7_s300_everything.pcapng",
+   "packets": 64,
+   "flows": 1,
+   "alerts": 6
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\snap7_s300_readVar.pcapng",
+   "packets": 2,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\snap7_s300_setupCommunication.pcapng",
+   "packets": 2,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\snap7_s300_stop.pcapng",
+   "packets": 2,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\step7_s300_AuthPassword.pcapng",
+   "packets": 6,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\step7_s300_copyRamToRom.pcapng",
+   "packets": 2,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\step7_s300_download.pcapng",
+   "packets": 96,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\step7_s300_readDiagData.pcapng",
+   "packets": 679,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\step7_s300_readVarTab.pcapng",
+   "packets": 548,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\step7_s300_rwVarTab.pcapng",
+   "packets": 24,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\step7_s300_stop.pcapng",
+   "packets": 4,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\tia_s300_downloadHwConfig.pcapng",
+   "packets": 154,
+   "flows": 6,
+   "alerts": 3
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\tia_s300_downloadOb1.pcapng",
+   "packets": 106,
+   "flows": 1,
+   "alerts": 2
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\tia_s300_flashLed.pcapng",
+   "packets": 4,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\tia_s300_goOnline.pcapng",
+   "packets": 448,
+   "flows": 1,
+   "alerts": 0
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\tia_s300_updateFirmware.pcapng",
+   "packets": 67749,
+   "flows": 2,
+   "alerts": 3
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\tia_s300_updateFirmware_2.pcapng",
+   "packets": 67749,
+   "flows": 2,
+   "alerts": 3
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\wincc_s300_setup-alarm-read-write.pcapng",
+   "packets": 164,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\wincc_s300_setup-alarm-read.pcapng",
+   "packets": 128,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\wincc_s300_setup-alarm-read_2.pcapng",
+   "packets": 487,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\s7\\wincc_s400_production.pcapng",
+   "packets": 1658,
+   "flows": 1,
+   "alerts": 1
+  },
+  {
+   "file": "C:\\Users\\admin\\Downloads\\ICS-Security-Tools-master\\ICS-Security-Tools-master\\pcaps\\Zigbee\\control4-sample.pcap",
+   "packets": 0,
+   "flows": 0,
+   "alerts": 0
+  }
+ ]
+}

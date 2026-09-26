@@ -1,0 +1,15 @@
+{
+  "rules": [
+    {
+      "id": "example-engineering-workstation",
+      "reason": "EXAMPLE ONLY -- engineering workstation 10.0.0.9 programs PLC 10.0.0.3 (change ticket ...). Copy to allowlist.json and edit.",
+      "threat_class": "ICS_UNAUTHORIZED_CONTROL_COMMAND",
+      "src": "10.0.0.9",
+      "dst": "10.0.0.3",
+      "dst_port": [502],
+      "evidence": {"function_code": ["WRITE_SINGLE_COIL", "WRITE_SINGLE_REGISTER", "WRITE_MULTIPLE_REGISTERS"]},
+      "expires": "2027-12-31",
+      "enabled": false
+    }
+  ]
+}

@@ -63,3 +63,8 @@ build/
 data/
 sensor*.log
 data/benign_live/
+config/users.json
+data/audit/
+config/allowlist.json
+scripts/lab/*.war
+data/lab_eng14/
