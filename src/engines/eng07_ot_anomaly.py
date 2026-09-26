@@ -89,12 +89,13 @@ OPCUA_HIGH_SERVICES = {"ADD_NODES", "ADD_REFERENCES", "DELETE_REFERENCES"}
 class OTIndustrialAnomalyDetector(Detector):
     name = "ENG-07-OT"
 
-    def _ics_alert(self, flow: dict, protocol: str, severity: str, confidence: float, mitre: tuple, evidence: dict) -> Alert:
+    def _ics_alert(self, flow: dict, protocol: str, severity: str, confidence: float, mitre: tuple, evidence: dict,
+                   transport: str = "TCP") -> Alert:
         return Alert(
             alert_id=flow["flow_uid"], timestamp=flow["ts"], severity=severity, confidence_score=confidence,
             threat_class="ICS_UNAUTHORIZED_CONTROL_COMMAND",
             flow_identifier=FlowIdentifier(src_ip=flow["src_ip"], src_port=flow["src_port"],
-                                           dst_ip=flow["dst_ip"], dst_port=flow["dst_port"], protocol="TCP"),
+                                           dst_ip=flow["dst_ip"], dst_port=flow["dst_port"], protocol=transport),
             mitre_attack=MitreAttack(tactic="Impair Process Control", technique_id=mitre[0], technique_name=mitre[1]),
             evidence={"protocol": protocol, **evidence},
             forensics={"raw_segment_hash_sha256": flow.get("segment_hash", "")},
@@ -110,6 +111,18 @@ class OTIndustrialAnomalyDetector(Detector):
                 return self._ics_alert(flow, "S7comm", "CRITICAL" if critical else "HIGH", 92.0 if critical else 80.0,
                                        _S7_MITRE.get(fn, ("T0855", "Unauthorized Command Message")),
                                        {"function_code": fn, "impact": "controller program/mode change" if critical else "live value write / program upload"})
+            return None
+
+        if proto == "profinet":
+            # PROFINET-DCP Set rewrites a device's IP / station name (or factory-resets it) with no authentication --
+            # validated on real captures (ChangeIPUsingDCP, profinet-wireshark-bug). Identify/Get/Hello are discovery.
+            if flow.get("pn_function") == "DCP_SET":
+                blocks = str(flow.get("pn_blocks", ""))
+                critical = "FACTORY_RESET" in blocks
+                return self._ics_alert(flow, "PROFINET-DCP", "CRITICAL" if critical else "HIGH", 90.0 if critical else 80.0,
+                                       ("T0836", "Modify Parameter"),
+                                       {"function_code": "DCP_SET", "blocks": blocks, "link_layer": "ethernet (MAC addresses, no IP)"},
+                                       transport="UDP")
             return None
 
         if proto == "opcua":

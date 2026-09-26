@@ -195,6 +195,42 @@ def parse_opcua(p: bytes) -> Optional[tuple[str, str, int]]:
     return (name, "plain", tid) if name else None
 
 
+def parse_profinet_dcp(frame: bytes) -> Optional[tuple[str, str, int]]:
+    """(function, option blocks touched, code) of a PROFINET-DCP REQUEST in a raw Ethernet frame (ethertype 0x8892).
+    Twin of parse_profinet_dcp in live.rs."""
+    if len(frame) < 26:
+        return None
+    off = 14
+    et = int.from_bytes(frame[12:14], "big")
+    while et in (0x8100, 0x88A8) and len(frame) >= off + 4:
+        et = int.from_bytes(frame[off + 2:off + 4], "big")
+        off += 4
+    if et != 0x8892:
+        return None
+    d = frame[off:]
+    if len(d) < 12 or not (0xFEFC <= int.from_bytes(d[:2], "big") <= 0xFEFF):
+        return None
+    svc, ty = d[2], d[3]
+    name = {3: "DCP_GET", 4: "DCP_SET", 5: "DCP_IDENTIFY", 6: "DCP_HELLO"}.get(svc)
+    if ty & 1 or name is None:
+        return None
+    dlen = int.from_bytes(d[10:12], "big")
+    blocks, factory, p, end = [], False, 12, min(12 + dlen, len(d))
+    while p + 4 <= end:
+        opt, sub, bl = d[p], d[p + 1], int.from_bytes(d[p + 2:p + 4], "big")
+        if opt == 1:
+            blocks.append("IP")
+        elif opt == 2:
+            blocks.append("DEVICE")
+        elif opt == 5:
+            blocks.append("CONTROL")
+            factory = factory or sub in (5, 6)
+        p += 4 + bl + (bl & 1)
+    if factory:
+        blocks.append("FACTORY_RESET")
+    return name, ",".join(blocks), 0x200 | svc
+
+
 def parse_iec104(p: bytes) -> Optional[tuple[str, str, int]]:
     """(type name, 'type=.. cot=..', type id) of the most command-like I-frame ASDU in a segment."""
     off = 0

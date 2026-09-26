@@ -18,7 +18,7 @@ import time
 from typing import Any, Iterator, Optional
 
 from src.capture.kerberos import parse_kdc_reply
-from src.capture.ot import parse_bacnet, parse_enip, parse_iec104, parse_opcua, parse_s7comm
+from src.capture.ot import parse_bacnet, parse_enip, parse_iec104, parse_opcua, parse_profinet_dcp, parse_s7comm
 from src.capture.ja4 import ja4_from_client_hello, sni_from_client_hello
 from src.flow_orientation import sender_is_originator
 
@@ -58,6 +58,12 @@ def _flow_uid(a_ip: str, a_port: int, b_ip: str, b_port: int, proto: str) -> str
 
 def _seg_hash(*parts: Any) -> str:
     return "sha256:" + hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()
+
+
+def _flow_uid_l2(a: str, b: str) -> str:
+    """Same recipe as the native flow_uid for a layer-2 'flow' (MAC addresses, port 0, proto 'eth')."""
+    import hashlib
+    return hashlib.sha256(f"{a}:0-{b}:0-eth".encode()).hexdigest()[:16]
 
 
 class _Flow:
@@ -133,6 +139,19 @@ class FlowAssembler:
                 ip = None
         if ip is None:
             self.stats["non_ip"] += 1
+            raw = bytes(pkt)
+            pn = parse_profinet_dcp(raw)
+            if pn is not None:                      # layer 2: endpoints are MAC addresses
+                function, detail, code = pn
+                mac = lambda b: ":".join(f"{x:02x}" for x in b)      # noqa: E731
+                dst_m, src_m = mac(raw[0:6]), mac(raw[6:12])
+                uid = _flow_uid_l2(src_m, dst_m)
+                self.stats["profinet"] = self.stats.get("profinet", 0) + 1
+                out.append(("profinet", {
+                    "uid": uid, "ts": float(getattr(pkt, "time", None) or time.time()), "id.orig_h": src_m, "id.orig_p": 0,
+                    "id.resp_h": dst_m, "id.resp_p": 0, "proto": "eth", "function": function, "detail": detail, "code": code,
+                    "segment_hash": _seg_hash(uid, function, detail),
+                }))
             return out
         src_ip, dst_ip = ip.src, ip.dst
         ts = float(getattr(pkt, "time", None) or time.time())

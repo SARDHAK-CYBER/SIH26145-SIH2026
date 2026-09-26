@@ -123,7 +123,7 @@ pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out),
 #[derive(Default, Clone)]
 pub struct Stats {
     pub packets: u64, pub non_ip: u64, pub flows_seen: u64,
-    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub opcua: u64, pub conn: u64,
+    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub opcua: u64, pub profinet: u64, pub conn: u64,
 }
 
 // Function-code name tables -- identical to flow_assembler.py's _MODBUS_FC / _DNP3_FC.
@@ -349,6 +349,38 @@ fn parse_opcua(p: &[u8]) -> Option<(String, String, u32)> {
     Some((name.to_string(), "plain".to_string(), id))
 }
 
+/// PROFINET-DCP over raw Ethernet (ethertype 0x8892, no IP): FrameID 0xFEFC..0xFEFF | ServiceID | ServiceType | Xid |
+/// delay | data length | option blocks. Only REQUESTS are decoded. Returns (function, detail, code); `detail` lists the
+/// option blocks a Set touches (IP, DEVICE, CONTROL[+FACTORY_RESET]) -- the same block layout as the DCP spec.
+fn parse_profinet_dcp(frame: &[u8]) -> Option<(String, String, u32)> {
+    if frame.len() < 26 { return None; }
+    let mut off = 12usize;
+    let mut et = u16::from_be_bytes([frame[off], frame[off + 1]]);
+    off += 2;
+    while (et == 0x8100 || et == 0x88a8) && frame.len() >= off + 4 { et = u16::from_be_bytes([frame[off + 2], frame[off + 3]]); off += 4; }
+    if et != 0x8892 { return None; }
+    let d = frame.get(off..)?;
+    if d.len() < 12 { return None; }
+    let frame_id = u16::from_be_bytes([d[0], d[1]]);
+    if !(0xFEFC..=0xFEFF).contains(&frame_id) { return None; }
+    let (svc, ty) = (d[2], d[3]);
+    if ty & 1 != 0 { return None; }                 // responses are not commands
+    let name = match svc { 3 => "DCP_GET", 4 => "DCP_SET", 5 => "DCP_IDENTIFY", 6 => "DCP_HELLO", _ => return None };
+    let dlen = u16::from_be_bytes([d[10], d[11]]) as usize;
+    let mut blocks: Vec<&str> = Vec::new();
+    let mut factory = false;
+    let mut p = 12usize;
+    let end = (12 + dlen).min(d.len());
+    while p + 4 <= end {
+        let (opt, sub) = (d[p], d[p + 1]);
+        let bl = u16::from_be_bytes([d[p + 2], d[p + 3]]) as usize;
+        match opt { 1 => blocks.push("IP"), 2 => blocks.push("DEVICE"), 5 => { blocks.push("CONTROL"); if sub == 5 || sub == 6 { factory = true; } } _ => {} }
+        p += 4 + bl + (bl & 1);                      // blocks are padded to even length
+    }
+    if factory { blocks.push("FACTORY_RESET"); }
+    Some((name.to_string(), blocks.join(","), 0x200 | svc as u32))
+}
+
 fn parse_dnp3(p: &[u8], s_ip: &str, s_p: u16, d_ip: &str, d_p: u16, ts: f64, uid: &str) -> Option<Dnp3Out> {
     if p.len() < 13 || p[0] != 0x05 || p[1] != 0x64 { return None; }
     let fc = p[12];
@@ -426,6 +458,16 @@ impl LiveFlowAssembler {
 
         let Some(l3) = strip_link_layer(LINKTYPE_ETHERNET, data) else {
             self.stats.non_ip += 1;
+            if let Some((function, detail, code)) = parse_profinet_dcp(data) {
+                // layer-2 protocol: the "endpoints" are MAC addresses
+                let mac = |b: &[u8]| format!("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", b[0], b[1], b[2], b[3], b[4], b[5]);
+                let (dst, src) = (mac(&data[0..6]), mac(&data[6..12]));
+                let uid = flow_uid(&src, 0, &dst, 0, "eth");
+                self.stats.profinet += 1;
+                out.push(Immediate::Ot(OtOut { kind: "profinet", uid: uid.clone(), ts, orig_h: src, orig_p: 0, resp_h: dst, resp_p: 0,
+                    segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
+                    function, detail, code, class_id: 0, instance_id: 0, response: false }));
+            }
             return out;
         };
         let Some((src_ip, dst_ip, proto_num, l4_payload)) = parse_ip_header(l3) else {

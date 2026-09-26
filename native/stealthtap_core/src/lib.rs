@@ -265,6 +265,7 @@ impl LiveFlowAssembler {
         d.set_item("cip", s.cip)?;
         d.set_item("bacnet", s.bacnet)?;
         d.set_item("opcua", s.opcua)?;
+        d.set_item("profinet", s.profinet)?;
         d.set_item("conn", s.conn)?;
         Ok(d.into())
     }

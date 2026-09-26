@@ -175,3 +175,20 @@ def test_opcua_write_request_alerts():
     a = loop.run_until_complete(OTIndustrialAnomalyDetector().score(flow))
     loop.close()
     assert a is not None and a.severity == "CRITICAL"
+
+
+@pytest.mark.parametrize("name,expect_set", [("ChangeIPUsingDCP.pcap", True), ("profinet-wireshark-bug.pcap", True), ("PROFINET-RT.pcap", False)])
+def test_profinet_dcp_native_equals_python_on_real_captures(name, expect_set):
+    f = PUB / "profinet" / name
+    if not f.exists():
+        pytest.skip("public sample not downloaded")
+    from scapy.utils import PcapReader
+    from src.capture.ot import parse_profinet_dcp
+    py = []
+    for pkt in PcapReader(str(f)):
+        r = parse_profinet_dcp(bytes(pkt))
+        if r:
+            py.append((r[0], r[1]))
+    rs = [(r["function"], r["detail"]) for _t, r in _native_records(f, {"profinet"})]
+    assert sorted(py) == sorted(rs) and rs
+    assert any(fn == "DCP_SET" for fn, _ in rs) is expect_set
