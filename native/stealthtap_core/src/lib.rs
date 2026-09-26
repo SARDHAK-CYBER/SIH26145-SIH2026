@@ -9,7 +9,7 @@
 //! files are not yet supported (returns a clear error, not a silent
 //! wrong answer) -- see native/README.md.
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "afxdp"))]
 mod afxdp;
 mod eng01;
 mod eng02;
@@ -167,7 +167,7 @@ impl LiveFlowAssembler {
                     d.set_item("uid", &r.uid)?; d.set_item("ts", r.ts)?;
                     d.set_item("id.orig_h", &r.orig_h)?; d.set_item("id.orig_p", r.orig_p)?;
                     d.set_item("id.resp_h", &r.resp_h)?; d.set_item("id.resp_p", r.resp_p)?;
-                    d.set_item("proto", r.proto)?; d.set_item("ja4", &r.ja4)?;
+                    d.set_item("proto", r.proto)?; d.set_item("ja4", &r.ja4)?; d.set_item("sni", &r.sni)?;
                     d.set_item("segment_hash", &r.segment_hash)?;
                     ("ssl", d)
                 }
@@ -249,7 +249,7 @@ fn stealthtap_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NativeEng05>()?;
     m.add_class::<NativeEng06>()?;
     m.add_class::<NativeEng13>()?;
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "afxdp"))]
     m.add_class::<afxdp::AfXdpCapture>()?;
     Ok(())
 }

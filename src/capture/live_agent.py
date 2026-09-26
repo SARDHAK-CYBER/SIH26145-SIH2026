@@ -52,9 +52,11 @@ try:
     # scripts/validate_native_live_assembler.py (see native/README.md).
     # Same call-site interface (process/snapshot/expire/flush/.stats), so
     # nothing below this needs to know which one is in use.
-    from src.capture.native_flow_assembler import NativeFlowAssemblerAdapter, NATIVE_LIVE_ASSEMBLER_AVAILABLE
+    from src.capture.native_flow_assembler import NativeFlowAssemblerAdapter, NATIVE_LIVE_ASSEMBLER_AVAILABLE, RawFrame
 except ImportError:
     NATIVE_LIVE_ASSEMBLER_AVAILABLE = False
+    NativeFlowAssemblerAdapter = None  # type: ignore[assignment,misc]
+    RawFrame = None  # type: ignore[assignment,misc]
 
 _FORCE_PYTHON_LIVE_ASSEMBLER = os.environ.get("STEALTHTAP_FORCE_PYTHON_LIVE_ASSEMBLER") == "1"
 
@@ -212,20 +214,42 @@ class LiveAgent:
             print(f"[live_agent] baseline warm-start from {path!r} failed (continuing without it): {exc}")
 
     # ---------------- lifecycle ----------------
+    @property
+    def raw_capable(self) -> bool:
+        """True when the assembler consumes raw Ethernet frames directly (the
+        native Rust one). Backends then skip scapy dissection entirely -- see
+        RawFrame for the measured 41x ingestion difference."""
+        return NativeFlowAssemblerAdapter is not None and isinstance(self._assembler, NativeFlowAssemblerAdapter)
+
+    def on_raw(self, ts: float, raw: bytes) -> None:
+        """Ingest one raw Ethernet frame. With the native assembler it goes
+        straight through as a RawFrame; with the Python fallback it is
+        dissected once here (that assembler needs a scapy Packet)."""
+        if self.raw_capable:
+            self._enqueue(RawFrame(ts, raw), len(raw))
+            return
+        from scapy.layers.l2 import Ether
+        pkt = Ether(raw)
+        pkt.time = ts
+        self._on_packet(pkt)
+
     def _on_packet(self, pkt) -> None:
-        t_arr = time.monotonic()
         try:
             wire = len(pkt)
         except Exception:
             wire = 0
+        self._enqueue(pkt, wire)
+
+    def _enqueue(self, item, wire: int) -> None:
+        t_arr = time.monotonic()
         self._bytes += wire
         try:
-            self._q.put_nowait((t_arr, pkt))
+            self._q.put_nowait((t_arr, item))
         except queue.Full:
             # bounded latency: drop the OLDEST, enqueue the newest
             try:
                 self._q.get_nowait()
-                self._q.put_nowait((t_arr, pkt))
+                self._q.put_nowait((t_arr, item))
             except queue.Empty:
                 pass
             self.stats["dropped"] += 1
@@ -245,6 +269,9 @@ class LiveAgent:
                                 self.prefer_kernel, self.buffer_mb, self.promisc)
         self.stats["backend"] = self._backend.name
         self.stats["kernel_level"] = self._backend.kernel_level
+        if self.raw_capable and os.environ.get("STEALTHTAP_FORCE_SCAPY_INGEST") != "1":
+            # backends that support it deliver raw frames and skip scapy
+            self._backend.raw_sink = self.on_raw
         self._backend.start()
         self.stats["kernel_buffer_set"] = getattr(self._backend, "kernel_buffer_set", None)
         print(f"[live_agent] capturing on {self.iface_req!r} via {self._backend.name} "
@@ -261,6 +288,22 @@ class LiveAgent:
             self.stats["backend"] = "pcap-replay"
             self._loop_thread = threading.Thread(target=self._run_loop, daemon=True, name="live-detect")
             self._loop_thread.start()
+        from src.capture.rawpcap import iter_raw_pcap
+        raw_iter = iter_raw_pcap(path) if self.raw_capable else None
+        if raw_iter is not None:
+            last = None
+            for ts, raw in raw_iter:
+                if realtime and last is not None:
+                    dt = ts - last
+                    if 0 < dt < 5:
+                        time.sleep(dt)
+                last = ts
+                self.on_raw(ts, raw)
+            for _ in range(50):
+                if self._q.qsize() == 0:
+                    break
+                time.sleep(0.1)
+            return
         last = None
         with PcapReader(path) as rd:
             for pkt in rd:
@@ -284,6 +327,9 @@ class LiveAgent:
         if self._loop_thread is not None:
             self._loop_thread.join(timeout=5)
         if self._pool is not None:
+            self._pool.drain(timeout=10.0)   # score what the shutdown flush routed to workers
+            for alert in self._pool.drain_alerts():
+                self._emit(alert, alert.pop("_t_arr", None))
             self._pool.stop()
 
     # ---------------- detection loop ----------------

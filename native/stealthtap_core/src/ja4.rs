@@ -29,6 +29,12 @@ fn tls_version_str(v: u16) -> &'static str {
 /// None whenever the bytes aren't a cleanly parseable ClientHello -- same
 /// "just omit ja4" contract as the Python original, never a panic.
 pub fn ja4_from_client_hello(payload: &[u8]) -> Option<String> {
+    ja4_and_sni(payload).map(|(ja4, _)| ja4)
+}
+
+/// (JA4, SNI) -- SNI is "" when the ClientHello carries no server_name. Same fail-closed
+/// truncation rule as before: a ClientHello cut short returns None, never a partial result.
+pub fn ja4_and_sni(payload: &[u8]) -> Option<(String, String)> {
     if payload.len() < 6 { return None; }
 
     let (hs, _off) = if payload[0] == 0x16 {
@@ -61,13 +67,16 @@ pub fn ja4_from_client_hello(payload: &[u8]) -> Option<String> {
 
     let mut exts: Vec<u16> = Vec::new();
     let mut sni_present = false;
+    let mut sni_name = String::new();
     let mut alpn_first = "00".to_string();
     let mut sig_algs_hex: Vec<String> = Vec::new();
     let mut best_version = legacy_version;
 
     if p + 2 <= body.len() {
         let ext_total = u16_at(body, p)? as usize; p += 2;
-        let end = (p + ext_total).min(body.len());
+        // extensions block claims more bytes than this packet holds: split ClientHello
+        if p + ext_total > body.len() { return None; }
+        let end = p + ext_total;
         while p + 4 <= end {
             let etype = u16_at(body, p)?;
             let esize = u16_at(body, p + 2)? as usize;
@@ -93,6 +102,13 @@ pub fn ja4_from_client_hello(payload: &[u8]) -> Option<String> {
             exts.push(etype);
             if etype == EXT_SNI {
                 sni_present = true;
+                // server_name_list: len(2) | name_type(1)=0 | name_len(2) | name
+                if edata.len() >= 5 && edata[2] == 0 {
+                    let n = u16::from_be_bytes([edata[3], edata[4]]) as usize;
+                    if 5 + n <= edata.len() {
+                        sni_name = String::from_utf8_lossy(&edata[5..5 + n]).to_ascii_lowercase();
+                    }
+                }
             } else if etype == EXT_ALPN && edata.len() >= 4 {
                 let first_len = edata[2] as usize;
                 if let Some(first) = edata.get(3..3 + first_len.min(edata.len().saturating_sub(3))) {
@@ -154,7 +170,7 @@ pub fn ja4_from_client_hello(payload: &[u8]) -> Option<String> {
         "000000000000".to_string()
     };
 
-    Some(format!("{ja4_a}_{ja4_b}_{ja4_c}"))
+    Some((format!("{ja4_a}_{ja4_b}_{ja4_c}"), sni_name))
 }
 
 fn hex12(s: &str) -> String {

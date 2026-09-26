@@ -31,9 +31,18 @@ indexmap = "2"
 # builds libbpf+libelf+zlib from source instead (via the `cc` crate, not
 # a Makefile/configure, per `use_cc_build`); `use_precompiled_bpf` uses
 # libxdp's own prebuilt default-program object instead of compiling one.
+#
+# OPT-IN via `--features afxdp` (Linux capture sensors only): the API/streaming
+# containers never capture, and building libbpf+elfutils+zlib from source
+# needs autotools/flex/bison -- real build time and toolchain for code those
+# images would never call.
 [target.'cfg(target_os = "linux")'.dependencies]
-xsk-rs = { version = "0.11", features = ["use_cc_build"] }
-libxdp-sys = { version = "0.2", features = ["vendored", "use_precompiled_bpf", "use_cc_build"] }
+xsk-rs = { version = "0.11", features = ["use_cc_build"], optional = true }
+libxdp-sys = { version = "0.2", features = ["vendored", "use_precompiled_bpf", "use_cc_build"], optional = true }
+
+[features]
+default = []
+afxdp = ["dep:xsk-rs", "dep:libxdp-sys"]
 
 [profile.release]
 opt-level = 3

@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import platform
 import threading
+import time
 from typing import Callable, Optional
 
 PacketCB = Callable[[object], None]
@@ -42,6 +43,11 @@ class CaptureError(RuntimeError):
 class BaseBackend:
     name = "base"
     kernel_level = False
+    # Set by LiveAgent when its assembler consumes raw Ethernet frames
+    # (native Rust). A backend that has raw bytes in hand then calls
+    # raw_sink(ts, frame) instead of building a scapy Packet (~100us each --
+    # a ~10k pps ceiling on the whole pipeline; raw is ~41x faster).
+    raw_sink: Optional[Callable[[float, bytes], None]] = None
 
     def start(self) -> None: ...
     def stop(self) -> None: ...
@@ -127,6 +133,13 @@ class ScapyBackend(BaseBackend):
             self._pcap = getattr(getattr(self._sock, "ins", None), "pcap", None) \
                 or getattr(self._sock, "pcap", None)
             self._enlarge_kernel_buffer()
+            if self.raw_sink is not None and hasattr(self._sock, "recv_raw"):
+                # Raw path: read frames straight off libpcap/Npcap with
+                # recv_raw() -- NO scapy dissection (see BaseBackend.raw_sink).
+                self._raw_stop = threading.Event()
+                self._raw_thread = threading.Thread(target=self._raw_loop, daemon=True, name="pcap-raw")
+                self._raw_thread.start()
+                return
             self._sniffer = AsyncSniffer(opened_socket=self._sock, prn=self.on_packet, store=False)
             self._sniffer.start()
         except Exception as exc:
@@ -143,7 +156,44 @@ class ScapyBackend(BaseBackend):
         raise CaptureError(f"capture thread failed to start on {self.iface!r}"
                            f"{f': {exc}' if exc else ''}. {self._INSTALL_HINT}")
 
+    def _raw_loop(self) -> None:
+        from scapy.layers.l2 import Ether
+        sink, sock = self.raw_sink, self._sock
+        while not self._raw_stop.is_set():
+            try:
+                cls, raw, ts = sock.recv_raw(65535)
+            except Exception:
+                if self._raw_stop.is_set():
+                    return
+                continue
+            if not raw:
+                continue
+            if cls is Ether or cls is None:
+                try:
+                    sink(ts or time.time(), raw)
+                except Exception:
+                    pass
+            else:
+                # non-Ethernet link type (e.g. Npcap loopback): the native
+                # assembler is Ethernet-only, so hand this one to scapy.
+                try:
+                    pkt = cls(raw)
+                    pkt.time = ts or time.time()
+                    self.on_packet(pkt)
+                except Exception:
+                    pass
+
     def stop(self) -> None:
+        if getattr(self, "_raw_stop", None) is not None:
+            self._raw_stop.set()
+        if getattr(self, "_raw_thread", None) is not None:
+            try:
+                if self._sock is not None:
+                    self._sock.close()   # unblocks recv_raw
+            except Exception:
+                pass
+            self._raw_thread.join(timeout=2.0)
+            self._raw_thread = None
         if self._sniffer is not None:
             try:
                 self._sniffer.stop()
@@ -160,6 +210,8 @@ class ScapyBackend(BaseBackend):
 
     @property
     def running(self) -> bool:
+        if getattr(self, "_raw_thread", None) is not None:
+            return self._raw_thread.is_alive()
         return self._sniffer is not None and getattr(self._sniffer, "running", False)
 
 
@@ -269,6 +321,13 @@ class AFPacketBackend(BaseBackend):
             except OSError:
                 continue
             if not raw:
+                continue
+            sink = self.raw_sink
+            if sink is not None:
+                try:
+                    sink(time.time(), raw)
+                except Exception:
+                    pass
                 continue
             try:
                 pkt = Ether(raw)

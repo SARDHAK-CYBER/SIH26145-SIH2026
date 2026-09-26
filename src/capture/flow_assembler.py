@@ -17,7 +17,7 @@ import hashlib
 import time
 from typing import Any, Iterator, Optional
 
-from src.capture.ja4 import ja4_from_client_hello
+from src.capture.ja4 import ja4_from_client_hello, sni_from_client_hello
 from src.flow_orientation import sender_is_originator
 
 QTYPE_NAMES = {1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR", 15: "MX",
@@ -183,7 +183,7 @@ class FlowAssembler:
                 out.append(("ssl", {
                     "uid": flow.uid, "ts": ts, "id.orig_h": src_ip, "id.orig_p": sport,
                     "id.resp_h": dst_ip, "id.resp_p": dport, "proto": proto,
-                    "ja4": ja4, "segment_hash": _seg_hash(flow.uid, ja4),
+                    "ja4": ja4, "sni": sni_from_client_hello(payload) or "", "segment_hash": _seg_hash(flow.uid, ja4),
                 }))
                 self.stats["ssl"] += 1
 

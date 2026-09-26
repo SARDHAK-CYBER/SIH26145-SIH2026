@@ -54,7 +54,7 @@ class AfXdpBackend(BaseBackend):
         if not _AFXDP_AVAILABLE:
             raise CaptureError(
                 "native AF_XDP support not built into stealthtap_core -- "
-                "rebuild on Linux (maturin develop --release) to enable it"
+                "rebuild on Linux with `maturin develop --release --features afxdp` to enable it"
             )
         if bpf:
             # libxdp's auto-attached default program (this backend uses no
@@ -103,6 +103,14 @@ class AfXdpBackend(BaseBackend):
             try:
                 batch = self._cap.recv_batch(256, 100)
             except Exception:
+                continue
+            sink = self.raw_sink
+            if sink is not None:
+                for _ts, raw in batch:
+                    try:
+                        sink(_ts, raw)
+                    except Exception:
+                        pass
                 continue
             for _ts, raw in batch:
                 try:

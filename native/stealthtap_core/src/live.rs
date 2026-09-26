@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use indexmap::IndexMap;
 use sha2::{Digest, Sha256};
 
-use crate::ja4::ja4_from_client_hello;
+use crate::ja4::ja4_and_sni;
 use crate::parse::{flow_uid, parse_dns_query, parse_ip_header, parse_l4, qtype_name,
                    sender_is_originator, strip_link_layer, LINKTYPE_ETHERNET};
 
@@ -99,7 +99,7 @@ pub struct DnsOut { pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p
     pub query: String, pub qtype_name: String, pub segment_hash: String }
 pub struct SslOut { pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p: u16,
     pub resp_h: String, pub resp_p: u16, pub proto: &'static str,
-    pub ja4: String, pub segment_hash: String }
+    pub ja4: String, pub sni: String, pub segment_hash: String }
 pub struct ModbusOut { pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p: u16,
     pub resp_h: String, pub resp_p: u16, pub func: String, pub register: u16, pub segment_hash: String }
 pub struct Dnp3Out { pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p: u16,
@@ -272,13 +272,13 @@ impl LiveFlowAssembler {
         if l4.proto == "tcp" && l4.payload.first() == Some(&0x16) {
             let already = self.flows.get(&flow_key).map(|f| f.emitted_ssl).unwrap_or(true);
             if !already {
-                if let Some(ja4) = ja4_from_client_hello(l4.payload) {
+                if let Some((ja4, sni)) = ja4_and_sni(l4.payload) {
                     if let Some(f) = self.flows.get_mut(&flow_key) { f.emitted_ssl = true; }
                     self.stats.ssl += 1;
                     out.push(Immediate::Ssl(SslOut {
                         uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
                         resp_h: dst_ip.clone(), resp_p: l4.dport, proto: "tcp",
-                        segment_hash: seg_hash(&[uid.clone(), ja4.clone()]), ja4,
+                        segment_hash: seg_hash(&[uid.clone(), ja4.clone()]), ja4, sni,
                     }));
                 }
             }
@@ -368,17 +368,28 @@ impl LiveFlowAssembler {
     /// total lifetime exceeds FLOW_HARD_TIMEOUT_S -- matches
     /// FlowAssembler.expire() exactly.
     pub fn expire(&mut self, now: f64) -> Vec<LiveConnRecord> {
+        // ONE order-preserving pass (IndexMap::retain), not a shift_remove per
+        // evicted flow. shift_remove keeps insertion order but is O(n) PER
+        // REMOVAL (it shifts every later entry down), so evicting k flows
+        // cost O(k*n) -- profiled as the single largest cost in the whole
+        // live pipeline (46% of a 48k-packet run, in code that was already
+        // Rust): the scan was never the problem, the per-key removal was.
+        // retain() visits entries in insertion order and drops the expired
+        // ones in the same pass, so the returned records keep EXACTLY the
+        // order the old code produced -- which the order-sensitive engines
+        // downstream (ENG-01's first-crossing dedup, ENG-02/06 windows)
+        // depend on.
+        let idle = self.idle_timeout_s;
         let mut out = Vec::new();
-        let expired_keys: Vec<FlowKey> = self.flows.iter()
-            .filter(|(_, f)| (now - f.last_ts) >= self.idle_timeout_s || (now - f.first_ts) >= FLOW_HARD_TIMEOUT_S)
-            .map(|(k, _)| k.clone())
-            .collect();
-        for key in expired_keys {
-            if let Some(f) = self.flows.shift_remove(&key) {
+        self.flows.retain(|_, f| {
+            if (now - f.last_ts) >= idle || (now - f.first_ts) >= FLOW_HARD_TIMEOUT_S {
                 out.push(f.to_conn());
-                self.stats.conn += 1;
+                false
+            } else {
+                true
             }
-        }
+        });
+        self.stats.conn += out.len() as u64;
         out
     }
 

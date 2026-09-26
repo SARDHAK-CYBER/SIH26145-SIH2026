@@ -26,6 +26,28 @@ except ImportError:
     NATIVE_LIVE_ASSEMBLER_AVAILABLE = False
 
 
+class RawFrame:
+    """A captured Ethernet frame that was never turned into a scapy Packet.
+
+    Duck-types the only two attributes NativeFlowAssemblerAdapter.process()
+    reads (`.time`, `.original`) plus len(), so it flows through the exact
+    same queue/adapter path as a scapy packet with no other changes.
+
+    Why it exists (measured, not assumed): scapy dissection of one packet
+    costs ~100us -- a hard ~10,000 pps ceiling on the WHOLE live pipeline no
+    matter how fast the engines are -- while raw bytes into the native
+    assembler run at ~408,000 pps (41x). Every earlier optimization landed
+    near ~6.6k pps because the capture feed itself was the bottleneck."""
+    __slots__ = ("time", "original")
+
+    def __init__(self, ts: float, raw: bytes):
+        self.time = ts
+        self.original = raw
+
+    def __len__(self) -> int:
+        return len(self.original)
+
+
 class NativeFlowAssemblerAdapter:
     """Drop-in replacement for FlowAssembler -- same process()/snapshot()/
     expire()/flush()/active_flows()/.stats surface, backed by the Rust

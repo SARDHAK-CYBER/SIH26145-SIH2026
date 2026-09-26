@@ -184,6 +184,21 @@ class EngineWorkerPool:
             print(f"[live_agent] WARNING: only {len(ready)}/{self.num_workers} engine "
                   f"workers signaled ready within {ready_timeout}s")
 
+    def drain(self, timeout: float = 30.0) -> bool:
+        """Send anything still buffered here and wait for the workers to
+        consume it. Without this, records the shutdown flush routed to the
+        pool sit in per-shard send buffers (only sent when a batch fills or
+        flush() is called) and stop() would discard them -- the last snapshot
+        of every still-active flow. Returns True if fully drained."""
+        deadline = time.time() + timeout
+        self.flush()
+        while time.time() < deadline:
+            if self.pending() == 0:
+                time.sleep(0.3)   # workers may still be scoring the batch they just took
+                return True
+            time.sleep(0.05)
+        return False
+
     def stop(self, timeout: float = 5.0) -> None:
         self.flush()
         self._stop_evt.set()

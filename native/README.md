@@ -158,6 +158,8 @@ configuration measured for this pipeline.
 
 ## AF_XDP capture backend (`src/afxdp.rs`, Linux only)
 
+> **Build note (2026-09-26):** AF_XDP is an opt-in cargo feature: `maturin develop --release --features afxdp` (Linux only, needs libxdp/libbpf). Default builds — including Windows — no longer pull `xsk-rs`/`libxdp-sys`. The backend feeds raw frames (`RawFrame`) straight into `LiveFlowAssembler`.
+
 `src/capture/afxdp_backend.py`'s `AfXdpBackend` -- a kernel-bypass-capable
 capture path (`select_backend()`'s first choice on Linux, ahead of
 `AFPacketBackend`), built on the `xsk-rs` crate. A UMEM (shared
@@ -222,3 +224,9 @@ does not yet declare this module as a binary to bundle, and a frozen
 build has not been produced or tested. A build today would likely fall
 back to the slower Python parser silently rather than fail loudly —
 fix before shipping a frozen executable.
+
+## Additions 2026-09-26
+- `LiveFlowAssembler.expire()` now uses a single order-preserving `retain` (942.8 → 38.8 ms on the benchmark set; output order unchanged and tested).
+- IPv6 (with extension-header walk) in both native parsers; flow uid matches the Python parser.
+- JA4: `ja4_and_sni()` returns the SNI too; a ClientHello split across segments (including a cut inside an extension header or an extensions block longer than the packet) fails closed — never a partial fingerprint. `ssl` records now carry `sni`.
+- Raw-frame ingestion: backends hand raw bytes to the native assembler with no scapy dissection (raw feed 408k pps; end-to-end pipeline ~45k pps).

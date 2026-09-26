@@ -39,6 +39,8 @@ def main() -> None:
     ap.add_argument("pcap")
     ap.add_argument("--label", default=None)
     ap.add_argument("--max-packets", type=int, default=None)
+    ap.add_argument("--scapy", action="store_true",
+                    help="feed scapy-dissected packets (the old ingestion path, ~10k pps ceiling) instead of raw frames")
     args = ap.parse_args()
 
     from scapy.config import conf
@@ -64,24 +66,41 @@ def main() -> None:
 
     fed, fed_bytes = 0, 0
     t0 = time.time()
-    with PcapReader(args.pcap) as rd:
-        for pkt in rd:
-            agent._on_packet(pkt)
+    from src.capture.rawpcap import iter_raw_pcap
+    raw_iter = iter_raw_pcap(args.pcap) if (agent.raw_capable and not args.scapy) else None
+    if raw_iter is not None:
+        # same raw-frame path a real NIC feeds (see RawFrame): no scapy dissection
+        for ts, raw in raw_iter:
+            agent.on_raw(ts, raw)
             fed += 1
-            fed_bytes += len(pkt)
+            fed_bytes += len(raw)
             if args.max_packets and fed >= args.max_packets:
                 break
+    else:
+        with PcapReader(args.pcap) as rd:
+            for pkt in rd:
+                agent._on_packet(pkt)
+                fed += 1
+                fed_bytes += len(pkt)
+                if args.max_packets and fed >= args.max_packets:
+                    break
     feed_s = time.time() - t0
 
-    # wait for the processing queue to fully drain (the real end of work) --
-    # with an engine pool active, work also queues inside worker processes
-    # (see LiveAgent.pending_work()), not just the packet queue.
+    # wait for the packet queue to drain, then trigger the loop's final
+    # snapshot/expire/flush pass (conn scoring happens THERE, not per packet)
+    # and wait for it -- and, in pool mode, for the workers to finish scoring
+    # everything the flush routed to them. Both modes are timed to "all
+    # scoring done", otherwise a pool run reports a fantasy number (the
+    # workers hadn't scored the conn records yet when the harness stopped).
     stall_deadline = time.time() + 120
-    while agent.pending_work() > 0 and time.time() < stall_deadline:
-        time.sleep(0.05)
+    while agent._q.qsize() > 0 and time.time() < stall_deadline:
+        time.sleep(0.02)
+    agent._running.clear()
+    t.join(timeout=300)
+    if agent._pool is not None:
+        agent._pool.drain(timeout=600)
     time.sleep(0.3)  # let the last in-flight batch finish scoring
     total_s = time.time() - t0
-    agent._running.clear()
     if agent._pool is not None:
         # final alert drain: workers may have pushed alerts after the last
         # in-process _consume() drain pass but before we stop them.

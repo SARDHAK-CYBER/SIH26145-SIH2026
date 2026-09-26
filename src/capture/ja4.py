@@ -46,7 +46,17 @@ def ja4_from_client_hello(payload: bytes, *, quic: bool = False) -> Optional[str
         return None
 
 
-def _parse(payload: bytes, quic: bool) -> Optional[str]:
+def sni_from_client_hello(payload: bytes) -> Optional[str]:
+    """The server_name (SNI) from a raw TLS ClientHello, or None. Same
+    fail-closed truncation rule as ja4_from_client_hello: a ClientHello that
+    runs past this packet's bytes yields None, never a partial name."""
+    try:
+        return _parse(payload, False, want_sni=True)
+    except (struct.error, IndexError, ValueError):
+        return None
+
+
+def _parse(payload: bytes, quic: bool, want_sni: bool = False):
     if len(payload) < 6:
         return None
 
@@ -80,21 +90,37 @@ def _parse(payload: bytes, quic: bool) -> Optional[str]:
 
     exts: list[int] = []
     sni_present = False
+    sni_name = ""
     alpn_first = "00"
     sig_algs_hex: list[str] = []
     best_version = legacy_version
 
     if p + 2 <= len(body):
         ext_total = _u16(body, p); p += 2
+        if p + ext_total > len(body):  # split ClientHello: fail closed
+            return None
         end = p + ext_total
         while p + 4 <= end:
             etype = _u16(body, p); esize = _u16(body, p + 2); p += 4
+            # A ClientHello split across TCP segments (this only ever sees
+            # ONE packet's payload) must fail closed. Python slicing never
+            # raises on overrun, so a cut landing inside the LAST extension's
+            # payload used to slip through and hash a partial extension --
+            # wrong if that extension is ALPN/supported_versions/sig-algs.
+            # Matches the native parser (native/.../ja4.rs), which fails
+            # closed on the same condition.
+            if p + esize > len(body):
+                return None
             edata = body[p:p + esize]; p += esize
             if _is_grease(etype):
                 continue
             exts.append(etype)
             if etype == _EXT_SNI:
                 sni_present = True
+                if len(edata) >= 5 and edata[2] == 0:
+                    n = _u16(edata, 3)
+                    if 5 + n <= len(edata):
+                        sni_name = edata[5:5 + n].decode("ascii", "ignore").lower()
             elif etype == _EXT_ALPN and len(edata) >= 4:
                 # ALPNProtocolNameList: 2b list len, then 1b str len + str
                 first_len = edata[2]
@@ -132,4 +158,6 @@ def _parse(payload: bytes, quic: bool) -> Optional[str]:
     ja4_c_src = f"{ext_list}_{sig_list}"
     ja4_c = hashlib.sha256(ja4_c_src.encode()).hexdigest()[:12] if ext_for_hash else "000000000000"
 
+    if want_sni:
+        return sni_name or None
     return f"{ja4_a}_{ja4_b}_{ja4_c}"
