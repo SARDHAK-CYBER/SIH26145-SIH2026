@@ -306,6 +306,8 @@ def build_app():
     app = FastAPI(title="StealthTap Live Capture", version="1.0.0")
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     app.include_router(router)
+    from src.api.discovery import router as discovery_router
+    app.include_router(discovery_router)
 
     @app.get("/health")
     def health():

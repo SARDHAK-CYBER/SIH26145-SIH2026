@@ -20,6 +20,13 @@ const MIN_INTERVAL_SECONDS: f64 = 2.0;
 const MAX_INTERVAL_SECONDS: f64 = 3600.0;
 const PRUNE_EVERY: u32 = 5000;
 
+/// Periodic multicast/broadcast (LLMNR, mDNS, SSDP, NTP-multicast, DHCP, IPv6 neighbour discovery) is protocol
+/// housekeeping, never a C2 channel: real Wi-Fi capture flagged a neighbour's LLMNR queries to 224.0.0.252.
+pub fn is_multicast_or_broadcast(ip: &str) -> bool {
+    if ip == "255.255.255.255" || ip.starts_with("ff") || ip.starts_with("FF") { return ip.contains(':') || ip == "255.255.255.255"; }
+    match ip.split('.').next().and_then(|o| o.parse::<u8>().ok()) { Some(o) => (224..=239).contains(&o), None => false }
+}
+
 fn mean(v: &[f64]) -> f64 {
     if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 }
 }
@@ -64,6 +71,7 @@ impl NativeEng02 {
     }
 
     pub fn core(&mut self, src_ip: &str, dst_ip: &str, ts: f64) -> Option<Eng02Hit> {
+        if is_multicast_or_broadcast(dst_ip) { return None; }
         self.since_prune += 1;
         if self.since_prune >= PRUNE_EVERY {
             self.since_prune = 0;

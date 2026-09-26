@@ -316,3 +316,25 @@ def test_exfil_still_catches_bulk_and_drip_feed():
         hit = asyncio.run(drip.score(_flow(20_000, 200, uid=f"D{i}", ts=1000.0 + i))) or hit
     assert hit is not None and hit.evidence["detection_type"] == "accumulated_low_and_slow"
     assert hit.evidence["contributing_flow_count"] >= 5
+
+
+def test_beaconing_ignores_periodic_multicast():
+    """Real Wi-Fi capture: a neighbour's 30 s-periodic LLMNR queries to 224.0.0.252 were flagged C2_BEACONING."""
+    from src.engines.eng02_c2_beaconing import C2BeaconingDetector
+    from src.flow_mapping import map_record
+    from src.memstore import MemoryStore
+    for dst in ("224.0.0.252", "239.255.255.250", "255.255.255.255", "ff02::fb"):
+        det = C2BeaconingDetector(redis_client=MemoryStore())
+        hit = None
+        for i in range(30):
+            f = map_record({"uid": f"L{i}", "ts": 1000.0 + 30 * i, "id.orig_h": "169.254.12.225", "id.resp_h": dst,
+                            "id.orig_p": 5000 + i, "id.resp_p": 5355, "proto": "udp"}, "conn")
+            hit = asyncio.run(det.score(f)) or hit
+        assert hit is None, dst
+    det = C2BeaconingDetector(redis_client=MemoryStore())
+    hit = None
+    for i in range(30):      # same cadence to an ordinary unicast host still alerts
+        f = map_record({"uid": f"U{i}", "ts": 1000.0 + 30 * i, "id.orig_h": "10.0.0.5", "id.resp_h": "203.0.113.9",
+                        "id.orig_p": 5000 + i, "id.resp_p": 443, "proto": "tcp"}, "conn")
+        hit = asyncio.run(det.score(f)) or hit
+    assert hit is not None

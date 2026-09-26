@@ -60,6 +60,17 @@ MIN_INTERVAL_SECONDS = 2.0     # faster than this is normal app chatter, not a C
 MAX_INTERVAL_SECONDS = 3600.0  # slower than an hour is out of scope for this check
 
 
+def _is_multicast_or_broadcast(ip: str) -> bool:
+    """Periodic multicast/broadcast (LLMNR, mDNS, SSDP, DHCP, IPv6 ND) is protocol housekeeping, not C2 --
+    found on REAL Wi-Fi capture (a neighbour's LLMNR queries to 224.0.0.252:5355 were flagged)."""
+    if ip == "255.255.255.255" or ip.lower().startswith("ff") and ":" in ip:
+        return True
+    try:
+        return 224 <= int(ip.split(".")[0]) <= 239
+    except ValueError:
+        return False
+
+
 class C2BeaconingDetector(Detector):
     name = "ENG-02"
 
@@ -87,6 +98,8 @@ class C2BeaconingDetector(Detector):
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip, dst_ip = flow.get("src_ip", ""), flow.get("dst_ip", "")
         ts = float(flow.get("ts", 0.0))
+        if _is_multicast_or_broadcast(dst_ip):
+            return None
 
         if self._native is not None:
             hit = self._native.check(src_ip, dst_ip, ts)

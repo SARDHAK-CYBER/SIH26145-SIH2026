@@ -76,6 +76,8 @@ def build_desktop_app(root: Path):
         return ms.manifest
 
     app.include_router(live_router)
+    from src.api.discovery import router as discovery_router
+    app.include_router(discovery_router)
     app.include_router(pcap_router)
     app.include_router(dashboard_router)
 
