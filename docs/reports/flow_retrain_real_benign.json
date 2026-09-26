@@ -1,0 +1,212 @@
+{
+ "benign_train_flows": 4661,
+ "benign_heldout_flows": 4276,
+ "cross_network_flows": 237,
+ "results": [
+  {
+   "config": "baseline (attack data + its few benign rows)",
+   "points": [
+    {
+     "threshold": 0.6,
+     "held_out_benign_fpr": 0.33559,
+     "held_out_ddos_capture_recall": 1.0,
+     "cross_network_fpr": 0.37975
+    },
+    {
+     "threshold": 0.9,
+     "held_out_benign_fpr": 0.31525,
+     "held_out_ddos_capture_recall": 1.0,
+     "cross_network_fpr": 0.23629
+    },
+    {
+     "threshold": 0.95,
+     "held_out_benign_fpr": 0.31361,
+     "held_out_ddos_capture_recall": 0.99983,
+     "cross_network_fpr": 0.22363
+    },
+    {
+     "threshold": 0.98,
+     "held_out_benign_fpr": 0.31361,
+     "held_out_ddos_capture_recall": 0.9995,
+     "cross_network_fpr": 0.22363
+    },
+    {
+     "threshold": 0.99,
+     "held_out_benign_fpr": 0.31361,
+     "held_out_ddos_capture_recall": 0.9995,
+     "cross_network_fpr": 0.21941
+    },
+    {
+     "threshold": 0.995,
+     "held_out_benign_fpr": 0.30589,
+     "held_out_ddos_capture_recall": 0.99917,
+     "cross_network_fpr": 0.21941
+    }
+   ]
+  },
+  {
+   "config": "+ real benign x1",
+   "points": [
+    {
+     "threshold": 0.6,
+     "held_out_benign_fpr": 0.00514,
+     "held_out_ddos_capture_recall": 0.99983,
+     "cross_network_fpr": 0.02532
+    },
+    {
+     "threshold": 0.9,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99967,
+     "cross_network_fpr": 0.0211
+    },
+    {
+     "threshold": 0.95,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.9995,
+     "cross_network_fpr": 0.01266
+    },
+    {
+     "threshold": 0.98,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.9995,
+     "cross_network_fpr": 0.01266
+    },
+    {
+     "threshold": 0.99,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99933,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.995,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99833,
+     "cross_network_fpr": 0.00844
+    }
+   ]
+  },
+  {
+   "config": "+ real benign x5",
+   "points": [
+    {
+     "threshold": 0.6,
+     "held_out_benign_fpr": 0.00047,
+     "held_out_ddos_capture_recall": 0.99967,
+     "cross_network_fpr": 0.0211
+    },
+    {
+     "threshold": 0.9,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.9995,
+     "cross_network_fpr": 0.01688
+    },
+    {
+     "threshold": 0.95,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.9995,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.98,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99917,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.99,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.999,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.995,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.9945,
+     "cross_network_fpr": 0.00844
+    }
+   ]
+  },
+  {
+   "config": "+ real benign x20",
+   "points": [
+    {
+     "threshold": 0.6,
+     "held_out_benign_fpr": 0.00023,
+     "held_out_ddos_capture_recall": 0.99967,
+     "cross_network_fpr": 0.01688
+    },
+    {
+     "threshold": 0.9,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99967,
+     "cross_network_fpr": 0.01266
+    },
+    {
+     "threshold": 0.95,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99917,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.98,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99917,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.99,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99917,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.995,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99383,
+     "cross_network_fpr": 0.00844
+    }
+   ]
+  },
+  {
+   "config": "+ real benign x50",
+   "points": [
+    {
+     "threshold": 0.6,
+     "held_out_benign_fpr": 0.0007,
+     "held_out_ddos_capture_recall": 0.99967,
+     "cross_network_fpr": 0.01688
+    },
+    {
+     "threshold": 0.9,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99967,
+     "cross_network_fpr": 0.01266
+    },
+    {
+     "threshold": 0.95,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.9995,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.98,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99917,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.99,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99917,
+     "cross_network_fpr": 0.00844
+    },
+    {
+     "threshold": 0.995,
+     "held_out_benign_fpr": 0.0,
+     "held_out_ddos_capture_recall": 0.99917,
+     "cross_network_fpr": 0.00844
+    }
+   ]
+  }
+ ]
+}

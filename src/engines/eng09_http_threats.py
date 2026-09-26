@@ -41,6 +41,30 @@ MIN_URI_LENGTH_FOR_ENTROPY = 12   # skip short paths -- entropy on "/api" is mea
 LARGE_POST_BYTES_THRESHOLD = 5_000_000  # 5MB -- conservative, tuned to avoid flagging normal file uploads
 
 
+_PKI_SUFFIXES = (".crl", ".crt", ".cer", ".cab", ".stl", ".ctl", ".der", ".p7c", ".p7b")
+
+
+def _is_pki_fetch(uri: str) -> bool:
+    """Certificate-status and trust-list retrieval by the OS crypto stack: OCSP GET requests carry the base64 DER request in
+    the path (high entropy, empty User-Agent) and CRL/AIA/CTL downloads are plain files. Both were flagged as C2 on a real
+    20-minute capture (Windows CryptoAPI: /MFEw... OCSP and /msdownload/.../pinrulesstl.cab)."""
+    path = uri.split("?", 1)[0]
+    if path.lower().endswith(_PKI_SUFFIXES):
+        return True
+    seg = path.lstrip("/")
+    if len(seg) >= 40 and "/" not in seg:
+        try:
+            import base64
+            from urllib.parse import unquote
+            der = base64.b64decode(unquote(seg) + "=" * (-len(unquote(seg)) % 4), altchars=b"-_" if "-" in seg or "_" in seg else None)
+            # OCSPRequest ::= SEQUENCE { TBSRequest ::= SEQUENCE { ... } } -> 30 <len> 30 <len>
+            inner = 2 + (der[1] - 0x80 if der[1] in (0x81, 0x82) else 0) if der[1] >= 0x80 else 2
+            return len(der) > 10 and der[0] == 0x30 and der[1] in range(0x00, 0x83) and der[inner] == 0x30
+        except Exception:
+            return False
+    return False
+
+
 class HTTPThreatDetector(Detector):
     name = "ENG-09"
 
@@ -63,7 +87,7 @@ class HTTPThreatDetector(Detector):
 
         suspicious_ua = any(marker in user_agent for marker in SUSPICIOUS_UA_MARKERS) or user_agent == ""
         uri_entropy = shannon_entropy(uri) if len(uri) >= MIN_URI_LENGTH_FOR_ENTROPY else 0.0
-        if suspicious_ua and uri_entropy > URI_ENTROPY_THRESHOLD:
+        if suspicious_ua and uri_entropy > URI_ENTROPY_THRESHOLD and not _is_pki_fetch(uri):
             reasons.append("suspicious_ua_and_high_entropy_uri")
             evidence["user_agent"] = user_agent or "(empty)"
             evidence["uri_entropy"] = round(uri_entropy, 2)

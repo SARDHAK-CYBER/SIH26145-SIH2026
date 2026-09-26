@@ -1,3 +1,10 @@
+# Deployment hardening, ENG-14, real benign test, flow retrain — 2026-09-27
+
+- API key auth (API + sensor), loopback-only datastore ports, dashboard sign-in, optional per-tenant keys (alerts, captures, jobs), `.github/workflows/ci.yml`.
+- ENG-14 (distcc, SMTP enumeration, HTTP default credentials/guessing/deployment) with Rust+Python decoders; upload path runs the native payload decoders; OPC UA security-policy findings; unique ICS alert ids.
+- Real 20-minute Wi-Fi capture replayed: 23 false positives found and fixed (ENG-01/02/06/09) -> 1; flow model retrained with real benign flows (FPR 23.7% -> ~0%, DDoS recall 99.9%).
+- Alert spool, scheduled `pg_dump` backups + verified restore, systemd/Windows auto-restart packaging. Details: `docs/OPERATIONS.md`, `docs/PRD.md` §14.
+
 # Second pass — real-data live path, native capture, separate dashboards — 2026-09-26
 
 - Separate Live / PCAP dashboards, packet inspector for both, no synthetic data in the UI.

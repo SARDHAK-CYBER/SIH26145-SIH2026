@@ -1,0 +1,34 @@
+{
+ "summary": {
+  "attack_files": 0,
+  "attack_detected": 0,
+  "recall": null,
+  "missed": [],
+  "benign_files": 1,
+  "benign_clean": 0,
+  "benign_alerts": {
+   "benign_wifi_20min.pcap": {
+    "C2_BEACONING": 1
+   }
+  },
+  "benign_alerts_per_1000_flows": 0.12,
+  "note": "file-level ground truth, duplicates removed, single pass per file"
+ },
+ "files": [
+  {
+   "file": "benign_wifi_20min.pcap",
+   "mb": 1791.7,
+   "benign": true,
+   "duplicate_of": null,
+   "packets": 7035434,
+   "flows": 8590,
+   "seconds": 2.76,
+   "pps": 2549779,
+   "alerts": 1,
+   "by_class": {
+    "C2_BEACONING": 1
+   },
+   "p95_latency_ms": null
+  }
+ ]
+}

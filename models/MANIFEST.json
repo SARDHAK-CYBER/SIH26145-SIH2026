@@ -36,26 +36,28 @@
     "family": "flow",
     "feature_schema_version": "1.0.0",
     "model_version": "v1",
-    "trained_at": "2026-09-10T18:15:42+0530",
+    "trained_at": "2026-09-27T01:26:20+0530",
     "training_data": {
       "source_file": "flow_training_data.csv",
-      "row_count": 23213
+      "row_count": 32150,
+      "note": "DDoS captures + real benign flows from a live Wi-Fi capture (weight 5); see docs/PRD.md section 14"
     },
     "test_split": {
       "fraction": 0.2,
       "row_count": 4643
     },
     "xgboost_metrics": {
-      "precision": 0.9996,
-      "recall": 0.9985,
-      "f1": 0.999,
-      "roc_auc": 0.9982,
+      "precision": 0.9997,
+      "recall": 0.9997,
+      "f1": 0.9997,
+      "roc_auc": 1.0,
       "confusion_matrix": {
-        "true_negative": 124,
+        "true_negative": 4274,
         "false_positive": 2,
-        "false_negative": 7,
-        "true_positive": 4510
-      }
+        "false_negative": 2,
+        "true_positive": 5998
+      },
+      "evaluated_on": "held-out DDoS captures (unseen files) + held-out real benign flows (later minutes of the live capture, normal2.pcap)"
     },
     "isolation_forest_metrics": {
       "precision": 0.9906,

@@ -16,7 +16,7 @@ How this file works:
 ## Automated status
 
 <!-- AUTO-STATUS:BEGIN -->
-_Last automated check: **2026-09-26 23:24:34** · PASS 27 · WARN 0 · FAIL 0 · tests 171 · live pipeline 366,555 pps · hybrid recall 83.0% · flow FPR 0.167%_
+_Last automated check: **2026-09-27 01:30:32** · PASS 27 · WARN 0 · FAIL 0 · tests 242 · live pipeline 360,620 pps · hybrid recall 83.0% · flow FPR 0.167%_
 
 No FAIL or WARN in the latest run.
 
@@ -73,7 +73,7 @@ on both OSes. Linux capture sensors can add `--features afxdp` (AF_XDP).
 | 21 | Live NIC capture on the native engine, real Wi-Fi, incl. IPv6 | **Done** | Elevated sensor, real Wi-Fi + real internet downloads: 148 Mbit/s, 0 kernel drops, agent saw 296,070 packets vs NIC counter 292,804 over 30 s, 179 local devices learned passively (ARP/broadcast), real link-local IPv6 (ICMPv6 ND) parsed. This network has no global IPv6 (`curl -6` fails); global-v6 flows remain covered by tests only. Real-traffic FP found and fixed: periodic LLMNR multicast flagged as C2 (ENG-02 now ignores multicast/broadcast) |
 | 22 | Multi-threaded capture/assembly sharding | **Done** | Flow-hash sharded assembler threads (default min(4, cores/4); `STEALTHTAP_SHARDS`). Flood capture (mirai) 228k → 395k → 486k pps at 1/2/4 shards; real mix (normal2) **1.58M pps ≈ 10 Gbit/s**. Output identical to 1 shard on all 26 real captures (`tests/test_native_capture.py`) |
 | 23 | Live-baseline sampling under flood | Open | Baseline is fed ≤ 2,000 flows/tick when flow rates are extreme |
-| 24 | Hard-negative retraining (dns/flow) | **Tested — cannot be fixed by retraining** | `scripts/retrain_flow_hard_negatives.py` (grouped holdout; real benign flows from `normal.pcap` minus the embedded nmap scan as negatives, `normal2.pcap` held out): the 4-feature flow model has **19% FPR on real benign flows** standalone and hard negatives do not help (0.19 → 0.20/0.24) while attack recall stays ~1.0 — the features (duration, bytes, proto) simply cannot separate them. This is exactly why the model is corroboration-only and never alerts alone; a real fix needs richer flow features (packet counts, flags, conn state) and a dataset carrying them (CICIDS not in repo). DNS model: 0/33 real SNIs, 0/25 CDN names fire. Prior note: | 2.7M real live packets on Wi-Fi produced 0 ML alerts (dns model 0/25 CDN-style names, 0/33 real SNIs; flow model is corroboration-only). Retraining also needs the original 675k-row/CICIDS datasets, which are not in this repo — revisit only if a real ML false positive appears |
+| 24 | Hard-negative retraining (dns/flow) | **Done for flow** (dns not needed) | Earlier conclusion "cannot be fixed" came from only 484 benign flows. With 8.9k real benign flows (20-min live Wi-Fi capture): shipped model was 23.7% FPR @0.6 (8.8% @0.99); retrained (`scripts/retrain_flow_real_benign.py`) is 0.00% on 4,276 time-held-out benign flows and 0.8% on 237 flows from other networks at DDoS recall 99.9% (`docs/reports/flow_retrain_real_benign.json`). Still corroboration-only by default: same-network hold-out is optimistic and the cross-network sample is small (PRD §14.4). DNS model: 0/33 real SNIs, 0/25 CDN names fire |
 | 25 | Network discovery (active, own subnet) | **Done** | `POST /network/discover`: unprivileged ARP-cache sweep (forces ARP with a UDP datagram, reads the OS neighbour table; accurate, no firewall dependence) or elevated `nmap -sn`. Real runs: Wi-Fi /24 → 39 devices with MACs (D-Link etc.); VMnet1 (no VMs) → 0, correctly. Scope rules tested (`tests/test_discovery.py`) |
 
 ## Follow-ups closed 2026-09-26 (third pass)
@@ -100,3 +100,19 @@ on both OSes. Linux capture sensors can add `--features afxdp` (AF_XDP).
 | Coverage verdict | *partial* — 155 of 183 local devices have visible unicast traffic (84.7%) |
 
 Root cause of the repeated "sensor never starts": every extra sensor tried to write the same `sensor.log`, which the first elevated sensor still held open; the launcher now logs to `sensor-<port>.log`. Note: one earlier validator run crashed with `KeyError: 'capture'` because a second validator was stopping the same capture — run one validator per sensor.
+
+## Added 2026-09-27
+
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| 26 | API/dashboard had no authentication; datastores published on all interfaces | **Done** | API key middleware (API + sensor), loopback-only published ports, dashboard sign-in, compose refuses to start without a key: `tests/test_security.py`, `docs/OPERATIONS.md` §1 |
+| 27 | No CI | **Done** | `.github/workflows/ci.yml` (Linux + Windows pytest with native build, dashboard build, compose validation). First run found a real bug (Windows-generated `package-lock.json` broke `vite` on Linux) — fixed and verified in a node:22 container |
+| 28 | Recall gap: distcc / SMTP enumeration / Tomcat manager captures | **Done (in-sample)** | ENG-14; live replay 15/15 unique attack captures; in-sample caveat in PRD §14.2 |
+| 29 | Real-network false positives (broadcast beacons, OCSP/CTL, idle push connections, mDNS, 1 MB upload) | **Done on one network** | 23 → 1 alert on a real 20-min capture (8,593 flows): `tests/test_false_positives_real_wifi.py`, PRD §14.3. Expect new kinds on other networks |
+| 30 | OPC UA channel security | **Partly** | Policy None / SHA-1 policies flagged; SignAndEncrypt bodies cannot be read without keys (permanent limit) |
+| 31 | Multi-tenant isolation | **Done for stored alerts/captures/jobs** | Per-tenant keys; not compute-isolated, OpenSearch path shared: `docs/OPERATIONS.md` §2 |
+| 32 | Backups / alert loss during outages | **Done** | Scheduled `pg_dump` + restore drill (identical rows), on-disk alert spool (`tests/test_forwarder_spool.py`) |
+| 33 | Sensor auto-restart | **Written, not executed** | systemd unit + Windows scheduled-task installer (syntax-checked; need an elevated install) |
+| 34 | High availability | Design only | `docs/OPERATIONS.md` §5; never run multi-node |
+| 35 | 24-72 h soak on a mirrored production link | Open | 4 h replay soak done (`docs/reports/soak_mixed_4h.json`); needs the real link |
+| 36 | TLS in front of API/dashboard | Open (deployment) | Reverse proxy required before `STEALTHTAP_BIND=0.0.0.0` |

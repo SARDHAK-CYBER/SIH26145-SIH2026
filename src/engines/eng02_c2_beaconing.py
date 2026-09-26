@@ -98,7 +98,7 @@ class C2BeaconingDetector(Detector):
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip, dst_ip = flow.get("src_ip", ""), flow.get("dst_ip", "")
         ts = float(flow.get("ts", 0.0))
-        if _is_multicast_or_broadcast(dst_ip):
+        if _is_multicast_or_broadcast(dst_ip) or _is_multicast_or_broadcast(src_ip):
             return None
 
         if self._native is not None:

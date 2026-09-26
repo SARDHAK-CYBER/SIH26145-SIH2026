@@ -35,6 +35,18 @@ API_URL = "http://localhost:8000/analyze/pcap"
 TIMEOUT_S = 600.0  # mirai.pcap (93.8MB) needs longer than 300s even running alone
 
 
+def _auth() -> dict:
+    """The API needs its key on every route but /health: STEALTHTAP_API_KEY from the environment or the repo's .env."""
+    import os
+    key = os.environ.get("STEALTHTAP_API_KEY", "")
+    envf = Path(__file__).resolve().parent.parent / ".env"
+    if not key and envf.exists():
+        for line in envf.read_text().splitlines():
+            if line.startswith("STEALTHTAP_API_KEY="):
+                key = line.split("=", 1)[1].strip()
+    return {"X-API-Key": key} if key else {}
+
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -46,7 +58,7 @@ def sha256(path: Path) -> str:
 def run_file(path: Path) -> dict:
     t0 = time.time()
     with open(path, "rb") as f:
-        resp = requests.post(API_URL, files={"file": (path.name, f, "application/octet-stream")}, timeout=TIMEOUT_S)
+        resp = requests.post(API_URL, files={"file": (path.name, f, "application/octet-stream")}, timeout=TIMEOUT_S, headers=_auth())
     wall_s = time.time() - t0
     resp.raise_for_status()
     d = resp.json()

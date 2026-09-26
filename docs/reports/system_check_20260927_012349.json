@@ -1,9 +1,9 @@
 {
- "timestamp": "20260927_013032",
+ "timestamp": "20260927_012349",
  "counts": {
-  "PASS": 27,
+  "PASS": 25,
   "WARN": 0,
-  "FAIL": 0,
+  "FAIL": 2,
   "SKIP": 0
  },
  "results": [
@@ -11,155 +11,155 @@
    "section": "infra",
    "name": "api /health",
    "status": "PASS",
-   "detail": "models=['dns', 'flow', 'modbus'] db=True p50=2057.7ms p99=2184.2ms",
-   "ms": 41250.0
+   "detail": "models=['dns', 'flow', 'modbus'] db=True p50=2055.8ms p99=2235.4ms",
+   "ms": 41350.1
   },
   {
    "section": "infra",
    "name": "pipeline status (all services)",
    "status": "PASS",
    "detail": "services_bad=none engines=13",
-   "ms": 2096.2
+   "ms": 2082.4
   },
   {
    "section": "infra",
    "name": "redis + RedisBloom CMS/HLL",
    "status": "PASS",
-   "detail": "RTT p50=0.99ms p99=1.51ms CMS=[3] HLL=2 client=hiredis",
-   "ms": 2546.8
+   "detail": "RTT p50=0.98ms p99=2.79ms CMS=[3] HLL=2 client=hiredis",
+   "ms": 3555.2
   },
   {
    "section": "infra",
    "name": "postgres (+ API read path)",
    "status": "PASS",
    "detail": "pg_isready=/var/run/postgresql:5432 - accepting connections /alerts=200",
-   "ms": 2288.5
+   "ms": 2300.6
   },
   {
    "section": "infra",
    "name": "opensearch",
    "status": "PASS",
    "detail": "cluster=green nodes=1",
-   "ms": 2189.9
+   "ms": 2450.8
   },
   {
    "section": "infra",
    "name": "redpanda (kafka)",
    "status": "PASS",
    "detail": "CLUSTER HEALTH OVERVIEW ======================= Healthy:                          true Unh",
-   "ms": 2322.6
+   "ms": 2335.2
   },
   {
    "section": "infra",
    "name": "dashboard (react)",
    "status": "PASS",
    "detail": "dashboard=200",
-   "ms": 2057.5
+   "ms": 2092.1
   },
   {
    "section": "infra",
    "name": "containers up",
    "status": "PASS",
    "detail": "12 containers, down=none",
-   "ms": 192.5
+   "ms": 183.5
   },
   {
    "section": "infra",
    "name": "container logs (errors)",
    "status": "PASS",
    "detail": "error-lines in last 300 log lines: none",
-   "ms": 777.3
+   "ms": 822.0
   },
   {
    "section": "native",
    "name": "stealthtap_core import",
    "status": "PASS",
    "detail": "missing=none",
-   "ms": 10.4
+   "ms": 16.3
   },
   {
    "section": "native",
    "name": "parser native==python",
    "status": "PASS",
    "detail": "ALL EQUIVALENT",
-   "ms": 829.3
+   "ms": 905.8
   },
   {
    "section": "native",
    "name": "ENG-01 native==python",
    "status": "PASS",
    "detail": "ALL EQUIVALENT (4 compared, 0 skipped)",
-   "ms": 1004.5
+   "ms": 1102.0
   },
   {
    "section": "native",
    "name": "ENG-02 native==python",
    "status": "PASS",
    "detail": "ALL EQUIVALENT (4 compared, 0 skipped)",
-   "ms": 1018.2
+   "ms": 1031.2
   },
   {
    "section": "native",
    "name": "ENG-05 native==python",
    "status": "PASS",
    "detail": "ALL EQUIVALENT (4 compared, 0 skipped)",
-   "ms": 1237.0
+   "ms": 1242.1
   },
   {
    "section": "native",
    "name": "ENG-06 native==python",
    "status": "PASS",
    "detail": "ALL EQUIVALENT (4 compared, 0 skipped)",
-   "ms": 949.3
+   "ms": 1003.4
   },
   {
    "section": "native",
    "name": "ENG-13 native==python",
    "status": "PASS",
    "detail": "ALL EQUIVALENT (4 compared, 0 skipped)",
-   "ms": 880.7
+   "ms": 940.3
   },
   {
    "section": "engines",
    "name": "pytest (engines, models, mapping, capture)",
    "status": "PASS",
-   "detail": "242 passed, 1 warning in 23.19s",
-   "ms": 23990.8
+   "detail": "242 passed, 1 warning in 30.07s",
+   "ms": 31165.9
   },
   {
    "section": "engines",
    "name": "ground-truth attack pcap (end-to-end)",
-   "status": "PASS",
-   "detail": "parser=zeek alerts=60 missed_expected=none unexpected_classes=none {'VOLUMETRIC_DDOS': 2, 'RECONNAISSANCE': 1, 'C2_BEACONING': 32, 'DATA_EXFILTRATION': 1, 'SLOWLORIS': 1, 'DGA_DOMAIN': 13, 'DNS_TUNNELING': 8, 'NETWORK_INTRUSION_ATTEMPT': 2}",
-   "ms": 10185.4
+   "status": "FAIL",
+   "detail": "parser=zeek alerts=59 missed_expected=['DATA_EXFILTRATION (want>=1, got 0)'] unexpected_classes=none {'VOLUMETRIC_DDOS': 2, 'RECONNAISSANCE': 1, 'C2_BEACONING': 32, 'SLOWLORIS': 1, 'DGA_DOMAIN': 13, 'DNS_TUNNELING': 8, 'NETWORK_INTRUSION_ATTEMPT': 2}",
+   "ms": 11148.6
   },
   {
    "section": "models",
    "name": "manifest / feature-schema contract",
    "status": "PASS",
    "detail": "families=['dns', 'flow', 'modbus'] schema_mismatch=none",
-   "ms": 6145.7
+   "ms": 6109.4
   },
   {
    "section": "models",
    "name": "dns model load+infer+metrics",
    "status": "PASS",
-   "detail": "xgb f1=0.9066 prec=0.9353 rec=0.8795 | infer 57.0us/row (20k batch) | iforest f1=0.0666 (advisory)",
-   "ms": 1675.9
+   "detail": "xgb f1=0.9066 prec=0.9353 rec=0.8795 | infer 53.4us/row (20k batch) | iforest f1=0.0666 (advisory)",
+   "ms": 1521.9
   },
   {
    "section": "models",
    "name": "flow model load+infer+metrics",
-   "status": "PASS",
-   "detail": "xgb f1=0.9997 prec=0.9997 rec=0.9997 | infer 50.9us/row (20k batch) | iforest f1=0.2084 (advisory)",
-   "ms": 1072.6
+   "status": "FAIL",
+   "detail": "KeyError: 'f1'",
+   "ms": 986.4
   },
   {
    "section": "models",
    "name": "modbus model load+infer+metrics",
    "status": "PASS",
-   "detail": "xgb f1=1.0 prec=1.0 rec=1.0 | infer 52.5us/row (20k batch) | iforest f1=0.0 (advisory)",
-   "ms": 1074.2
+   "detail": "xgb f1=1.0 prec=1.0 rec=1.0 | infer 58.7us/row (20k batch) | iforest f1=0.0 (advisory)",
+   "ms": 1198.7
   },
   {
    "section": "models",
@@ -172,29 +172,29 @@
    "section": "models",
    "name": "API /score/dns round-trip",
    "status": "PASS",
-   "detail": "status=200 score=99.92 p50=2066.6ms p99=2105.5ms",
-   "ms": 82721.4
+   "detail": "status=200 score=99.92 p50=2056.6ms p99=2089.8ms",
+   "ms": 82356.1
   },
   {
    "section": "performance",
    "name": "live pipeline throughput (1 worker)",
    "status": "PASS",
-   "detail": "live pipeline 360,620 pps (0.395 Gbit/s), records dropped=0",
-   "ms": 13876.6
+   "detail": "live pipeline 361,742 pps (0.396 Gbit/s), records dropped=0",
+   "ms": 13864.4
   },
   {
    "section": "performance",
    "name": "/analyze/pcap latency (small file)",
    "status": "PASS",
-   "detail": "wall=11.1s parse=9.004s detect=0.026s parser=zeek suricata_ran=True yara=True",
-   "ms": 11113.3
+   "detail": "wall=10.1s parse=8.003s detect=0.026s parser=zeek suricata_ran=True yara=True",
+   "ms": 10096.2
   },
   {
    "section": "accuracy",
    "name": "real-traffic accuracy (latest report)",
    "status": "PASS",
-   "detail": "hybrid recall=83% specificity=50% precision=95% F1=0.89 | flow-FPR=0.167% (1/598) | report age 8.8h",
-   "ms": 16.4
+   "detail": "hybrid recall=83% specificity=50% precision=95% F1=0.89 | flow-FPR=0.167% (1/598) | report age 8.7h",
+   "ms": 7.6
   }
  ]
 }

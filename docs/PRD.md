@@ -28,7 +28,7 @@ Single record→flow mapper: `src/flow_mapping.py`. Single flow-orientation poli
 
 ## 4. Detection layer
 
-### 4.1 Rule/statistical engines (ENG-01–13)
+### 4.1 Rule/statistical engines (ENG-01–14)
 
 See `README.md` for the full table. All are deterministic and require no training data. Four are stateful across flows (ENG-01, 02, 06, 13) and use Redis in the Docker deployment; the standalone build uses `src/memstore.py`, an in-process implementation of the exact Redis commands they call (RedisBloom CMS, HyperLogLog, lists, hashes, `SET NX EX`), with real TTL expiry — **without this, those four engines silently detect nothing on a Redis-less desktop install**, which was true of the codebase before this document was written and is now fixed.
 
@@ -243,3 +243,33 @@ Bottlenecks found and fixed: Windows EcoQoS clamps a background process ~8× aft
 * OPC UA, PROFINET and BACnet still have no detection logic (no real captures to validate against). EtherNet/IP/CIP is now decoded live and validated on real Digital Bond captures.
 * Capture/assembly is sharded across flow-hash threads (default min(4, cores/4)): flood capture 228k→486k pps, real mix 1.58M pps ≈ 10 Gbit/s, identical output to a single shard.
 * Active discovery (`/network/discover`) is implemented and scope-checked but a real sweep was not run (needs the elevated sensor restarted with this code).
+
+## 14. 2026-09-27 — deployment hardening, ENG-14, real benign network test, flow model retrain
+
+### 14.1 What changed
+* **Access control / tenancy / resilience** — see `docs/OPERATIONS.md` (API key, loopback-only datastores, tenant-scoped alerts and captures, alert spool, scheduled backups with a verified restore drill, sensor auto-restart packaging, CI).
+* **ENG-14** (`src/engines/eng14_appsvc.py`, decoders `native/.../appsvc.rs` + `src/capture/appsvc.py`): distcc non-compiler jobs, SMTP account enumeration, HTTP Basic default credentials / guessing / code-deployment endpoints. The upload path now runs the same native payload decoders as the live path.
+* **OPC UA**: the security policy is read from the clear-text OpenSecureChannel; policy `None` and deprecated SHA-1 policies raise `INSECURE_CONFIGURATION` (LOW/MEDIUM). Ciphertext bodies remain uninspectable.
+* **ICS alert ids** are now unique (they reused the flow uid and the database silently dropped the second alert on a flow).
+
+### 14.2 Detection on the labelled corpus
+Live pipeline, single pass: **15/15** unique attack captures detected (previously 11/14); scapy-parser path: hybrid 25/25 (95% CI 87–100%), rules only 24/25. **In-sample caveat:** the six previously missed captures (`distcc_exec_backdoor`, `smtp`, `tomcat`, and their `*2` twins — Metasploit sessions) were inspected before the ENG-14 rules were written, so their detection shows the rules work on real traffic, not that recall will hold on unseen exploits. `unreallrcd*.pcap` turned out to contain a real distcc exploit session and is detected by ENG-14 as well. Rules were then checked for false alarms on every other capture on disk (68 files incl. all public ICS/IPv6/Kerberos samples): no other ENG-14 alert.
+
+### 14.3 Real benign network test
+A 20-minute live capture on a real Wi-Fi network (7,035,434 packets, 1.79 GB, 0 ring gaps, 8,593 flows) replayed through the full live pipeline raised 23 alerts, all false positives (list in README). Fixes: ENG-02 ignores flows with a multicast/broadcast endpoint in either direction; ENG-01 Slowloris only on web-service ports and the spoofed-source check never for multicast/broadcast destinations; ENG-09 ignores OCSP requests and CRL/CTL/AIA file fetches; ENG-06 single-flow floor 1 MiB → 4 MiB (`EXFIL_MIN_SINGLE_FLOW_BYTES`). Result: **1 alert / 8,593 flows (0.12 per 1,000)**, and that one is the test-traffic helper's own periodic request. Real-capture recall unchanged (15/15). Cost of the Slowloris change: the three "SLOWLORIS" alerts on `mirai.pcap` (idle telnet connections, ports 23/2323) no longer fire — they were idle sessions, not Slowloris; Mirai is still detected by other engines.
+
+### 14.4 Flow model: the "19% false-positive rate" was real, and is now fixed
+The earlier statement that the flow model "cannot be fixed by retraining" rested on 484 benign training flows. With the 20-minute capture (8,937 real benign flows in total) the shipped model measured **23.7% FPR at threshold 0.6, 8.8% at 0.99, 0% only at ≥0.995 (DDoS recall then 63%)** (`docs/reports/flow_model_operating_points.json`, before retraining). Retraining with real benign flows (weight 5; `scripts/retrain_flow_real_benign.py`), split by time so the held-out minutes are unseen:
+
+| Model | Held-out benign FPR (4,276 flows) | Cross-network FPR (237 real flows, other networks) | Held-out DDoS-capture recall |
+|---|---|---|---|
+| before (DDoS captures only) | 33.6% @0.6 / 31.4% @0.98 | 38% @0.6 / 22% @0.98 | 100% |
+| **retrained** | **0.05% @0.6, 0.00% @≥0.9** | **2.1% @0.6, 0.8% @≥0.95** | **99.97% @0.6, 99.9% @0.98** |
+
+Shipped as `models/flow_xgboost_v1.onnx` (manifest + importances updated; the real benign rows were appended to `models/flow_training_data.csv`, which holds only duration/bytes/protocol). **Limits:** the held-out minutes come from the same network and session as the training minutes (temporal split, same hosts), so 0.00% is optimistic; the cross-network sample is 237 flows (95% CI up to ~3%); the model only sees duration/bytes/protocol and detects DDoS shape, not intrusions. Therefore `ML_FLOW_STANDALONE_CONFIDENCE` still defaults to "never alone" — enable `0.98` per network only after measuring with `scripts/flow_model_operating_points.py` on that network's own benign traffic. The corroboration path benefits either way.
+
+### 14.5 Not done / cannot be done
+* **OPC UA SignAndEncrypt bodies** stay unreadable: decrypting needs the server's private key (not available to a passive sensor). Only the clear-text policy and channel metadata are used.
+* **24-72 h live-link soak** — a 4 h low-rate replay soak of the real corpus was run (`docs/reports/soak_mixed_4h.json`); a multi-day run on a mirrored production link needs that link.
+* **HA** — designed in `docs/OPERATIONS.md` §5, not exercised on multiple nodes; tenant isolation covers stored alerts/captures, not compute or the OpenSearch side path.
+* BACnet/OPC UA write and PROFINET factory-reset alerts are still validated only on independent-encoder / real-derived packets.

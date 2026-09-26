@@ -61,6 +61,9 @@ def sh(cmd: list[str], timeout: int = 120, **kw) -> subprocess.CompletedProcess:
 
 def http(method: str, path: str, **kw):
     import requests
+    key = os.environ.get("STEALTHTAP_API_KEY") or env_value("STEALTHTAP_API_KEY")
+    if key:                                   # the API requires its key on every route except /health
+        kw["headers"] = {"X-API-Key": key, **kw.pop("headers", {})}
     return requests.request(method, API + path, timeout=kw.pop("timeout", 30), **kw)
 
 

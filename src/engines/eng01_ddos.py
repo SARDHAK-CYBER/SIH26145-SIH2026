@@ -3,6 +3,9 @@ from typing import Optional
 from redis import Redis
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
+from src.engines.eng02_c2_beaconing import _is_multicast_or_broadcast
+
+SLOWLORIS_PORTS = frozenset({80, 443, 3000, 5000, 8000, 8008, 8080, 8081, 8088, 8443, 8888, 9000, 9090})
 
 try:
     # Native fast-path: the exact same thresholds/formulas below, moved
@@ -175,6 +178,8 @@ class VolumetricDDoSDetector(Detector):
         SPOOFED_MIN_PACKETS in one window)."""
         bucket_id = int(flow["ts"] // self.window_seconds)
         dst = flow["dst_ip"]
+        if _is_multicast_or_broadcast(dst):     # many sources -> one multicast group is mDNS/SSDP/LLMNR, not a spoofed flood
+            return None
         hll_key = f"{self.key_prefix}eng01:dst_src_hll:{dst}:{bucket_id}"
 
         try:
@@ -216,6 +221,7 @@ class VolumetricDDoSDetector(Detector):
                 flow["src_ip"], flow["dst_ip"], flow["ts"],
                 float(flow.get("duration_s", 0) or 0),
                 float(flow.get("orig_bytes", 0) or 0) + float(flow.get("resp_bytes", 0) or 0),
+                int(flow.get("dst_port", 0) or 0),
             )
             if hit is None:
                 return None
@@ -341,7 +347,12 @@ class VolumetricDDoSDetector(Detector):
     def _looks_like_slowloris(self, flow: dict) -> bool:
         duration = flow.get("duration_s", 0)
         bytes_total = flow.get("orig_bytes", 0) + flow.get("resp_bytes", 0)
-        return duration > self.slowloris_duration_s and bytes_total < self.slowloris_max_bytes
+        port = int(flow.get("dst_port", 0) or 0)
+        # Slowloris holds HTTP connections open. Idle long-lived connections on other services are normal (push channels
+        # 5228/5223, Windows Delivery Optimization 7680, SSH/RDP/VNC/MQTT ...) and were the top false positive on a real
+        # 20-minute Wi-Fi capture. Port 0 = unknown keeps the old behaviour. Twin of slowloris_port() in eng01.rs.
+        return (duration > self.slowloris_duration_s and bytes_total < self.slowloris_max_bytes
+                and (port == 0 or port in SLOWLORIS_PORTS))
 
     def _build_alert(self, flow: dict, threat_class: str, confidence: float, evidence: dict) -> Alert:
         return Alert(

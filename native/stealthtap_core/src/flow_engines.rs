@@ -62,7 +62,7 @@ impl FlowEngines {
     /// Mid-flight snapshot of an active flow: only the rate/fan-out engines.
     pub fn snapshot(&mut self, r: &LiveConnRecord, out: &mut Vec<Hit>) {
         let total = (r.orig_bytes + r.resp_bytes) as f64;
-        if let Some(h) = self.e01.check(&r.orig_h, &r.resp_h, r.ts, r.duration, total) {
+        if let Some(h) = self.e01.check(&r.orig_h, &r.resp_h, r.ts, r.duration, total, r.resp_p) {
             out.push(Hit { engine: "eng01", hit: FlowHit::E01(h) });
         }
         if let Some(h) = self.e05.core(&r.orig_h, &r.resp_h, r.resp_p, r.ts, r.orig_bytes as f64, r.resp_bytes as f64) {
@@ -76,7 +76,7 @@ impl FlowEngines {
     /// A flow that has ended: every conn-level engine.
     pub fn expire(&mut self, r: &LiveConnRecord, out: &mut Vec<Hit>) {
         let total = (r.orig_bytes + r.resp_bytes) as f64;
-        if let Some(h) = self.e01.check(&r.orig_h, &r.resp_h, r.ts, r.duration, total) {
+        if let Some(h) = self.e01.check(&r.orig_h, &r.resp_h, r.ts, r.duration, total, r.resp_p) {
             out.push(Hit { engine: "eng01", hit: FlowHit::E01(h) });
         }
         if let Some(h) = self.e02.core(&r.orig_h, &r.resp_h, r.ts) {

@@ -51,7 +51,7 @@ PER_FLOW_RATIO_THRESHOLD = 20.0  # a single flow's own outbound:inbound ratio --
 # DATA_EXFILTRATION alert on a single 601,527-byte upload to a Microsoft endpoint (26.5:1, i.e.
 # ordinary telemetry/sync). Modern benign uploads routinely reach hundreds of KB; genuine bulk
 # exfiltration is far larger, and drip-fed exfiltration is caught by the accumulated check below.
-MIN_SINGLE_FLOW_BYTES = int(os.environ.get("EXFIL_MIN_SINGLE_FLOW_BYTES", str(1_048_576)))
+MIN_SINGLE_FLOW_BYTES = int(os.environ.get("EXFIL_MIN_SINGLE_FLOW_BYTES", str(4_194_304)))   # 4 MiB
 
 # Accumulated window: deliberately much longer than any single flow,
 # since low-and-slow exfiltration is specifically designed to spread

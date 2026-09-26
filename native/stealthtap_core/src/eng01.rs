@@ -28,6 +28,12 @@ const SPOOFED_MIN_PACKETS: u32 = 150;
 const SPOOFED_UNIQUENESS_RATIO: f64 = 0.85;
 const SLOWLORIS_DURATION_S: f64 = 120.0;
 const SLOWLORIS_MAX_BYTES: f64 = 50.0;
+
+/// Slowloris holds HTTP connections open. Idle long-lived connections on other services are normal (push channels 5228/5223,
+/// Windows Delivery Optimization 7680, SSH/RDP/VNC/MQTT sessions...), and flagging them was the top false positive on a real
+/// 20-minute Wi-Fi capture. Port 0 = unknown (unit tests / sources without ports) keeps the old behaviour.
+pub const SLOWLORIS_PORTS: [u16; 13] = [80, 443, 3000, 5000, 8000, 8008, 8080, 8081, 8088, 8443, 8888, 9000, 9090];
+pub fn slowloris_port(p: u16) -> bool { p == 0 || SLOWLORIS_PORTS.contains(&p) }
 // How many old buckets to retain before sweeping -- generous margin
 // above BUCKET_TTL_SECONDS/WINDOW_SECONDS=3 buckets, so a flow whose
 // conn record arrives slightly late (snapshot/expire jitter) still
@@ -83,7 +89,7 @@ impl NativeEng01 {
     /// counters just updated), then -- ONLY if flood didn't already
     /// fire -- the spoofed-destination counters update and get
     /// checked. Same early-return order as the Python reference.
-    pub fn check(&mut self, src_ip: &str, dst_ip: &str, ts: f64, duration_s: f64, bytes_total: f64) -> Option<Eng01Hit> {
+    pub fn check(&mut self, src_ip: &str, dst_ip: &str, ts: f64, duration_s: f64, bytes_total: f64, dst_port: u16) -> Option<Eng01Hit> {
         let bucket = bucket_of(ts);
         self.sweep_if_needed(bucket);
 
@@ -95,7 +101,7 @@ impl NativeEng01 {
         let distinct_dests = sb.dsts.len() as u32;
         let already_flood_alerted = sb.flood_alerted;
 
-        if duration_s > SLOWLORIS_DURATION_S && bytes_total < SLOWLORIS_MAX_BYTES {
+        if duration_s > SLOWLORIS_DURATION_S && bytes_total < SLOWLORIS_MAX_BYTES && slowloris_port(dst_port) {
             return Some(Eng01Hit::Slowloris { duration_s, bytes_total });
         }
 
@@ -115,6 +121,8 @@ impl NativeEng01 {
             }
         }
 
+        // many sources -> one multicast/broadcast group is what mDNS/SSDP/LLMNR look like, not a spoofed flood
+        if crate::eng02::is_multicast_or_broadcast(dst_ip) { return None; }
         let dst_key = (dst_ip.to_string(), bucket);
         let db = self.dst.entry(dst_key.clone()).or_default();
         db.pkt_count += 1;
@@ -143,9 +151,9 @@ impl NativeEng01 {
         NativeEng01 { src: HashMap::new(), dst: HashMap::new(), max_bucket_seen: i64::MIN }
     }
 
-    #[pyo3(name = "check")]
-    fn py_check(&mut self, py: Python<'_>, src_ip: &str, dst_ip: &str, ts: f64, duration_s: f64, bytes_total: f64) -> PyResult<Option<PyObject>> {
-        match self.check(src_ip, dst_ip, ts, duration_s, bytes_total) {
+    #[pyo3(name = "check", signature = (src_ip, dst_ip, ts, duration_s, bytes_total, dst_port=0))]
+    fn py_check(&mut self, py: Python<'_>, src_ip: &str, dst_ip: &str, ts: f64, duration_s: f64, bytes_total: f64, dst_port: u16) -> PyResult<Option<PyObject>> {
+        match self.check(src_ip, dst_ip, ts, duration_s, bytes_total, dst_port) {
             Some(hit) => Ok(Some(hit_to_py(py, &hit)?)),
             None => Ok(None),
         }

@@ -1,0 +1,197 @@
+{
+ "benign_sources": {
+  "normal2.pcap": 99,
+  "normal.pcap": 484,
+  "benign_wifi_20min.pcap": 8354
+ },
+ "attack_flows": 136859,
+ "operating_points": [
+  {
+   "threshold": 0.6,
+   "benign_flows": 8937,
+   "benign_flagged": 0,
+   "benign_fpr": 0.0,
+   "benign_fpr_95_upper": 0.00043,
+   "attack_capture_flow_recall": 0.12414,
+   "ddos_training_distribution_recall": 1.0
+  },
+  {
+   "threshold": 0.8,
+   "benign_flows": 8937,
+   "benign_flagged": 0,
+   "benign_fpr": 0.0,
+   "benign_fpr_95_upper": 0.00043,
+   "attack_capture_flow_recall": 0.05851,
+   "ddos_training_distribution_recall": 0.99967
+  },
+  {
+   "threshold": 0.9,
+   "benign_flows": 8937,
+   "benign_flagged": 0,
+   "benign_fpr": 0.0,
+   "benign_fpr_95_upper": 0.00043,
+   "attack_capture_flow_recall": 0.05747,
+   "ddos_training_distribution_recall": 0.99967
+  },
+  {
+   "threshold": 0.95,
+   "benign_flows": 8937,
+   "benign_flagged": 0,
+   "benign_fpr": 0.0,
+   "benign_fpr_95_upper": 0.00043,
+   "attack_capture_flow_recall": 0.05737,
+   "ddos_training_distribution_recall": 0.99967
+  },
+  {
+   "threshold": 0.98,
+   "benign_flows": 8937,
+   "benign_flagged": 0,
+   "benign_fpr": 0.0,
+   "benign_fpr_95_upper": 0.00043,
+   "attack_capture_flow_recall": 0.05726,
+   "ddos_training_distribution_recall": 0.99933
+  },
+  {
+   "threshold": 0.99,
+   "benign_flows": 8937,
+   "benign_flagged": 0,
+   "benign_fpr": 0.0,
+   "benign_fpr_95_upper": 0.00043,
+   "attack_capture_flow_recall": 0.05707,
+   "ddos_training_distribution_recall": 0.99833
+  },
+  {
+   "threshold": 0.995,
+   "benign_flows": 8937,
+   "benign_flagged": 0,
+   "benign_fpr": 0.0,
+   "benign_fpr_95_upper": 0.00043,
+   "attack_capture_flow_recall": 0.04867,
+   "ddos_training_distribution_recall": 0.996
+  },
+  {
+   "threshold": 0.999,
+   "benign_flows": 8937,
+   "benign_flagged": 0,
+   "benign_fpr": 0.0,
+   "benign_fpr_95_upper": 0.00043,
+   "attack_capture_flow_recall": 0.03265,
+   "ddos_training_distribution_recall": 0.904
+  }
+ ],
+ "per_file": {
+  "normal2.pcap": {
+   "flows": 99,
+   "flagged_at_0.98": 0
+  },
+  "normal.pcap": {
+   "flows": 484,
+   "flagged_at_0.98": 0
+  },
+  "benign_wifi_20min.pcap": {
+   "flows": 8354,
+   "flagged_at_0.98": 0
+  },
+  "0day.pcap": {
+   "flows": 0,
+   "flagged_at_0.98": 0
+  },
+  "blackEnergy.pcap": {
+   "flows": 0,
+   "flagged_at_0.98": 0
+  },
+  "distcc_exec_backdoor.pcap": {
+   "flows": 7,
+   "flagged_at_0.98": 0
+  },
+  "distcc_exec_backdoor2.pcap": {
+   "flows": 13,
+   "flagged_at_0.98": 1
+  },
+  "hydra_ftp.pcap": {
+   "flows": 128,
+   "flagged_at_0.98": 0
+  },
+  "hydra_ftp2.pcap": {
+   "flows": 256,
+   "flagged_at_0.98": 0
+  },
+  "hydra_ssh.pcap": {
+   "flows": 3091,
+   "flagged_at_0.98": 0
+  },
+  "hydra_ssh2.pcap": {
+   "flows": 6181,
+   "flagged_at_0.98": 1
+  },
+  "java_rmi.pcap": {
+   "flows": 24719,
+   "flagged_at_0.98": 0
+  },
+  "java_rmi2.pcap": {
+   "flows": 5966,
+   "flagged_at_0.98": 0
+  },
+  "mirai.pcap": {
+   "flows": 0,
+   "flagged_at_0.98": 0
+  },
+  "netbios_ssn.pcap": {
+   "flows": 6160,
+   "flagged_at_0.98": 3
+  },
+  "netbios_ssn2.pcap": {
+   "flows": 12300,
+   "flagged_at_0.98": 2229
+  },
+  "replayAttacks.pcap": {
+   "flows": 0,
+   "flagged_at_0.98": 0
+  },
+  "ruby_drb.pcap": {
+   "flows": 5981,
+   "flagged_at_0.98": 4
+  },
+  "ruby_drb2.pcap": {
+   "flows": 11943,
+   "flagged_at_0.98": 2004
+  },
+  "smtp.pcap": {
+   "flows": 7,
+   "flagged_at_0.98": 0
+  },
+  "smtp22.pcap": {
+   "flows": 13,
+   "flagged_at_0.98": 0
+  },
+  "tomcat.pcap": {
+   "flows": 24,
+   "flagged_at_0.98": 0
+  },
+  "tomcat2.pcap": {
+   "flows": 48,
+   "flagged_at_0.98": 12
+  },
+  "unreallrcd.pcap": {
+   "flows": 23836,
+   "flagged_at_0.98": 3
+  },
+  "unreallrcd2.pcap": {
+   "flows": 21700,
+   "flagged_at_0.98": 1554
+  },
+  "vsftpd.pcap": {
+   "flows": 4835,
+   "flagged_at_0.98": 4
+  },
+  "vsftpd2.pcap": {
+   "flows": 9651,
+   "flagged_at_0.98": 2022
+  },
+  "zeus.pcap": {
+   "flows": 0,
+   "flagged_at_0.98": 0
+  }
+ },
+ "note": "attack-capture flows are labelled by FILE (background flows inside an attack capture count as attack flows), so recall there is a floor"
+}

@@ -71,7 +71,7 @@ impl NativeEng02 {
     }
 
     pub fn core(&mut self, src_ip: &str, dst_ip: &str, ts: f64) -> Option<Eng02Hit> {
-        if is_multicast_or_broadcast(dst_ip) { return None; }
+        if is_multicast_or_broadcast(dst_ip) || is_multicast_or_broadcast(src_ip) { return None; }
         self.since_prune += 1;
         if self.since_prune >= PRUNE_EVERY {
             self.since_prune = 0;

@@ -262,7 +262,7 @@ def add_reconnaissance(start_ts: float) -> float:
 
 def add_data_exfiltration(start_ts: float) -> float:
     """(f) Data exfiltration -- one flow, asymmetric byte ratio, over
-    ENG06's 20:1 threshold AND its 1 MiB single-flow volume floor (the
+    ENG06's 20:1 threshold AND its 4 MiB single-flow volume floor (the
     floor exists because a 654-byte request vs a 25-byte reply is a 26:1
     'ratio' on ordinary traffic). Real, advancing TCP sequence numbers are
     required: a version that reused seq=0 on every segment made Zeek count
@@ -279,14 +279,14 @@ def add_data_exfiltration(start_ts: float) -> float:
     add(eth / IP(src=dst, dst=attacker) / TCP(sport=443, dport=src_port, flags="SA", seq=seq_v, ack=seq_a + 1), ts); ts += 0.02
     add(eth / IP(src=attacker, dst=dst) / TCP(sport=src_port, dport=443, flags="A", seq=seq_a + 1, ack=seq_v + 1), ts); ts += 0.01
     sent = 0
-    for _ in range(900):
+    for _ in range(3600):
         add(eth / IP(src=attacker, dst=dst) / TCP(sport=src_port, dport=443, flags="PA", seq=seq_a + 1 + sent, ack=seq_v + 1) / Raw(b"D" * 1400), ts)
         sent += 1400; ts += 0.01
     add(eth / IP(src=dst, dst=attacker) / TCP(sport=443, dport=src_port, flags="PA", seq=seq_v + 1, ack=seq_a + 1 + sent) / Raw(b"ok"), ts)
     ground_truth["threats"].append({
         "category": "data_exfiltration", "start_ts": start_ts, "end_ts": ts,
         "expected_alert": "DATA_EXFILTRATION", "engine": "ENG06",
-        "note": "~1.26 MB out, ~2 bytes back -- over both the 20:1 ratio and the 1 MiB single-flow volume floor",
+        "note": "~5.0 MB out, ~2 bytes back -- over both the 20:1 ratio and the 4 MiB single-flow volume floor (a 1.2 MB upload is ordinary traffic, see PRD 14.3)",
     })
     return ts + 1
 
