@@ -3,7 +3,8 @@ Active device discovery of the LOCAL subnet -- complements the passive host inve
 devices that happened to send a packet the sensor could see).
 
 Deliberately narrow, because scanning networks you do not own is not okay:
-  * host discovery only (`nmap -sn`: ARP on the local segment, ICMP/TCP ping beyond) -- NO port scans;
+  * host discovery only -- NO port scans: an unprivileged ARP-cache sweep (UDP datagram to the discard port to force ARP,
+    then the OS neighbour table) or, when the sensor is elevated, `nmap -sn`;
   * the target range must sit inside a subnet this machine is actually attached to, be private
     (RFC1918 / link-local) and hold at most MAX_ADDRESSES addresses; a larger interface subnet is
     narrowed to the /24 around this host unless a smaller CIDR is given;
@@ -104,41 +105,100 @@ def resolve_target(interface: Optional[str], cidr: Optional[str]) -> tuple[str, 
     return iface, target
 
 
+def _oui_table() -> dict[str, str]:
+    exe = _nmap()
+    tbl: dict[str, str] = {}
+    if exe:
+        f = os.path.join(os.path.dirname(exe), "nmap-mac-prefixes")
+        if os.path.exists(f):
+            for line in open(f, encoding="utf-8", errors="ignore"):
+                if line[:1] != "#" and len(line) > 7:
+                    tbl[line[:6].lower()] = line[7:].strip()
+    return tbl
+
+
+def _neighbors(target: ipaddress.IPv4Network) -> dict[str, str]:
+    """{ip: mac} from the OS neighbour (ARP) table, restricted to `target`. No privileges needed."""
+    out: dict[str, str] = {}
+    if os.name == "nt":
+        cp = subprocess.run(["powershell", "-NoProfile", "-Command",
+                             "Get-NetNeighbor -AddressFamily IPv4 | Where-Object {$_.State -in 'Reachable','Stale','Delay','Probe','Permanent'} "
+                             "| ForEach-Object { $_.IPAddress + ' ' + $_.LinkLayerAddress }"],
+                            capture_output=True, text=True, timeout=30)
+        pairs = [ln.split() for ln in cp.stdout.splitlines() if ln.strip()]
+    else:
+        cp = subprocess.run(["ip", "-4", "neigh"], capture_output=True, text=True, timeout=30)
+        pairs = []
+        for ln in cp.stdout.splitlines():
+            t = ln.split()
+            if "lladdr" in t and t[-1] not in ("FAILED", "INCOMPLETE"):
+                pairs.append([t[0], t[t.index("lladdr") + 1]])
+    for pr in pairs:
+        if len(pr) < 2:
+            continue
+        try:
+            ip = ipaddress.IPv4Address(pr[0])
+        except ValueError:
+            continue
+        mac = pr[1].replace("-", ":").lower()
+        if ip in target and mac not in ("00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff") and not mac.startswith("01:00:5e"):
+            out[str(ip)] = mac
+    return out
+
+
+def _arp_sweep(target: ipaddress.IPv4Network) -> list[dict]:
+    """Unprivileged, accurate LAN discovery: make the OS resolve every address in the range (a UDP datagram to the discard
+    port forces an ARP request; no raw sockets, no firewall dependence -- a host answers ARP even when it drops every
+    port), then read the neighbour table. Only on-link hosts that actually answered ARP appear."""
+    import socket
+    gap = 1.0 / max(1, MAX_RATE)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(False)
+    try:
+        for ip in target.hosts():
+            try:
+                sock.sendto(bytes(1), (str(ip), 9))
+            except OSError:
+                pass
+            time.sleep(gap)
+    finally:
+        sock.close()
+    time.sleep(2.5)                                    # let late ARP replies land
+    oui = _oui_table()
+    rows = []
+    for ip, mac in _neighbors(target).items():
+        rows.append({"ip": ip, "mac": mac, "vendor": oui.get(mac.replace(":", "")[:6]), "hostname": None, "latency_ms": None})
+    return rows
+
+
 def _run(job_id: str, iface: str, target: ipaddress.IPv4Network) -> None:
     job = _JOBS[job_id]
-    exe = _nmap()
-    if exe is None:
-        job.update(status="error", error="nmap is not installed")
-        return
     try:
-        args = [exe, "-sn", "-n", "--max-rate", str(MAX_RATE)]
-        if not _elevated():
-            # No raw sockets without privileges (and on Windows Npcap's admin-only mode would stall ~2 minutes on a UAC
-            # prompt): fall back to connect()-based liveness probes -- finds hosts with an open common port, so it is a
-            # subset of what the ARP sweep of an elevated sensor finds.
-            args += ["--unprivileged", "-PS22,80,135,443,445,3389", "--host-timeout", "5s"]
-        cp = subprocess.run(args + ["-oX", "-", str(target)], capture_output=True, text=True, timeout=600)
-        root = ET.fromstring(cp.stdout)
-        hosts = []
-        for h in root.findall("host"):
-            if (h.find("status") is None) or h.find("status").get("state") != "up":
-                continue
-            row = {"ip": "", "mac": None, "vendor": None, "hostname": None, "latency_ms": None}
-            for a in h.findall("address"):
-                if a.get("addrtype") == "ipv4":
-                    row["ip"] = a.get("addr")
-                elif a.get("addrtype") == "mac":
-                    row["mac"], row["vendor"] = (a.get("addr") or "").lower(), a.get("vendor")
-            t = h.find("times")
-            if t is not None and t.get("srtt"):
-                row["latency_ms"] = round(int(t.get("srtt")) / 1000, 2)
-            hn = h.find("hostnames/hostname")
-            if hn is not None:
-                row["hostname"] = hn.get("name")
-            hosts.append(row)
+        if _elevated() and _nmap():
+            cp = subprocess.run([_nmap(), "-sn", "-n", "--max-rate", str(MAX_RATE), "-oX", "-", str(target)],
+                                capture_output=True, text=True, timeout=600)
+            root = ET.fromstring(cp.stdout)
+            hosts = []
+            for h in root.findall("host"):
+                st = h.find("status")
+                if st is None or st.get("state") != "up":
+                    continue
+                row = {"ip": "", "mac": None, "vendor": None, "hostname": None, "latency_ms": None}
+                for a in h.findall("address"):
+                    if a.get("addrtype") == "ipv4":
+                        row["ip"] = a.get("addr")
+                    elif a.get("addrtype") == "mac":
+                        row["mac"], row["vendor"] = (a.get("addr") or "").lower(), a.get("vendor")
+                t = h.find("times")
+                if t is not None and t.get("srtt"):
+                    row["latency_ms"] = round(int(t.get("srtt")) / 1000, 2)
+                hosts.append(row)
+            mode = "nmap ARP/ping sweep (elevated)"
+        else:
+            hosts = _arp_sweep(target)
+            mode = "ARP-cache sweep (unprivileged)"
         hosts.sort(key=lambda r: tuple(int(x) for x in r["ip"].split(".")))
-        job.update(status="done", hosts=hosts, finished=time.time(), mode="arp/ping (elevated)" if _elevated() else "tcp-connect probes (unprivileged)",
-                   note=None if _elevated() else "Unprivileged fallback: results are LOW confidence (on the host-only VMware subnet it reported 10 of 16 addresses up with ~500 ms uniform latency, which is not credible). Use the elevated sensor for an ARP sweep.")
+        job.update(status="done", hosts=hosts, finished=time.time(), mode=mode)
     except Exception as exc:
         job.update(status="error", error=f"{type(exc).__name__}: {exc}")
 
