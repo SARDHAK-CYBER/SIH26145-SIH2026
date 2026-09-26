@@ -7,7 +7,7 @@ tests and tools then talk to it over HTTP and never open the driver themselves.
 
   powershell -File scripts\start_sensor.ps1            # port 8101, prompts once for elevation
   powershell -File scripts\start_sensor.ps1 -Port 8100
-Logs: sensor.log next to this repo.
+Logs: sensor-<port>.log next to this repo.
 #>
 param([int]$Port = 8101)
 

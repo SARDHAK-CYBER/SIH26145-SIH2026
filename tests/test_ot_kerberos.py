@@ -319,3 +319,21 @@ def test_real_global_ipv6_flows_and_hop_by_hop_are_assembled_natively():
         assert r["id.orig_h"].startswith("2604:1380:4091:ce00::") and r["id.resp_h"].startswith("2604:1380:4091:ce00::")
         assert r["orig_bytes"] >= 79_000                                     # the 80 KB payload was seen, not dropped
     assert hbh[0]["orig_bytes"] > 0                                          # extension header walked, TCP still found
+
+
+def test_opcua_encrypted_and_unsecured_metadata_on_real_captures():
+    """A passive sensor cannot read SignAndEncrypt bodies, but it can count them and see policy-None channels."""
+    f = PUB / "opcua" / "opcua-encrypted.pcap"
+    g = PUB / "opcua" / "opcua-signed.pcap"
+    if not f.exists() or not g.exists():
+        pytest.skip("public sample not downloaded")
+    st = {}
+    for name, p in (("enc", f), ("signed", g)):
+        cap = core.NativeCapture(pcap=str(p), loops=1, speed=0.0)
+        cap.start()
+        while not cap.finished() or cap.pending():
+            cap.poll(20, 1000)
+        st[name] = cap.stats()
+        cap.stop()
+    assert st["enc"]["opcua_encrypted"] >= 1 and st["enc"]["opcua_unsecured"] >= 1
+    assert st["signed"]["opcua_encrypted"] == 0

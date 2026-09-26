@@ -189,6 +189,10 @@ export function LiveOverview({ status, series, summary, hosts, protocols, alerts
         <span>uptime {fmtDuration(status.uptime_s)}</span>
         <span>packets {fmtNum(cap?.recv)}</span>
         <span>ML: {(status.ml_families ?? []).join(', ') || 'rules only'}</span>
+        {(cap?.opcua_encrypted || cap?.opcua_unsecured) ? (
+          <span style={{ color: 'var(--sev-medium)' }}>OPC UA: {fmtNum(cap?.opcua_encrypted)} encrypted chunks (not inspectable) · {fmtNum(cap?.opcua_unsecured)} unsecured channels</span>
+        ) : null}
+        <span>engine threads {cap?.shards ?? 1}</span>
         <span>dns {fmtNum(cap?.dns)} · tls {fmtNum(cap?.ssl)} · http {fmtNum(cap?.http)} · ot {fmtNum((cap?.modbus ?? 0) + (cap?.dnp3 ?? 0))}</span>
       </div>
     </div>

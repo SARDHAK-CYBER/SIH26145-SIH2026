@@ -123,7 +123,7 @@ pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out),
 #[derive(Default, Clone)]
 pub struct Stats {
     pub packets: u64, pub non_ip: u64, pub flows_seen: u64,
-    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub opcua: u64, pub profinet: u64, pub conn: u64,
+    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub opcua: u64, pub opcua_encrypted: u64, pub opcua_unsecured: u64, pub profinet: u64, pub conn: u64,
 }
 
 // Function-code name tables -- identical to flow_assembler.py's _MODBUS_FC / _DNP3_FC.
@@ -613,6 +613,14 @@ impl LiveFlowAssembler {
                     }
                 }
             } else if l4.dport == 4840 {
+                // Metadata a passive sensor CAN see even when bodies are ciphertext: chunks it cannot read (SignAndEncrypt),
+                // and OpenSecureChannel requests that negotiate security policy "None" (no signing, no encryption at all).
+                let pl = l4.payload;
+                if pl.len() >= 28 && &pl[0..3] == b"MSG" && parse_opcua(pl).is_none() { self.stats.opcua_encrypted += 1; }
+                if pl.len() >= 16 && &pl[0..3] == b"OPN" {
+                    let n = u32::from_le_bytes([pl[12], pl[13], pl[14], pl[15]]) as usize;
+                    if let Some(uri) = pl.get(16..16 + n) { if uri.ends_with(b"#None") { self.stats.opcua_unsecured += 1; } }
+                }
                 if let Some((function, detail, code)) = parse_opcua(l4.payload) {
                     self.stats.opcua += 1;
                     out.push(Immediate::Ot(OtOut { kind: "opcua", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,

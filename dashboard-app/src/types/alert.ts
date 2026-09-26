@@ -212,6 +212,8 @@ export interface CaptureEngineStats {
   records_dropped: number; pending_records: number; unsupported_frames: number;
   ring_first_id: number; ring_last_id: number; ring_len: number;
   last_ts: number; loops_done: number; running: boolean; finished: boolean;
+  shards?: number; kerberos?: number; s7comm?: number; iec104?: number; cip?: number; bacnet?: number;
+  opcua?: number; opcua_encrypted?: number; opcua_unsecured?: number; profinet?: number;
 }
 
 // ── Live dashboard data ─────────────────────────────────────────────────
