@@ -16,7 +16,7 @@ How this file works:
 ## Automated status
 
 <!-- AUTO-STATUS:BEGIN -->
-_Last automated check: **2026-09-26 23:11:12** · PASS 27 · WARN 0 · FAIL 0 · tests 166 · live pipeline 348,602 pps · hybrid recall 83.0% · flow FPR 0.167%_
+_Last automated check: **2026-09-26 23:24:34** · PASS 27 · WARN 0 · FAIL 0 · tests 171 · live pipeline 366,555 pps · hybrid recall 83.0% · flow FPR 0.167%_
 
 No FAIL or WARN in the latest run.
 
@@ -75,3 +75,14 @@ on both OSes. Linux capture sensors can add `--features afxdp` (AF_XDP).
 | 23 | Live-baseline sampling under flood | Open | Baseline is fed ≤ 2,000 flows/tick when flow rates are extreme |
 | 24 | Hard-negative retraining (dns/flow) | **Tested — cannot be fixed by retraining** | `scripts/retrain_flow_hard_negatives.py` (grouped holdout; real benign flows from `normal.pcap` minus the embedded nmap scan as negatives, `normal2.pcap` held out): the 4-feature flow model has **19% FPR on real benign flows** standalone and hard negatives do not help (0.19 → 0.20/0.24) while attack recall stays ~1.0 — the features (duration, bytes, proto) simply cannot separate them. This is exactly why the model is corroboration-only and never alerts alone; a real fix needs richer flow features (packet counts, flags, conn state) and a dataset carrying them (CICIDS not in repo). DNS model: 0/33 real SNIs, 0/25 CDN names fire. Prior note: | 2.7M real live packets on Wi-Fi produced 0 ML alerts (dns model 0/25 CDN-style names, 0/33 real SNIs; flow model is corroboration-only). Retraining also needs the original 675k-row/CICIDS datasets, which are not in this repo — revisit only if a real ML false positive appears |
 | 25 | Network discovery (active, own subnet) | **Done** | `POST /network/discover`: unprivileged ARP-cache sweep (forces ARP with a UDP datagram, reads the OS neighbour table; accurate, no firewall dependence) or elevated `nmap -sn`. Real runs: Wi-Fi /24 → 39 devices with MACs (D-Link etc.); VMnet1 (no VMs) → 0, correctly. Scope rules tested (`tests/test_discovery.py`) |
+
+## Follow-ups closed 2026-09-26 (third pass)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Tests only on hand-built packets (BACnet/OPC UA writes, DCP factory reset) | **Upgraded** | DCP factory reset decoded from frames built by scapy's independent `pnio/pnio_dcp` encoder (this exposed a real robustness bug: zero DCPDataLength → fixed); BACnet WriteProperty and OPC UA WriteRequest built by changing only the service field of a REAL captured request. Still no real capture *containing* those events exists publicly |
+| Real-data misses | **Fixed** | Real `cip_stop_plc.pcap` (CIP Stop 0x07) was undetected → CIP Reset/Start/Stop added; real S7 PLC-stop ×2, S7 download ×2, WRITE_VAR, DNP3 file/binary-output writes all alert |
+| Global IPv6 on real packets | **Done (captured files)** | tcpdump test-suite captures with global 2604:1380:… addresses incl. hop-by-hop jumbogram assembled natively (`tests/test_ot_kerberos.py`). The Python fallback assembler fails on 80 KB IPv6 jumbograms (native is authoritative). This Wi-Fi has no global IPv6, so a live link is still untested |
+| Whole-network coverage | **Measured, deployment doc** | `/capture/coverage` + Hosts-page card compute visible-vs-known devices (verdict full/partial/own-traffic-only, blind-spot list from an active sweep); `docs/DEPLOYMENT_COVERAGE.md` gives mirror/TAP/gateway/bridge placement. Placement itself is a deployment choice |
+| OPC UA SignAndEncrypt | **Inherent** | Ciphertext cannot be inspected by a passive sensor without the session keys; metadata (SNI/JA4-style, sizes, timing) only |
+| Live NIC re-run on the newest code | **Blocked** | Needs an elevated sensor started with the new code; 6+ UAC requests this session were not approved |
