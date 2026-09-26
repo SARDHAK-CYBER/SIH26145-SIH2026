@@ -30,6 +30,8 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/network", tags=["discovery"])
 
+# Python's is_private also covers documentation/benchmark/CGNAT-adjacent ranges: allow exactly RFC1918 + link-local.
+_SWEEPABLE = [ipaddress.IPv4Network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16")]
 MAX_ADDRESSES = 1024
 MAX_RATE = int(os.environ.get("STEALTHTAP_DISCOVERY_MAX_RATE", "100"))     # probes/s
 _JOBS: dict[str, dict] = {}
@@ -98,7 +100,7 @@ def resolve_target(interface: Optional[str], cidr: Optional[str]) -> tuple[str, 
         name, net, ip = subs[0]
         iface = name
         target = net if net.num_addresses <= 256 else ipaddress.IPv4Network(f"{ip}/24", strict=False)
-    if not (target.is_private or target.is_link_local):
+    if not any(target.subnet_of(r) for r in _SWEEPABLE):
         raise HTTPException(403, "only private (RFC1918 / link-local) ranges may be swept")
     if target.num_addresses > MAX_ADDRESSES:
         raise HTTPException(422, f"range has {target.num_addresses} addresses; the limit is {MAX_ADDRESSES} — give a smaller CIDR")
