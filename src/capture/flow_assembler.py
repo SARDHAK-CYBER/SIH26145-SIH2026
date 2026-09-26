@@ -18,7 +18,7 @@ import time
 from typing import Any, Iterator, Optional
 
 from src.capture.kerberos import parse_kdc_reply
-from src.capture.ot import parse_enip, parse_iec104, parse_s7comm
+from src.capture.ot import parse_bacnet, parse_enip, parse_iec104, parse_s7comm
 from src.capture.ja4 import ja4_from_client_hello, sni_from_client_hello
 from src.flow_orientation import sender_is_originator
 
@@ -206,6 +206,19 @@ class FlowAssembler:
                     "segment_hash": _seg_hash(flow.uid, k["client"], k["service"], k["cipher"]),
                 }))
                 self.stats["kerberos"] = self.stats.get("kerberos", 0) + 1
+
+        # ---- BACnet/IP (UDP/47808) ----
+        if proto == "udp" and payload and 47808 in (sport, dport):
+            b = parse_bacnet(payload)
+            if b is not None:
+                function, detail, code = b
+                self.stats["bacnet"] = self.stats.get("bacnet", 0) + 1
+                out.append(("bacnet", {
+                    "uid": flow.uid, "ts": ts, "id.orig_h": src_ip, "id.orig_p": sport,
+                    "id.resp_h": dst_ip, "id.resp_p": dport, "proto": "udp",
+                    "function": function, "detail": detail, "code": code,
+                    "segment_hash": _seg_hash(flow.uid, function, detail),
+                }))
 
         # ---- Modbus / DNP3 (immediate) ----
         if proto == "tcp" and payload:

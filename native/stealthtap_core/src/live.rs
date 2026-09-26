@@ -123,7 +123,7 @@ pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out),
 #[derive(Default, Clone)]
 pub struct Stats {
     pub packets: u64, pub non_ip: u64, pub flows_seen: u64,
-    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub conn: u64,
+    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub conn: u64,
 }
 
 // Function-code name tables -- identical to flow_assembler.py's _MODBUS_FC / _DNP3_FC.
@@ -286,6 +286,46 @@ fn parse_cip_message(m: &[u8], unwrap: bool) -> Option<(u8, u32, u32, bool)> {
         }
     }
     Some((svc, class, inst, false))
+}
+
+/// BACnet/IP (UDP/47808): BVLC | NPDU | APDU. Returns (service name, detail, service code) for confirmed and
+/// unconfirmed REQUESTS (Who-Is/ReadProperty polling is decoded too; ENG-07 only alerts on state-changing ones).
+fn parse_bacnet(p: &[u8]) -> Option<(String, String, u32)> {
+    if p.len() < 8 || p[0] != 0x81 { return None; }
+    let mut off = match p[1] { 0x04 => 10usize, _ => 4usize };          // Forwarded-NPDU carries a 6-byte origin address
+    if p.len() <= off + 2 || p[off] != 0x01 { return None; }
+    let ctl = p[off + 1];
+    off += 2;
+    if ctl & 0x80 != 0 { return None; }                                  // network-layer message, no APDU
+    if ctl & 0x20 != 0 { let dlen = *p.get(off + 2)? as usize; off += 3 + dlen; }   // DNET, DLEN, DADR
+    if ctl & 0x08 != 0 { let slen = *p.get(off + 2)? as usize; off += 3 + slen; }   // SNET, SLEN, SADR
+    if ctl & 0x20 != 0 { off += 1; }                                     // hop count
+    let apdu = p.get(off..)?;
+    if apdu.len() < 2 { return None; }
+    match apdu[0] >> 4 {
+        0 => {   // Confirmed-Request: type/flags | max-segs/resp | invoke id | [seq, window if segmented] | service
+            let idx = if apdu[0] & 0x08 != 0 { 5 } else { 3 };
+            let svc = *apdu.get(idx)?;
+            let name = match svc {
+                0 => "ACKNOWLEDGE_ALARM", 5 => "SUBSCRIBE_COV", 6 => "ATOMIC_READ_FILE", 7 => "ATOMIC_WRITE_FILE",
+                8 => "ADD_LIST_ELEMENT", 9 => "REMOVE_LIST_ELEMENT", 10 => "CREATE_OBJECT", 11 => "DELETE_OBJECT",
+                12 => "READ_PROPERTY", 14 => "READ_PROPERTY_MULTIPLE", 15 => "WRITE_PROPERTY", 16 => "WRITE_PROPERTY_MULTIPLE",
+                17 => "DEVICE_COMMUNICATION_CONTROL", 18 => "CONFIRMED_PRIVATE_TRANSFER", 20 => "REINITIALIZE_DEVICE",
+                26 => "READ_RANGE", _ => return None,
+            };
+            Some((name.to_string(), "confirmed".to_string(), svc as u32))
+        }
+        1 => {   // Unconfirmed-Request: type | service
+            let svc = apdu[1];
+            let name = match svc {
+                0 => "I_AM", 1 => "I_HAVE", 2 => "UNCONFIRMED_COV_NOTIFICATION", 3 => "UNCONFIRMED_EVENT_NOTIFICATION",
+                4 => "UNCONFIRMED_PRIVATE_TRANSFER", 5 => "UNCONFIRMED_TEXT_MESSAGE", 6 => "TIME_SYNCHRONIZATION",
+                7 => "WHO_HAS", 8 => "WHO_IS", 9 => "UTC_TIME_SYNCHRONIZATION", _ => return None,
+            };
+            Some((name.to_string(), "unconfirmed".to_string(), 0x100 | svc as u32))
+        }
+        _ => None,
+    }
 }
 
 fn parse_dnp3(p: &[u8], s_ip: &str, s_p: u16, d_ip: &str, d_p: u16, ts: f64, uid: &str) -> Option<Dnp3Out> {
@@ -464,6 +504,16 @@ impl LiveFlowAssembler {
                     segment_hash: seg_hash(&[uid.clone(), k.client.clone(), k.service.clone(), k.cipher.clone()]),
                     request_type: k.request_type.to_string(), client: k.client, service: k.service, cipher: k.cipher,
                 }));
+            }
+        }
+
+        // BACnet/IP (UDP): peers use 47808 on both sides, so either port qualifies
+        if l4.proto == "udp" && (l4.dport == 47808 || l4.sport == 47808) && !l4.payload.is_empty() {
+            if let Some((function, detail, code)) = parse_bacnet(l4.payload) {
+                self.stats.bacnet += 1;
+                out.push(Immediate::Ot(OtOut { kind: "bacnet", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                    resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
+                    function, detail, code, class_id: 0, instance_id: 0, response: false }));
             }
         }
 

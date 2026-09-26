@@ -71,6 +71,14 @@ IEC104_CRITICAL_TYPES = set(range(45, 52)) | set(range(58, 65))   # C_SC/DC/RC/S
 IEC104_HIGH_TYPES = {103, 105}                                     # clock sync, reset process
 
 
+# BACnet: reads, Who-Is/I-Am discovery and COV subscriptions are ordinary building-automation traffic (decoded and
+# verified silent on real captures: BACnetARRAY-*, BACnetDeviceObjectReference, BACnetIP-MSTP-Mix). State-changing
+# services are what an attacker uses to alter setpoints, silence a controller or wipe it.
+BACNET_CRITICAL_SERVICES = {"REINITIALIZE_DEVICE", "DEVICE_COMMUNICATION_CONTROL", "DELETE_OBJECT", "ATOMIC_WRITE_FILE"}
+BACNET_HIGH_SERVICES = {"WRITE_PROPERTY", "WRITE_PROPERTY_MULTIPLE", "CREATE_OBJECT", "ADD_LIST_ELEMENT", "REMOVE_LIST_ELEMENT",
+                        "CONFIRMED_PRIVATE_TRANSFER", "UNCONFIRMED_PRIVATE_TRANSFER", "TIME_SYNCHRONIZATION", "UTC_TIME_SYNCHRONIZATION"}
+
+
 class OTIndustrialAnomalyDetector(Detector):
     name = "ENG-07-OT"
 
@@ -95,6 +103,15 @@ class OTIndustrialAnomalyDetector(Detector):
                 return self._ics_alert(flow, "S7comm", "CRITICAL" if critical else "HIGH", 92.0 if critical else 80.0,
                                        _S7_MITRE.get(fn, ("T0855", "Unauthorized Command Message")),
                                        {"function_code": fn, "impact": "controller program/mode change" if critical else "live value write / program upload"})
+            return None
+
+        if proto == "bacnet":
+            svc = str(flow.get("bacnet_service", "")).upper()
+            if svc in BACNET_CRITICAL_SERVICES or svc in BACNET_HIGH_SERVICES:
+                critical = svc in BACNET_CRITICAL_SERVICES
+                return self._ics_alert(flow, "BACnet", "CRITICAL" if critical else "HIGH", 90.0 if critical else 78.0,
+                                       ("T0836", "Modify Parameter") if svc.startswith("WRITE") else ("T0855", "Unauthorized Command Message"),
+                                       {"function_code": svc, "kind": flow.get("bacnet_kind", "")})
             return None
 
         if proto == "iec104":

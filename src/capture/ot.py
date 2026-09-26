@@ -115,6 +115,56 @@ def parse_enip(p: bytes):
     return None
 
 
+_BACNET_CONFIRMED = {
+    0: "ACKNOWLEDGE_ALARM", 5: "SUBSCRIBE_COV", 6: "ATOMIC_READ_FILE", 7: "ATOMIC_WRITE_FILE", 8: "ADD_LIST_ELEMENT",
+    9: "REMOVE_LIST_ELEMENT", 10: "CREATE_OBJECT", 11: "DELETE_OBJECT", 12: "READ_PROPERTY", 14: "READ_PROPERTY_MULTIPLE",
+    15: "WRITE_PROPERTY", 16: "WRITE_PROPERTY_MULTIPLE", 17: "DEVICE_COMMUNICATION_CONTROL",
+    18: "CONFIRMED_PRIVATE_TRANSFER", 20: "REINITIALIZE_DEVICE", 26: "READ_RANGE",
+}
+_BACNET_UNCONFIRMED = {
+    0: "I_AM", 1: "I_HAVE", 2: "UNCONFIRMED_COV_NOTIFICATION", 3: "UNCONFIRMED_EVENT_NOTIFICATION",
+    4: "UNCONFIRMED_PRIVATE_TRANSFER", 5: "UNCONFIRMED_TEXT_MESSAGE", 6: "TIME_SYNCHRONIZATION", 7: "WHO_HAS",
+    8: "WHO_IS", 9: "UTC_TIME_SYNCHRONIZATION",
+}
+
+
+def parse_bacnet(p: bytes) -> Optional[tuple[str, str, int]]:
+    """(service, 'confirmed'|'unconfirmed', code) of a BACnet/IP request (UDP/47808). Twin of parse_bacnet in live.rs."""
+    if len(p) < 8 or p[0] != 0x81:
+        return None
+    off = 10 if p[1] == 0x04 else 4                       # Forwarded-NPDU: 6-byte origin address
+    if len(p) <= off + 2 or p[off] != 0x01:
+        return None
+    ctl = p[off + 1]
+    off += 2
+    if ctl & 0x80:
+        return None
+    if ctl & 0x20:
+        if len(p) <= off + 2:
+            return None
+        off += 3 + p[off + 2]
+    if ctl & 0x08:
+        if len(p) <= off + 2:
+            return None
+        off += 3 + p[off + 2]
+    if ctl & 0x20:
+        off += 1
+    apdu = p[off:]
+    if len(apdu) < 2:
+        return None
+    t = apdu[0] >> 4
+    if t == 0:
+        idx = 5 if apdu[0] & 0x08 else 3
+        if len(apdu) <= idx:
+            return None
+        name = _BACNET_CONFIRMED.get(apdu[idx])
+        return (name, "confirmed", apdu[idx]) if name else None
+    if t == 1:
+        name = _BACNET_UNCONFIRMED.get(apdu[1])
+        return (name, "unconfirmed", 0x100 | apdu[1]) if name else None
+    return None
+
+
 def parse_iec104(p: bytes) -> Optional[tuple[str, str, int]]:
     """(type name, 'type=.. cot=..', type id) of the most command-like I-frame ASDU in a segment."""
     off = 0

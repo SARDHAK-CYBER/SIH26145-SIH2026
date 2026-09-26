@@ -263,6 +263,7 @@ impl LiveFlowAssembler {
         d.set_item("s7comm", s.s7comm)?;
         d.set_item("iec104", s.iec104)?;
         d.set_item("cip", s.cip)?;
+        d.set_item("bacnet", s.bacnet)?;
         d.set_item("conn", s.conn)?;
         Ok(d.into())
     }

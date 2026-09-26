@@ -101,3 +101,40 @@ def test_enip_cip_native_equals_python_on_real_digitalbond_captures(name):
         assert rs == []                                   # benign polling raises no CIP request alerts
     else:
         assert any(s in (0x04, 0x10, 0x4B, 0x4F, 0x50) for s, _c, _i in rs)   # the dangerous set ENG-07 keys on
+
+
+@pytest.mark.parametrize("name", ["BACnet-MSTP-SNAP-Mixed.pcap", "BACnetIP-MSTP-Mix.pcap", "BACnetARRAY-element-0.pcap",
+                                  "BACnet-BBMD-on-same-subnet.pcap", "BACnetARRAY-elements.pcap"])
+def test_bacnet_native_equals_python_and_real_traffic_is_quiet(name):
+    f = PUB / "bacnet" / name
+    if not f.exists():
+        pytest.skip("public sample not downloaded")
+    from scapy.utils import PcapReader
+    from scapy.layers.inet import UDP
+    from src.capture.ot import parse_bacnet
+    py = []
+    for pkt in PcapReader(str(f)):
+        if UDP in pkt and 47808 in (pkt[UDP].sport, pkt[UDP].dport):
+            r = parse_bacnet(bytes(pkt[UDP].payload))
+            if r:
+                py.append(r[0])
+    rs = [r["function"] for _t, r in _native_records(f, {"bacnet"})]
+    assert sorted(py) == sorted(rs)
+    from src.engines.eng07_ot_anomaly import BACNET_CRITICAL_SERVICES, BACNET_HIGH_SERVICES
+    assert not (set(rs) & (BACNET_CRITICAL_SERVICES | BACNET_HIGH_SERVICES))     # real captures contain reads/discovery only
+
+
+def test_bacnet_write_property_alerts():
+    """CONSTRUCTED packet (the real captures hold no writes): WriteProperty must decode and alert in both twins."""
+    import asyncio
+    from src.capture.ot import parse_bacnet
+    from src.engines.eng07_ot_anomaly import OTIndustrialAnomalyDetector
+    from src.flow_mapping import map_record
+    pkt = bytes([0x81, 0x0A, 0, 12, 0x01, 0x04, 0x00, 0x05, 0x01, 0x0F, 0x0C, 0x00, 0x00, 0x00, 0x01])   # conf-req, service 15
+    assert parse_bacnet(pkt)[0] == "WRITE_PROPERTY"
+    flow = map_record({"uid": "B1", "ts": 1.0, "id.orig_h": "10.0.0.9", "id.resp_h": "10.0.0.20", "id.orig_p": 47808,
+                       "id.resp_p": 47808, "function": "WRITE_PROPERTY", "detail": "confirmed", "code": 15}, "bacnet")
+    loop = asyncio.new_event_loop()
+    a = loop.run_until_complete(OTIndustrialAnomalyDetector().score(flow))
+    loop.close()
+    assert a is not None and a.severity == "HIGH"
