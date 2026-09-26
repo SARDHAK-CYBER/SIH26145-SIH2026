@@ -79,3 +79,25 @@ def test_ot_decoders_native_equals_python(name, kind, expect, quiet):
     rs = [r["function"] for _t, r in _native_records(f, {kind})]
     assert sorted(py) == sorted(rs)
     assert expect <= set(rs)
+
+
+@pytest.mark.parametrize("name", ["CL5000EIP-Lock-PLC-Attempt.pcap", "CL5000EIP-Change-Date-Attempt.pcap", "CL5000EIP-View-Device-Status.pcap"])
+def test_enip_cip_native_equals_python_on_real_digitalbond_captures(name):
+    f = PUB / "ics" / name
+    if not f.exists():
+        pytest.skip("public sample not downloaded")
+    from scapy.utils import PcapReader
+    from scapy.layers.inet import TCP
+    from src.capture.ot import parse_enip
+    py = []
+    for pkt in PcapReader(str(f)):
+        if TCP in pkt and pkt[TCP].dport == 44818 and bytes(pkt[TCP].payload):
+            r = parse_enip(bytes(pkt[TCP].payload))
+            if r and not r[3]:
+                py.append((r[0], r[1], r[2]))
+    rs = [(r["service"], r["class_id"], r["instance_id"]) for _t, r in _native_records(f, {"cip"})]
+    assert sorted(py) == sorted(rs)
+    if "View-Device-Status" in name:
+        assert rs == []                                   # benign polling raises no CIP request alerts
+    else:
+        assert any(s in (0x04, 0x10, 0x4B, 0x4F, 0x50) for s, _c, _i in rs)   # the dangerous set ENG-07 keys on

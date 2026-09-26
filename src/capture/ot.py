@@ -51,6 +51,70 @@ def parse_s7comm(p: bytes) -> Optional[tuple[str, str, int]]:
     return "USERDATA", f"{_S7_GROUPS.get(group, 'OTHER')}/{sub}", 0x100 | (group << 4) | (sub & 0xF)
 
 
+def _epath(path: bytes) -> tuple[int, int]:
+    cls = inst = i = 0
+    while i < len(path):
+        b = path[i]
+        if b == 0x20 and i + 1 < len(path):
+            cls = path[i + 1]; i += 2
+        elif b == 0x21 and i + 3 < len(path):
+            cls = int.from_bytes(path[i + 2:i + 4], "little"); i += 4
+        elif b == 0x24 and i + 1 < len(path):
+            inst = path[i + 1]; i += 2
+        elif b == 0x25 and i + 3 < len(path):
+            inst = int.from_bytes(path[i + 2:i + 4], "little"); i += 4
+        elif b in (0x31, 0x29):
+            i += 4
+        else:
+            i += 2
+    return cls, inst
+
+
+def _cip_message(m: bytes, unwrap: bool):
+    if len(m) < 2:
+        return None
+    svc = m[0]
+    if svc & 0x80:
+        return svc & 0x7F, 0, 0, True
+    words = m[1]
+    path = m[2:2 + words * 2]
+    if len(path) < words * 2:
+        return None
+    cls, inst = _epath(path)
+    if svc == 0x52 and unwrap and cls == 6:                   # Unconnected Send -> embedded request
+        d = m[2 + words * 2:]
+        if len(d) >= 4:
+            sz = int.from_bytes(d[2:4], "little")
+            inner = d[4:4 + sz]
+            if len(inner) == sz:
+                return _cip_message(inner, False)
+    return svc, cls, inst, False
+
+
+def parse_enip(p: bytes):
+    """(service, class, instance, is_response) of the first CIP message in an EtherNet/IP SendRRData/
+    SendUnitData segment (TCP/44818). Twin of parse_enip in live.rs."""
+    if len(p) < 24 or int.from_bytes(p[:2], "little") not in (0x6F, 0x70):
+        return None
+    body = p[24:]
+    if len(body) < 8:
+        return None
+    count = int.from_bytes(body[6:8], "little")
+    items = body[8:]
+    for _ in range(min(count, 8)):
+        if len(items) < 4:
+            return None
+        ty = int.from_bytes(items[0:2], "little")
+        ln = int.from_bytes(items[2:4], "little")
+        data = items[4:4 + ln]
+        if len(data) < ln:
+            return None
+        if ty in (0x00B2, 0x00B1):
+            return _cip_message(data[2:] if ty == 0x00B1 else data, True)
+        items = items[4 + ln:]
+    return None
+
+
 def parse_iec104(p: bytes) -> Optional[tuple[str, str, int]]:
     """(type name, 'type=.. cot=..', type id) of the most command-like I-frame ASDU in a segment."""
     off = 0

@@ -170,6 +170,8 @@ pub(crate) fn immediate_to_dict<'py>(py: Python<'py>, rec: &Immediate) -> PyResu
             d.set_item("function", &r.function)?;
             d.set_item("detail", &r.detail)?;
             d.set_item("code", r.code)?;
+            d.set_item("service", r.code)?;
+            d.set_item("class_id", r.class_id)?; d.set_item("instance_id", r.instance_id)?; d.set_item("response", r.response)?;
             d.set_item("segment_hash", &r.segment_hash)?;
             r.kind
         }
@@ -260,6 +262,7 @@ impl LiveFlowAssembler {
         d.set_item("kerberos", s.kerberos)?;
         d.set_item("s7comm", s.s7comm)?;
         d.set_item("iec104", s.iec104)?;
+        d.set_item("cip", s.cip)?;
         d.set_item("conn", s.conn)?;
         Ok(d.into())
     }

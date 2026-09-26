@@ -41,7 +41,7 @@ except Exception:
 # TLS handshake snapshot can't false-positive as exfiltration.
 DISPATCH_IMMEDIATE = {
     "dns": ("eng03",), "ssl": ("eng04", "eng03s"),
-    "modbus": ("eng07",), "dnp3": ("eng07",), "s7comm": ("eng07",), "iec104": ("eng07",),
+    "modbus": ("eng07",), "dnp3": ("eng07",), "s7comm": ("eng07",), "iec104": ("eng07",), "cip": ("eng07",),
     "http": ("eng09",), "kerberos": ("eng11",),
 }
 IMMEDIATE_ML_FAMILY = {"ssl": "tls", "modbus": "modbus"}

@@ -743,7 +743,7 @@ impl Shared {
             let s = a.lock().unwrap().stats.clone();
             t.packets += s.packets; t.non_ip += s.non_ip; t.flows_seen += s.flows_seen; t.dns += s.dns; t.ssl += s.ssl;
             t.modbus += s.modbus; t.dnp3 += s.dnp3; t.http += s.http; t.kerberos += s.kerberos; t.s7comm += s.s7comm;
-            t.iec104 += s.iec104; t.conn += s.conn;
+            t.iec104 += s.iec104; t.cip += s.cip; t.conn += s.conn;
         }
         t
     }
@@ -1001,7 +1001,7 @@ impl NativeCapture {
             d.set_item("packets", s.packets)?; d.set_item("non_ip", s.non_ip)?; d.set_item("flows_seen", s.flows_seen)?;
             d.set_item("dns", s.dns)?; d.set_item("ssl", s.ssl)?; d.set_item("modbus", s.modbus)?;
             d.set_item("dnp3", s.dnp3)?; d.set_item("http", s.http)?; d.set_item("kerberos", s.kerberos)?;
-            d.set_item("s7comm", s.s7comm)?; d.set_item("iec104", s.iec104)?; d.set_item("conn", s.conn)?;
+            d.set_item("s7comm", s.s7comm)?; d.set_item("iec104", s.iec104)?; d.set_item("cip", s.cip)?; d.set_item("conn", s.conn)?;
             d.set_item("active_flows", self.sh.active_all())?;
             let (hn, hd) = if self.sh.asms.len() == 1 {
                 let a = self.sh.asms[0].lock().unwrap(); (a.inv.hosts.len(), a.inv.hosts_dropped)

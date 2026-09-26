@@ -18,7 +18,7 @@ import time
 from typing import Any, Iterator, Optional
 
 from src.capture.kerberos import parse_kdc_reply
-from src.capture.ot import parse_iec104, parse_s7comm
+from src.capture.ot import parse_enip, parse_iec104, parse_s7comm
 from src.capture.ja4 import ja4_from_client_hello, sni_from_client_hello
 from src.flow_orientation import sender_is_originator
 
@@ -212,6 +212,18 @@ class FlowAssembler:
             rec = self._modbus(payload, src_ip, sport, dst_ip, dport, ts, flow.uid) if 502 in (sport, dport) else None
             if rec is None and 20000 in (sport, dport):
                 rec = self._dnp3(payload, src_ip, sport, dst_ip, dport, ts, flow.uid)
+            if rec is None and dport == 44818:
+                enip = parse_enip(payload)
+                if enip is not None and not enip[3]:
+                    svc, cls, inst, _resp = enip
+                    self.stats["cip"] = self.stats.get("cip", 0) + 1
+                    rec = ("cip", {
+                        "uid": flow.uid, "ts": ts, "id.orig_h": src_ip, "id.orig_p": sport,
+                        "id.resp_h": dst_ip, "id.resp_p": dport, "proto": "tcp",
+                        "function": f"0x{svc:02X}", "detail": f"class={cls} instance={inst}",
+                        "service": svc, "class_id": cls, "instance_id": inst, "response": False,
+                        "segment_hash": _seg_hash(flow.uid, svc, cls, inst),
+                    })
             if rec is None and dport in (102, 2404):
                 kind, parsed = (("s7comm", parse_s7comm(payload)) if dport == 102 else ("iec104", parse_iec104(payload)))
                 if parsed is not None:

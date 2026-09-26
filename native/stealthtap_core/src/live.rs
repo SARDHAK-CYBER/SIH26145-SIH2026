@@ -115,14 +115,15 @@ pub struct KerberosOut { pub uid: String, pub ts: f64, pub orig_h: String, pub o
 
 /// Other OT protocols (S7comm, IEC 60870-5-104): `kind` is the log type Python dispatches on.
 pub struct OtOut { pub kind: &'static str, pub uid: String, pub ts: f64, pub orig_h: String, pub orig_p: u16,
-    pub resp_h: String, pub resp_p: u16, pub function: String, pub detail: String, pub code: u32, pub segment_hash: String }
+    pub resp_h: String, pub resp_p: u16, pub function: String, pub detail: String, pub code: u32, pub segment_hash: String,
+    pub class_id: u32, pub instance_id: u32, pub response: bool }
 
 pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out), Http(HttpOut), Kerberos(KerberosOut), Ot(OtOut) }
 
 #[derive(Default, Clone)]
 pub struct Stats {
     pub packets: u64, pub non_ip: u64, pub flows_seen: u64,
-    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub conn: u64,
+    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub conn: u64,
 }
 
 // Function-code name tables -- identical to flow_assembler.py's _MODBUS_FC / _DNP3_FC.
@@ -225,6 +226,66 @@ fn parse_iec104(p: &[u8]) -> Option<(String, String, u32)> {
         _ => return None,
     };
     Some((name.to_string(), format!("type={tid} cot={cot}"), tid as u32))
+}
+
+/// EtherNet/IP encapsulation (TCP/44818) carrying a CIP request: SendRRData (0x6F) / SendUnitData (0x70) ->
+/// common-packet-format items -> CIP message [service | path words | EPATH(class 0x20/0x21, instance 0x24/0x25)].
+/// An Unconnected Send (service 0x52 to the Connection Manager) is unwrapped once to the embedded request.
+/// Returns (service, class, instance, is_response).
+fn parse_enip(p: &[u8]) -> Option<(u8, u32, u32, bool)> {
+    if p.len() < 24 { return None; }
+    let cmd = u16::from_le_bytes([p[0], p[1]]);
+    if cmd != 0x6F && cmd != 0x70 { return None; }
+    let body = p.get(24..)?;
+    if body.len() < 8 { return None; }
+    let count = u16::from_le_bytes([body[6], body[7]]) as usize;
+    let mut items = &body[8..];
+    for _ in 0..count.min(8) {
+        if items.len() < 4 { return None; }
+        let ty = u16::from_le_bytes([items[0], items[1]]);
+        let len = u16::from_le_bytes([items[2], items[3]]) as usize;
+        let data = items.get(4..4 + len)?;
+        if ty == 0x00B2 || ty == 0x00B1 {
+            let cip = if ty == 0x00B1 { data.get(2..)? } else { data };   // connected data starts with a 2-byte sequence
+            return parse_cip_message(cip, true);
+        }
+        items = &items[4 + len..];
+    }
+    None
+}
+
+fn epath(path: &[u8]) -> (u32, u32) {
+    let (mut class, mut inst) = (0u32, 0u32);
+    let mut i = 0usize;
+    while i < path.len() {
+        match path[i] {
+            0x20 => { if i + 1 < path.len() { class = path[i + 1] as u32; } i += 2; }
+            0x21 => { if i + 3 < path.len() { class = u16::from_le_bytes([path[i + 2], path[i + 3]]) as u32; } i += 4; }
+            0x24 => { if i + 1 < path.len() { inst = path[i + 1] as u32; } i += 2; }
+            0x25 => { if i + 3 < path.len() { inst = u16::from_le_bytes([path[i + 2], path[i + 3]]) as u32; } i += 4; }
+            0x30 | 0x28 => { i += 2; }
+            0x31 | 0x29 => { i += 4; }
+            _ => { i += 2; }
+        }
+    }
+    (class, inst)
+}
+
+fn parse_cip_message(m: &[u8], unwrap: bool) -> Option<(u8, u32, u32, bool)> {
+    if m.len() < 2 { return None; }
+    let svc = m[0];
+    if svc & 0x80 != 0 { return Some((svc & 0x7f, 0, 0, true)); }   // response: service echoed with the high bit set
+    let words = m[1] as usize;
+    let path = m.get(2..2 + words * 2)?;
+    let (class, inst) = epath(path);
+    if svc == 0x52 && unwrap && class == 6 {           // Unconnected Send -> embedded message request
+        let d = m.get(2 + words * 2..)?;
+        if d.len() >= 4 {
+            let sz = u16::from_le_bytes([d[2], d[3]]) as usize;
+            if let Some(inner) = d.get(4..4 + sz) { return parse_cip_message(inner, false); }
+        }
+    }
+    Some((svc, class, inst, false))
 }
 
 fn parse_dnp3(p: &[u8], s_ip: &str, s_p: u16, d_ip: &str, d_p: u16, ts: f64, uid: &str) -> Option<Dnp3Out> {
@@ -423,14 +484,25 @@ impl LiveFlowAssembler {
                     self.stats.s7comm += 1;
                     out.push(Immediate::Ot(OtOut { kind: "s7comm", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
                         resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
-                        function, detail, code }));
+                        function, detail, code, class_id: 0, instance_id: 0, response: false }));
+                }
+            } else if l4.dport == 44818 {
+                if let Some((svc, class, inst, resp)) = parse_enip(l4.payload) {
+                    if !resp {
+                        self.stats.cip += 1;
+                        let function = format!("0x{svc:02X}");
+                        let detail = format!("class={class} instance={inst}");
+                        out.push(Immediate::Ot(OtOut { kind: "cip", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                            resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
+                            function, detail, code: svc as u32, class_id: class, instance_id: inst, response: false }));
+                    }
                 }
             } else if l4.dport == 2404 {
                 if let Some((function, detail, code)) = parse_iec104(l4.payload) {
                     self.stats.iec104 += 1;
                     out.push(Immediate::Ot(OtOut { kind: "iec104", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
                         resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
-                        function, detail, code }));
+                        function, detail, code, class_id: 0, instance_id: 0, response: false }));
                 }
             }
         }
