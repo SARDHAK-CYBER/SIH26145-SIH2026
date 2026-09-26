@@ -4,9 +4,10 @@ Passive AI-DPI network threat detection — SIH 2026, Problem Statement 26145 (N
 
 StealthTap inspects network traffic (uploaded PCAPs, live capture on a chosen interface, or streamed Zeek logs) and raises typed security alerts using 13 rule/statistical engines, three trained ML models, and an unsupervised per-network behavioural baseline — without ever storing packet payload. Packet parsing and flow assembly (both the upload and live paths) run on a validated native Rust core (`native/stealthtap_core`); detection logic stays in Python, unchanged, with an automatic fallback to the pure-Python parser if the native module isn't built.
 
-**Runs two ways:**
-- **Docker stack** — full pipeline: real Zeek 6.0.3 + 6 ICSNPP OT plugins, Suricata (20,829 ET Open rules), YARA, Postgres, Redis, React dashboard.
-- **Standalone desktop app** (`stealthtap_app.py`, meant to be packaged with PyInstaller — see the packaging caveat below) — no Docker/Redis/Postgres, for Windows and Linux. Select a network interface like Wireshark and watch alerts live.
+**Ships as a service, on Linux and Windows** (not a frozen executable — the native module is per-platform anyway, and a service behaves identically on both):
+- **Docker stack** (`docker compose up -d`) — full pipeline: real Zeek 6.0.3 + 6 ICSNPP OT plugins, Suricata (20,829 ET Open rules), YARA, Postgres, Redis, OpenSearch, Redpanda, React dashboard. The image builds the native Rust module (multi-stage), so uploads run on the fast path inside the container.
+- **Bare service** (`pip install -r requirements.txt` + `maturin develop --release` + `uvicorn`, or `python stealthtap_app.py`) — no Docker/Redis/Postgres. Select a network interface like Wireshark and watch alerts live.
+- Living status: [`docs/PRIORITIES.md`](docs/PRIORITIES.md) (regenerated from a real system check by `scripts/update_priorities.py`) and the latest full report in [`docs/reports/LATEST.md`](docs/reports/LATEST.md).
 
 ## Honest accuracy — read before deploying
 
@@ -49,6 +50,25 @@ Same rule as accuracy: measured, not asserted.
 Methodology note: this dev machine showed real, substantial throughput swings (not code regressions) purely from other concurrent load on the box — running the full Docker analysis stack alongside a wall-clock benchmark cut measured pps by 5-10x with zero code changes. Where that matters, prefer the CPU-time-profiled number (isolated from system scheduling noise) over a single wall-clock run.
 
 **What would close the remaining gap**: the remaining ~7 engines (ENG-03/04/07/09/11 and the Suricata/YARA/BZAR Docker-only engines) are either already cheap (stateless or exact-match), Docker-only (can't run in the hot path regardless), or lower-volume in practice — diminishing returns from porting them individually. The larger remaining lever is the ONNX inference cost itself (now the single biggest remaining line item) and further architectural work on how many flows reach Python at all. See `docs/PRD.md` §11 for the full methodology and every number behind this table.
+
+### Update 2026-09-26 — real-traffic hardening pass (measured, not asserted)
+
+A full-stack test (`python scripts/system_check.py`) found and fixed these; every row has a regression test (`tests/test_regressions_2026_09.py`, `tests/test_api_availability.py`, `tests/test_raw_ingest.py`, `tests/test_tls_sni.py`):
+
+| Issue found | Fix | Measured |
+|---|---|---|
+| One large upload froze the whole API, `/health` included | Heavy stages off the event loop, concurrency cap + 429 backpressure, 600 s deadline, async job endpoints, Suricata size-skip | 93.8 MB / 565k-flow capture: >10 min freeze → **HTTP 200 in 33 s**, worst `/health` 58 ms |
+| Docker image had no native module | Multi-stage build compiles the wheel | verified in-container |
+| Live capture ceiling ≈ 10k pps (scapy dissection ~100 µs/packet) | Raw-frame ingestion straight into the native assembler (`RawFrame`, all backends) | 6.5k → **~45–75k pps**, identical unique detections |
+| IPv6 silently dropped (76.6% of a real network) | IPv6 + extension-header walk in both native parsers | native == Python incl. flow uid |
+| Native JA4 returned a *wrong* fingerprint for a split ClientHello | Fail closed in native and Python (also for a cut inside an extension header) | tested at 5 cut points |
+| Native `expire()` O(k·n) | order-preserving `retain` | 942.8 → 38.8 ms (24×) |
+| ENG-01 Redis path | 2 pipelines → 1, `hiredis` C parser | 24.3 → 13.9 s / 12,300 flows |
+| RECONNAISSANCE alert flood (22,588 alerts, one scanner) | One alert per campaign + 10× escalation | — |
+| TLS traffic had rule-only detection (no `tls` model, no labeled data) | ENG-03 scores the TLS **SNI** with the trained DGA model (`TLS_SNI_MIN_CONFIDENCE`, default 90) | 0 alerts on 33 real SNIs + 25 CDN-style names; 6/6 DGA-style names fire. Small real sample — see `scripts/eval_tls_sni.py` |
+| Anomaly baseline needed ~10 min before doing anything | `warm_start` from the batch's own span | — |
+
+Decisions made from data: **Treelite not integrated** (its GTIL is 1.4–4× *slower* than onnxruntime; XGBoost-native is faster but inference is <1% of the pipeline — `scripts/bench_inference_backends.py`). **Multi-core engine pool stays opt-in and is not recommended**: with real Redis 4 workers measured 5.6k pps vs 44.9k pps single-process, because ENG-01 pays a Redis round trip per flow (fix path: batch ENG-01 commands per worker batch). AF_XDP is available for Linux sensors behind the `afxdp` cargo feature; Windows has no kernel-bypass equivalent short of Windows Server.
 
 ## Detection pipeline
 
@@ -93,7 +113,7 @@ Ingest paths ──────────────────────�
 |---|---|---|
 | ENG-01 | Volumetric DDoS / Slowloris | RedisBloom Count-Min Sketch flood counter + HyperLogLog spoofed-source ratio, per 10s window |
 | ENG-02 | C2 beaconing | Coefficient-of-variation on inter-arrival times (catches jittered beacons, not just perfect periodicity) |
-| ENG-03 | DGA domains / DNS tunnelling | Trained XGBoost+IsolationForest on registrable domain, or deterministic lexical heuristic fallback |
+| ENG-03 | DGA domains / DNS tunnelling / TLS SNI | Trained XGBoost+IsolationForest on registrable domain, or deterministic lexical heuristic fallback; same model applied to the TLS SNI (strict floor) |
 | ENG-04 | Encrypted malware (JA4) | Real JA4 TLS fingerprint (live path) matched against threat intel |
 | ENG-05 | Reconnaissance | Fan-out of **unanswered probe-shaped** flows per source per 5 min (excludes normal browsing) |
 | ENG-06 | Data exfiltration | Per-flow byte-ratio (with a volume floor) + accumulated low-and-slow ratio over 5 min |
@@ -126,33 +146,32 @@ Isolation Forests are trained but demoted to advisory everywhere (F1 < 0.3 on he
 | IEC 60870-5-104, IEC 61850 (GOOSE/SV/MMS), EtherCAT, BACnet, HART-IP | Third-party open parsers exist (see `docs/PRD.md` §9); not integrated |
 | Modbus RTU, PROFIBUS DP/PA, Foundation Fieldbus H1, wired HART | **Serial buses — not visible on any Ethernet capture.** Need a serial adapter or protocol gateway; out of scope for a NIC-based sensor |
 
-## Quick start — Docker (full stack)
+## Quick start — Docker (full stack, Linux or Windows)
 
 ```bash
 cp .env.example .env   # set real passwords, never commit .env
-docker compose up -d --build
+docker compose up -d --build     # services restart on failure and are health-gated
+python scripts/system_check.py   # full-stack check -> docs/reports/LATEST.md
 ```
 Dashboard: http://localhost:4173 · API: http://localhost:8000
 
-## Quick start — standalone desktop app (no Docker)
+## Quick start — bare service (no Docker)
 
 ```bash
-python stealthtap_app.py            # dev mode, opens http://127.0.0.1:8100
+pip install -r requirements.txt
+pip install maturin && maturin develop --release -m native/stealthtap_core/Cargo.toml   # optional but ~10x faster
+python stealthtap_app.py            # http://127.0.0.1:8100  (or: uvicorn on src.api)
 ```
-Or build a single executable:
-```bash
-cd dashboard-app && VITE_API_BASE= VITE_LIVE_API_BASE= npx vite build --outDir ../build/ui --emptyOutDir && cd ..
-pip install pyinstaller
-pyinstaller packaging/stealthtap.spec --noconfirm      # -> dist/stealthtap(.exe)
-```
-Live capture needs elevated privileges (Administrator on Windows, root/`CAP_NET_RAW` on Linux). **Windows also needs [Npcap](https://npcap.com/) installed separately** — its free licence forbids redistribution, so it is never bundled; the app detects it at runtime.
+Live capture needs elevated privileges (Administrator on Windows, root/`CAP_NET_RAW` on Linux). **Windows also needs [Npcap](https://npcap.com/) installed separately** — its free licence forbids redistribution, so it is never bundled. Linux sensors can add `--features afxdp` to the maturin build for AF_XDP.
 
-**Packaging status — disclosed, not glossed over**: this frozen build has not yet been produced or run. `packaging/stealthtap.spec` does not currently declare the native Rust module (`native/stealthtap_core`) as a binary to bundle, so a build today would most likely fall back to the slower pure-Python parser at runtime rather than fail loudly. Fix and a real build-and-run test are needed before treating the `.exe`/Linux binary as deliverable — see `native/README.md`.
+The PyInstaller single-executable path is retired in favour of the service deployment above (`packaging/` is kept for reference only).
 
 ## Verify it yourself
 
 ```bash
-python -m pytest tests/ -q                                             # 69 unit/integration tests
+python -m pytest tests/ -q                                             # 123 unit/integration tests
+python scripts/system_check.py [--accuracy]                            # full stack: infra, native, engines, models, perf, accuracy
+python scripts/update_priorities.py                                    # refresh docs/PRIORITIES.md from a real check
 python scripts/analyze_local.py samples/simulated_attack_traffic.pcap  # full pipeline, no Docker
 python scripts/eval_real_traffic.py "<your pcap folder>" --out eval_results  # accuracy on real data
 python scripts/validate_native_parser.py "<your pcap folder>"          # native upload-parser vs. Python, byte-for-byte
@@ -166,6 +185,8 @@ Zeek (BSD), Suricata (GPLv2), YARA (BSD), ICSNPP (BSD-3), XGBoost/scikit-learn/O
 
 ## Documentation
 
+- `docs/PRIORITIES.md` — living priority list (auto-refreshed status block + hand-maintained items)
+- `docs/reports/LATEST.md` — latest full system-check report; `docs/reports/history.csv` — trend
 - `docs/PRD.md` — full requirements, methodology, root-cause analysis, roadmap
 - `native/README.md` — native Rust core: scope, validation methodology, measured performance, what's still Python-only
 - `docs/LIVE_CAPTURE_DEPLOYMENT.md` — deploying the live/streaming sensor

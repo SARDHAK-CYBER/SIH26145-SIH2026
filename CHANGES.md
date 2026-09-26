@@ -1,3 +1,19 @@
+# Full-stack test + hardening pass — 2026-09-26
+
+`scripts/system_check.py` (new) found the defects below; result **27 PASS / 0 WARN / 0 FAIL**, 123 tests.
+Details and measurements: `docs/PRD.md` §12, living priorities: `docs/PRIORITIES.md`.
+
+- **API availability**: heavy stages off the event loop, concurrency cap + 429, deadline, async job endpoints, Suricata size-skip (mirai 93.8 MB: >10 min freeze → 33 s; `/health` 58 ms).
+- **Docker**: multi-stage build ships the native module; restart policies + health-gated `depends_on`.
+- **Live ingest**: raw-frame path into the native assembler on all backends (6.5k → ~45k pps end-to-end).
+- **IPv6** support in both native parsers; **JA4** fail-closed for split ClientHellos (native + Python).
+- **TLS**: ENG-03 scores the SNI with the trained DGA model (native + Python SNI extraction).
+- **Native**: `expire()` 24× faster, order preserved; `afxdp` is now an opt-in cargo feature.
+- **ENG-01** Redis path: one pipeline + `hiredis`; **ENG-05** one alert per campaign.
+- **Fixtures**: realistic generator, floods aligned to ENG-01's 10 s window.
+- **Decisions**: Treelite not integrated (measured slower/negligible); multi-core pool still not recommended (real-Redis 1/2/4 workers: 44.9k / 3.2k / 5.6k pps); PyInstaller path retired in favour of service deployment.
+- **Tooling**: `scripts/system_check.py`, `scripts/update_priorities.py`, `scripts/bench_inference_backends.py`, `scripts/eval_tls_sni.py`, `docs/PRIORITIES.md`, `docs/reports/`.
+
 # Native Rust core + throughput pass — 2026-09-23
 
 Priority: reach the stated 1-5 Gbps / low-latency target without losing the

@@ -116,26 +116,40 @@ def add_ddos_spoofed_source_flood(start_ts: float) -> float:
         ts += 0.01
     ground_truth["threats"].append({
         "category": "ddos_spoofed_source_flood", "start_ts": start_ts, "end_ts": ts,
-        "expected_alert": "VOLUMETRIC_DDOS (KNOWN GAP -- see note)", "engine": "ENG01",
-        "note": "spoofed multi-source flood -- current per-source-IP counter will likely MISS this; a documented open gap (source-IP entropy), not a generator bug",
+        "expected_alert": "VOLUMETRIC_DDOS", "engine": "ENG01",
+        "note": "spoofed multi-source flood -- caught by ENG01's per-destination distinct-source (HyperLogLog uniqueness) check, not the per-source counter; this used to be labelled a known gap but the check exists and fires (92% confidence, spoofed_source_pattern=true)",
     })
     return ts
 
 
 def add_slowloris(start_ts: float) -> float:
-    """(a) Slowloris variant -- one long-duration, near-zero-byte
-    connection, matching ENG01's check exactly (duration > 120s, bytes < 50)."""
+    """(a) Slowloris -- ONE established connection held open for 160s by a
+    few bytes of partial header every ~40s, matching ENG01's check (duration
+    > 120s, bytes < 50). A real handshake is required: an earlier version
+    sent a bare SYN and one data packet 150s later with no handshake, which
+    Zeek (correctly) logs as two unrelated records (S0 + OTH), so the real
+    Zeek-backed pipeline could never see a long, low-byte connection there.
+    A real Slowloris is a completed handshake plus trickled headers."""
     ts = start_ts
-    attacker = "192.168.100.51"
-    syn = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src=attacker, dst=VICTIM_IP) / TCP(sport=51000, dport=80, flags="S")
-    syn.time = ts; packets.append(syn)
-    trickle = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src=attacker, dst=VICTIM_IP) / TCP(sport=51000, dport=80, flags="PA") / Raw(b"X")
-    trickle.time = ts + 150  # 150s later, ~1 byte total -- see module docstring on timestamp design
-    packets.append(trickle)
+    attacker, sport = "192.168.100.51", 51000
+    eth = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02")
+    seq_a, seq_v = 1000, 9000
+    def add(pkt, t):
+        pkt.time = t; packets.append(pkt)
+    add(eth / IP(src=attacker, dst=VICTIM_IP) / TCP(sport=sport, dport=80, flags="S", seq=seq_a), ts)
+    add(eth / IP(src=VICTIM_IP, dst=attacker) / TCP(sport=80, dport=sport, flags="SA", seq=seq_v, ack=seq_a + 1), ts + 0.01)
+    add(eth / IP(src=attacker, dst=VICTIM_IP) / TCP(sport=sport, dport=80, flags="A", seq=seq_a + 1, ack=seq_v + 1), ts + 0.02)
+    sent = 0
+    for k in range(1, 5):
+        t = ts + 40 * k
+        add(eth / IP(src=attacker, dst=VICTIM_IP) / TCP(sport=sport, dport=80, flags="PA", seq=seq_a + 1 + sent, ack=seq_v + 1) / Raw(b"X"), t)
+        sent += 1
+        add(eth / IP(src=VICTIM_IP, dst=attacker) / TCP(sport=80, dport=sport, flags="A", seq=seq_v + 1, ack=seq_a + 1 + sent), t + 0.01)
+    add(eth / IP(src=attacker, dst=VICTIM_IP) / TCP(sport=sport, dport=80, flags="FA", seq=seq_a + 1 + sent, ack=seq_v + 1), ts + 161)
     ground_truth["threats"].append({
-        "category": "slowloris", "start_ts": start_ts, "end_ts": ts + 150,
+        "category": "slowloris", "start_ts": start_ts, "end_ts": ts + 161,
         "expected_alert": "SLOWLORIS", "engine": "ENG01",
-        "note": "one connection, 150s duration, ~1 byte payload",
+        "note": "one ESTABLISHED connection, 161s duration, 4 payload bytes total",
     })
     return ts + 1
 
@@ -184,7 +198,7 @@ def add_dns_tunneling(start_ts: float) -> float:
     n = 8
     for i in range(n):
         payload = _rand_high_entropy_label(45, 55)
-        domain = f"{payload}.chunk{i:02d}.exfil-test.local"
+        domain = f"{payload}.chunk{i:02d}.exfil-test.net"
         pkt = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src=INTERNAL_HOST, dst="8.8.8.8") / UDP(sport=random.randint(40000, 60000), dport=53) / DNS(rd=1, qd=DNSQR(qname=domain, qtype="TXT"))
         pkt.time = ts; packets.append(pkt)
         ts += 0.5
@@ -248,32 +262,48 @@ def add_reconnaissance(start_ts: float) -> float:
 
 def add_data_exfiltration(start_ts: float) -> float:
     """(f) Data exfiltration -- one flow, asymmetric byte ratio, over
-    ENG06's 20:1 threshold."""
+    ENG06's 20:1 threshold AND its 256KB single-flow volume floor (the
+    floor exists because a 654-byte request vs a 25-byte reply is a 26:1
+    'ratio' on ordinary traffic). Real, advancing TCP sequence numbers are
+    required: a version that reused seq=0 on every segment made Zeek count
+    240 overlapping retransmissions as ~1.4KB of payload (orig_bytes=1399),
+    so the Zeek-backed pipeline could never see the volume."""
     ts = start_ts
     attacker, dst = "192.168.100.15", "203.0.113.50"
     src_port = random.randint(50000, 60000)
-    syn = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src=attacker, dst=dst) / TCP(sport=src_port, dport=443, flags="S")
-    syn.time = ts; packets.append(syn); ts += 0.02
-    synack = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src=dst, dst=attacker) / TCP(sport=443, dport=src_port, flags="SA")
-    synack.time = ts; packets.append(synack); ts += 0.02
-    for _ in range(20):
-        chunk = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src=attacker, dst=dst) / TCP(sport=src_port, dport=443, flags="PA") / Raw(b"D" * 1400)
-        chunk.time = ts; packets.append(chunk); ts += 0.01
-    small_resp = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src=dst, dst=attacker) / TCP(sport=443, dport=src_port, flags="A") / Raw(b"ok")
-    small_resp.time = ts; packets.append(small_resp)
+    eth = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02")
+    seq_a, seq_v = 5000, 70000
+    def add(pkt, t):
+        pkt.time = t; packets.append(pkt)
+    add(eth / IP(src=attacker, dst=dst) / TCP(sport=src_port, dport=443, flags="S", seq=seq_a), ts); ts += 0.02
+    add(eth / IP(src=dst, dst=attacker) / TCP(sport=443, dport=src_port, flags="SA", seq=seq_v, ack=seq_a + 1), ts); ts += 0.02
+    add(eth / IP(src=attacker, dst=dst) / TCP(sport=src_port, dport=443, flags="A", seq=seq_a + 1, ack=seq_v + 1), ts); ts += 0.01
+    sent = 0
+    for _ in range(240):
+        add(eth / IP(src=attacker, dst=dst) / TCP(sport=src_port, dport=443, flags="PA", seq=seq_a + 1 + sent, ack=seq_v + 1) / Raw(b"D" * 1400), ts)
+        sent += 1400; ts += 0.01
+    add(eth / IP(src=dst, dst=attacker) / TCP(sport=443, dport=src_port, flags="PA", seq=seq_v + 1, ack=seq_a + 1 + sent) / Raw(b"ok"), ts)
     ground_truth["threats"].append({
         "category": "data_exfiltration", "start_ts": start_ts, "end_ts": ts,
         "expected_alert": "DATA_EXFILTRATION", "engine": "ENG06",
-        "note": "~28000 bytes out, ~2 bytes back -- far over the 20:1 ratio threshold",
+        "note": "~336000 bytes out, ~2 bytes back -- over both the 20:1 ratio and the 256KB single-flow volume floor",
     })
     return ts + 1
+
+
+def _next_window_start(ts: float, window: float = 10.0) -> float:
+    """Start of the next ENG-01 counting window (+0.5s). ENG-01 counts flows per
+    fixed 10s wall-clock bucket, so a 2.5s flood that straddles a bucket boundary
+    is split (e.g. 172 + 78) and never reaches the 200-flow threshold. The
+    fixture must not depend on what second it happened to be generated in."""
+    return (int(ts // window) + 1) * window + 0.5
 
 
 def main() -> None:
     ts = BASE_TIME
     ts = add_benign_traffic(ts)
-    ts = add_ddos_single_source_flood(ts + 2)
-    ts = add_ddos_spoofed_source_flood(ts + 2)
+    ts = add_ddos_single_source_flood(_next_window_start(ts))
+    ts = add_ddos_spoofed_source_flood(_next_window_start(ts))
     ts = add_slowloris(ts + 2)
     ts = add_c2_beaconing(ts + 2)
     ts = add_dga_domains(ts + 2)

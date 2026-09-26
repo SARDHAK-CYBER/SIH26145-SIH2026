@@ -1,0 +1,33 @@
+# System check 20260926_164429
+
+**PASS 27 · WARN 0 · FAIL 0 · SKIP 0**
+
+| section | check | status | detail |
+|---|---|---|---|
+| infra | api /health | PASS | models=['dns', 'flow', 'modbus'] db=True p50=3.3ms p99=113.9ms |
+| infra | pipeline status (all services) | PASS | services_bad=none engines=13 |
+| infra | redis + RedisBloom CMS/HLL | PASS | RTT p50=0.23ms p99=0.42ms CMS=[3] HLL=2 client=hiredis |
+| infra | postgres (+ API read path) | PASS | pg_isready=/var/run/postgresql:5432 - accepting connections /alerts=200 |
+| infra | opensearch | PASS | cluster=yellow nodes=1 |
+| infra | redpanda (kafka) | PASS | CLUSTER HEALTH OVERVIEW ======================= Healthy:                          true Unh |
+| infra | dashboard (react) | PASS | dashboard=200 |
+| infra | containers up | PASS | 11 containers, down=none |
+| infra | container logs (errors) | PASS | error-lines in last 300 log lines: none |
+| native | stealthtap_core import | PASS | missing=none |
+| native | parser native==python | PASS | ALL EQUIVALENT |
+| native | ENG-01 native==python | PASS | ALL EQUIVALENT (4 compared, 0 skipped) |
+| native | ENG-02 native==python | PASS | ALL EQUIVALENT (4 compared, 0 skipped) |
+| native | ENG-05 native==python | PASS | ALL EQUIVALENT (4 compared, 0 skipped) |
+| native | ENG-06 native==python | PASS | ALL EQUIVALENT (4 compared, 0 skipped) |
+| native | ENG-13 native==python | PASS | ALL EQUIVALENT (4 compared, 0 skipped) |
+| engines | pytest (engines, models, mapping, capture) | PASS | 123 passed in 36.85s |
+| engines | ground-truth attack pcap (end-to-end) | PASS | parser=zeek alerts=60 missed_expected=none unexpected_classes=none {'VOLUMETRIC_DDOS': 2, 'RECONNAISSANCE': 1, 'C2_BEACONING': 32, 'DATA_EXFILTRATION': 1, 'SLOWLORIS': 1, 'DGA_DOMAIN': 13, 'DNS_TUNNELING': 8, 'NETWORK_IN |
+| models | manifest / feature-schema contract | PASS | families=['dns', 'flow', 'modbus'] schema_mismatch=none |
+| models | dns model load+infer+metrics | PASS | xgb f1=0.9066 prec=0.9353 rec=0.8795 / infer 2.4us/row (20k batch) / iforest f1=0.0666 (advisory) |
+| models | flow model load+infer+metrics | PASS | xgb f1=0.999 prec=0.9996 rec=0.9985 / infer 2.0us/row (20k batch) / iforest f1=0.2084 (advisory) |
+| models | modbus model load+infer+metrics | PASS | xgb f1=1.0 prec=1.0 rec=1.0 / infer 1.9us/row (20k batch) / iforest f1=0.0 (advisory) |
+| models | model coverage | PASS | families without a trained model: none; tls has no labeled data -> covered by ENG-03 SNI scoring (dns model) + JA4 intel (ENG-04) |
+| models | API /score/dns round-trip | PASS | status=200 score=99.92 p50=30.6ms p99=41.0ms |
+| performance | live pipeline throughput (1 worker) | PASS | live pipeline 44,576 pps, dropped=0 |
+| performance | /analyze/pcap latency (small file) | PASS | wall=8.1s parse=8.003s detect=0.044s parser=zeek suricata_ran=True yara=True |
+| accuracy | real-traffic accuracy (latest report) | PASS | hybrid recall=83% specificity=50% precision=95% F1=0.89 / flow-FPR=0.167% (1/598) / report age 0.1h |
