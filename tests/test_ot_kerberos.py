@@ -296,3 +296,26 @@ def test_opcua_write_from_a_real_read_request(tmp_path):
         pytest.skip("no plain ReadRequest in this capture")
     got = [r["function"] for _t, r in _native_records(_write_pcap(tmp_path, [fr]), {"opcua"})]
     assert got == ["WRITE"]
+
+
+def test_real_global_ipv6_flows_and_hop_by_hop_are_assembled_natively():
+    """REAL IPv6 captures from the tcpdump test-suite (global 2604:1380:... addresses, incl. a hop-by-hop jumbogram)."""
+    d = PUB / "ipv6"
+    if not (d / "bigtcp-ipv6.pcap").exists():
+        pytest.skip("public sample not downloaded")
+
+    def flows(name):
+        idx = core.PcapIndex(str(d / name))
+        a = core.LiveFlowAssembler(60.0)
+        for i in range(1, len(idx) + 1):
+            ts, _w, raw = idx.packet(i)
+            a.process(ts, bytes(raw))
+        return [r for _t, r in a.flush()]
+
+    plain = flows("bigtcp-ipv6.pcap")
+    hbh = flows("bigtcp-ipv6-hbh.pcap")
+    assert len(plain) == len(hbh) == 1
+    for r in plain + hbh:
+        assert r["id.orig_h"].startswith("2604:1380:4091:ce00::") and r["id.resp_h"].startswith("2604:1380:4091:ce00::")
+        assert r["orig_bytes"] >= 79_000                                     # the 80 KB payload was seen, not dropped
+    assert hbh[0]["orig_bytes"] > 0                                          # extension header walked, TCP still found
