@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ApiError, network, type Coverage, type DiscoveredHost } from '../../api/client';
 import type { HostRow } from '../../types/alert';
 import { ago, fmtBytes, fmtNum } from '../../lib/format';
 
@@ -38,11 +39,7 @@ export function HostsView({ hosts, running, onOpenHost }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div className="glass" style={{ padding: 14, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.55 }}>
-        <strong style={{ color: 'var(--text)' }}>What this sees.</strong> Every host that sent or received a packet on the monitored link, plus every
-        device that announced itself by ARP. On a mirror/SPAN port, a TAP, or a gateway this is the whole network; on a plain Wi-Fi client it is this
-        machine, its peers' broadcast/multicast traffic, and everything it talks to. Nothing is guessed: rows appear only when packets were seen.
-      </div>
+      <CoverageCard running={running} />
 
       <div className="glass" style={{ padding: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         {(['all', 'local', 'remote'] as Scope[]).map((s) => (
@@ -89,6 +86,65 @@ export function HostsView({ hosts, running, onOpenHost }: Props) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+const VERDICT_TEXT: Record<string, { label: string; color: string }> = {
+  full: { label: 'Full visibility', color: 'var(--accent-emerald)' },
+  partial: { label: 'Partial visibility', color: 'var(--sev-medium)' },
+  'own-traffic-only': { label: 'This machine + broadcast only', color: 'var(--sev-high)' },
+};
+
+function CoverageCard({ running }: { running: boolean }) {
+  const [cov, setCov] = useState<Coverage | null>(null);
+  const [found, setFound] = useState<DiscoveredHost[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [mode, setMode] = useState<string | undefined>();
+
+  useEffect(() => {
+    let dead = false;
+    const pull = () => network.coverage((found ?? []).map((h) => h.ip)).then((c) => { if (!dead) setCov(c); }).catch(() => {});
+    pull();
+    const t = window.setInterval(pull, 5000);
+    return () => { dead = true; window.clearInterval(t); };
+  }, [found, running]);
+
+  async function discover() {
+    setBusy(true); setErr(null);
+    try { const r = await network.discover(); setFound(r.hosts); setMode(r.mode); }
+    catch (e) { setErr(e instanceof ApiError ? e.message : 'discovery failed'); }
+    finally { setBusy(false); }
+  }
+
+  const v = cov ? (VERDICT_TEXT[cov.verdict] ?? { label: cov.verdict, color: 'var(--text-muted)' }) : null;
+  return (
+    <div className="glass" style={{ padding: 16, display: 'grid', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text-muted)' }}>Network visibility</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: v?.color }}>{v?.label ?? '—'}
+            {cov?.visible_ratio != null && <span className="mono" style={{ fontSize: 13, marginLeft: 10, color: 'var(--text-dim)' }}>{Math.round(cov.visible_ratio * 100)}%</span>}
+          </div>
+        </div>
+        <div className="mono" style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+          {cov ? <>{cov.visible_devices} of {cov.local_devices_known} local devices have visible unicast traffic<br />
+            {cov.known_only_devices} known only from ARP / broadcast{found ? ' / active discovery' : ''}</> : 'waiting for capture…'}
+        </div>
+        <button className="btn-ghost" style={{ marginLeft: 'auto' }} disabled={busy} onClick={discover}>
+          {busy ? 'Sweeping subnet…' : 'Discover devices on my subnet'}
+        </button>
+      </div>
+      {cov?.advice && <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.55 }}>{cov.advice}</div>}
+      {err && <div style={{ fontSize: 12, color: 'var(--sev-critical)' }}>{err}</div>}
+      {found && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          Active sweep ({mode}): {found.length} device{found.length === 1 ? '' : 's'} answered ARP
+          {cov && cov.silent_discovered.length > 0 ? ` — ${cov.silent_discovered.length} of them never appeared in the captured traffic (blind spot): ` : '.'}
+          <span className="mono">{cov?.silent_discovered.slice(0, 12).join(', ')}</span>
+        </div>
+      )}
     </div>
   );
 }

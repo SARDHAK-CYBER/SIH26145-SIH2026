@@ -81,6 +81,22 @@ def local_subnets() -> list[tuple[str, ipaddress.IPv4Network, ipaddress.IPv4Addr
     return out
 
 
+def _preferred(subs):
+    """The subnet of the interface that carries the default route (the 'real' LAN), else the first one."""
+    import socket
+    try:
+        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sk.connect(("192.0.2.1", 9))            # no packet is sent; the OS just picks the outgoing address
+        me = ipaddress.IPv4Address(sk.getsockname()[0])
+        sk.close()
+        for entry in subs:
+            if entry[2] == me:
+                return entry
+    except OSError:
+        pass
+    return subs[0]
+
+
 def resolve_target(interface: Optional[str], cidr: Optional[str]) -> tuple[str, ipaddress.IPv4Network]:
     subs = [s for s in local_subnets() if interface is None or s[0] == interface]
     if not subs:
@@ -97,7 +113,7 @@ def resolve_target(interface: Optional[str], cidr: Optional[str]) -> tuple[str, 
         else:
             raise HTTPException(403, "the range must lie inside a subnet this machine is attached to")
     else:
-        name, net, ip = subs[0]
+        name, net, ip = _preferred(subs)
         iface = name
         target = net if net.num_addresses <= 256 else ipaddress.IPv4Network(f"{ip}/24", strict=False)
     if not any(target.subnet_of(r) for r in _SWEEPABLE):

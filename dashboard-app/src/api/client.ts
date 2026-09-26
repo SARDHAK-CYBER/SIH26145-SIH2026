@@ -193,4 +193,24 @@ export const live = {
   streamUrl: () => `${liveBase()}/capture/stream`,
 };
 
+export interface Coverage {
+  verdict: string; visible_ratio: number | null; local_devices_known: number; visible_devices: number;
+  known_only_devices: number; silent_discovered: string[]; known_only_sample: string[]; advice: string | null;
+}
+export interface DiscoveredHost { ip: string; mac: string | null; vendor: string | null; hostname: string | null }
+export const network = {
+  coverage: (known: string[] = []) =>
+    fetch(`${liveBase()}/capture/coverage?known=${encodeURIComponent(known.join(','))}`).then((r) => j<Coverage>(r, 'coverage failed')),
+  discover: async (): Promise<{ cidr: string; mode?: string; hosts: DiscoveredHost[] }> => {
+    const start = await fetch(`${liveBase()}/network/discover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then((r) => j<{ job_id: string; cidr: string }>(r, 'discovery failed to start'));
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const st = await fetch(`${liveBase()}/network/discover/${start.job_id}`).then((r) => j<{ status: string; hosts: DiscoveredHost[]; mode?: string; error?: string }>(r, 'discovery failed'));
+      if (st.status === 'done') return { cidr: start.cidr, mode: st.mode, hosts: st.hosts };
+      if (st.status === 'error') throw new ApiError(st.error ?? 'discovery failed');
+    }
+  },
+};
+
 export type { Alert };

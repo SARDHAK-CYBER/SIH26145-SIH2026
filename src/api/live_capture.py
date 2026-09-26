@@ -200,6 +200,54 @@ def hosts(limit: int = 500, scope: str = "all"):
     return out
 
 
+def _own_addresses() -> set[str]:
+    try:
+        import psutil
+        return {a.address for addrs in psutil.net_if_addrs().values() for a in addrs if a.family.name in ("AF_INET", "AF_INET6")}
+    except Exception:
+        return set()
+
+
+@router.get("/coverage")
+def coverage(known: str = ""):
+    """How much of the LOCAL network this sensor can actually see -- computed, not assumed.
+
+    A device is *visible* when the sensor has seen it SEND unicast TCP/UDP (so its conversations with other hosts are
+    inspected). A device is *known-only* when the sensor merely learned it exists (ARP, broadcast/multicast, or an
+    active discovery result passed in `known=ip,ip,...`). On a mirror port / TAP / gateway nearly every known device
+    is visible; on a Wi-Fi client only this machine and its peers' broadcast chatter are.
+    """
+    rows = hosts(1000, "local")
+    own = _own_addresses()
+    extra = {x.strip() for x in known.split(",") if x.strip()}
+    seen_ips = {h["ip"] for h in rows}
+    local = [h for h in rows if h["ip"] not in own and not h["ip"].startswith(("224.", "239.", "255.", "ff", "fe80", "169.254.255"))
+             and h["ip"] != "0.0.0.0"]
+    visible = [h for h in local if h["tcp"] + h["udp"] > 0 and h["tx_pkts"] > 0]
+    known_only = [h for h in local if h not in visible]
+    silent = sorted(extra - seen_ips - own)
+    total = len(local) + len(silent)
+    ratio = round(len(visible) / total, 3) if total else None
+    if total == 0:
+        verdict = "no other local devices observed yet"
+    elif ratio >= 0.9:
+        verdict = "full"
+    elif ratio >= 0.35:
+        verdict = "partial"
+    else:
+        verdict = "own-traffic-only"
+    return {
+        "verdict": verdict, "visible_ratio": ratio, "local_devices_known": total,
+        "visible_devices": len(visible), "known_only_devices": len(known_only) + len(silent),
+        "silent_discovered": silent[:200],
+        "known_only_sample": [h["ip"] for h in known_only[:20]],
+        "advice": None if verdict == "full" else (
+            "To inspect every device's traffic, place the sensor where that traffic passes: a switch mirror/SPAN port, a network TAP, "
+            "or the gateway itself (e.g. Windows Mobile Hotspot / Internet Connection Sharing host, a Linux bridge or router). "
+            "See docs/DEPLOYMENT_COVERAGE.md."),
+    }
+
+
 @router.get("/protocols")
 def protocols():
     return sorted(_need_agent().protocols(), key=lambda r: -r["bytes"])
