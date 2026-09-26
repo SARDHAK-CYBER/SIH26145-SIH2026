@@ -48,6 +48,9 @@ class Alert(BaseModel):
         # a flow that is statistically unusual FOR THIS NETWORK, without a
         # more specific attack class.
         "BEHAVIORAL_ANOMALY",
+        # A weakness observed on the wire rather than an attack: e.g. an OPC UA channel negotiated with security policy
+        # None (no signing/encryption) or a deprecated SHA-1 policy.
+        "INSECURE_CONFIGURATION",
     ]
     flow_identifier: FlowIdentifier
     mitre_attack: MitreAttack

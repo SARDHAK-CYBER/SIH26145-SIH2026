@@ -596,7 +596,22 @@ _CLASSIC_PCAP_MAGICS = (bytes.fromhex("d4c3b2a1"), bytes.fromhex("a1b2c3d4"),
                        bytes.fromhex("4d3cb2a1"), bytes.fromhex("a1b23c4d"))
 
 
-def _store_capture(analysis_id: str, contents: bytes) -> bool:
+def _owner_file(analysis_id: str) -> Path:
+    return CAPTURE_STORE / f"{analysis_id}.tenant"
+
+
+def _check_owner(analysis_id: str, request: Request) -> None:
+    """A stored capture is visible only to the tenant that uploaded it (404, not 403, so ids do not leak)."""
+    tenant = getattr(request.state, "tenant", None) or "default"
+    try:
+        owner = _owner_file(analysis_id).read_text().strip()
+    except OSError:
+        owner = "default"
+    if owner != tenant:
+        raise HTTPException(404, "no such capture")
+
+
+def _store_capture(analysis_id: str, contents: bytes, tenant: str = "default") -> bool:
     """Persist a classic pcap for the inspector (pcapng isn't indexable). Best-effort."""
     if contents[:4] not in _CLASSIC_PCAP_MAGICS:
         return False
@@ -609,11 +624,13 @@ def _store_capture(analysis_id: str, contents: bytes) -> bool:
             if now - f.stat().st_mtime > CAPTURE_TTL_SECONDS or total + len(contents) > CAPTURE_STORE_MAX_BYTES:
                 total -= f.stat().st_size
                 f.unlink(missing_ok=True)
+                _owner_file(f.stem).unlink(missing_ok=True)
                 with _INDEX_LOCK:
                     _INDEXES.pop(f.stem, None)
         if len(contents) > CAPTURE_STORE_MAX_BYTES:
             return False
         (CAPTURE_STORE / f"{analysis_id}.pcap").write_bytes(contents)
+        _owner_file(analysis_id).write_text(tenant)
         return True
     except OSError:
         return False
@@ -642,10 +659,10 @@ def _get_index(analysis_id: str):
     return idx
 
 
-async def _analyze_contents(contents: bytes, filename: str, app_state) -> dict:
+async def _analyze_contents(contents: bytes, filename: str, app_state, tenant: str = "default") -> dict:
     parser_used = "zeek"
     analysis_id = str(uuid.uuid4())
-    stored = await asyncio.to_thread(_store_capture, analysis_id, contents)
+    stored = await asyncio.to_thread(_store_capture, analysis_id, contents, tenant)
     t0 = time.time()
     # Zeek parsing and Suricata signature matching are fully
     # independent services -- run them concurrently rather than one
@@ -739,9 +756,9 @@ async def _analyze_contents(contents: bytes, filename: str, app_state) -> dict:
     }
 
 
-async def _guarded_analysis(contents: bytes, filename: str, app_state) -> dict:
+async def _guarded_analysis(contents: bytes, filename: str, app_state, tenant: str = "default") -> dict:
     try:
-        return await asyncio.wait_for(_analyze_contents(contents, filename, app_state), ANALYSIS_TIMEOUT_SECONDS)
+        return await asyncio.wait_for(_analyze_contents(contents, filename, app_state, tenant), ANALYSIS_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         raise HTTPException(504, f"analysis exceeded {ANALYSIS_TIMEOUT_SECONDS:.0f}s; use POST /analyze/pcap/async "
                                  f"and poll GET /analyze/jobs/<id> for large captures")
@@ -756,7 +773,7 @@ async def analyze_pcap(request: Request, file: UploadFile = File(...)):
         raise HTTPException(413, f"file exceeds {MAX_UPLOAD_BYTES} byte cap")
     _admit()
     try:
-        return await _guarded_analysis(contents, file.filename, request.app.state)
+        return await _guarded_analysis(contents, file.filename, request.app.state, getattr(request.state, "tenant", None) or "default")
     finally:
         _release()
 
@@ -783,10 +800,12 @@ async def analyze_pcap_async(request: Request, file: UploadFile = File(...)):
     _JOBS[job_id] = {"status": "running", "created": time.time(), "filename": file.filename}
     app_state = request.app.state
     filename = file.filename
+    tenant = getattr(request.state, "tenant", None) or "default"
+    _JOBS[job_id]["tenant"] = tenant
 
     async def _run():
         try:
-            _JOBS[job_id].update(status="done", result=await _guarded_analysis(contents, filename, app_state))
+            _JOBS[job_id].update(status="done", result=await _guarded_analysis(contents, filename, app_state, tenant))
         except HTTPException as exc:
             _JOBS[job_id].update(status="error", error=exc.detail, http_status=exc.status_code)
         except Exception as exc:  # never let a background task die silently
@@ -799,9 +818,9 @@ async def analyze_pcap_async(request: Request, file: UploadFile = File(...)):
 
 
 @router.get("/analyze/jobs/{job_id}")
-async def analyze_job(job_id: str):
+async def analyze_job(request: Request, job_id: str):
     job = _JOBS.get(job_id)
-    if job is None:
+    if job is None or job.get("tenant", "default") != (getattr(request.state, "tenant", None) or "default"):
         raise HTTPException(404, "unknown or expired job id")
     if job["status"] == "done":
         return {"job_id": job_id, "status": "done", "result": job["result"]}
@@ -814,10 +833,11 @@ async def analyze_job(job_id: str):
 # Packet inspector for uploaded captures
 # --------------------------------------------------------------------------
 @router.get("/analyze/{analysis_id}/packets")
-async def capture_packets(analysis_id: str, start: int = 0, limit: int = 200, filter: str = ""):
+async def capture_packets(request: Request, analysis_id: str, start: int = 0, limit: int = 200, filter: str = ""):
     """Page through the uploaded capture. `start` is a 0-based packet index; the reply's
     `next` is where to continue (== total when exhausted). `filter`: whitespace-separated
     case-insensitive terms that must all match a row, `!term` negates ("tcp 10.0.0.5 !dns")."""
+    _check_owner(analysis_id, request)
     idx = _get_index(analysis_id)
     limit = max(1, min(limit, 1000))
     rows, nxt = await asyncio.to_thread(idx.page, max(0, start), limit, filter)
@@ -826,7 +846,8 @@ async def capture_packets(analysis_id: str, start: int = 0, limit: int = 200, fi
 
 
 @router.get("/analyze/{analysis_id}/packet/{n}")
-async def capture_packet(analysis_id: str, n: int):
+async def capture_packet(request: Request, analysis_id: str, n: int):
+    _check_owner(analysis_id, request)
     idx = _get_index(analysis_id)
     got = await asyncio.to_thread(idx.packet, n)
     if got is None:
@@ -839,9 +860,10 @@ async def capture_packet(analysis_id: str, n: int):
 
 
 @router.get("/analyze/{analysis_id}/export.pcap")
-async def capture_export(analysis_id: str, filter: str = "", limit: int = 20000):
+async def capture_export(request: Request, analysis_id: str, filter: str = "", limit: int = 20000):
     """Download the packets matching `filter` as a pcap (the whole file when no filter)."""
     from fastapi.responses import FileResponse, Response
+    _check_owner(analysis_id, request)
     idx = _get_index(analysis_id)
     if not filter.strip():
         return FileResponse(idx.path(), media_type="application/vnd.tcpdump.pcap",

@@ -155,7 +155,7 @@ def test_opcua_native_equals_python_on_real_wireshark_captures(name, expect):
             r = parse_opcua(bytes(pkt[TCP].payload))
             if r:
                 py.append(r[0])
-    rs = [r["function"] for _t, r in _native_records(f, {"opcua"})]
+    rs = [r["function"] for _t, r in _native_records(f, {"opcua"}) if r["function"] != "SECURE_CHANNEL_POLICY"]
     assert sorted(py) == sorted(rs) and expect <= set(rs)
     from src.engines.eng07_ot_anomaly import OPCUA_CRITICAL_SERVICES, OPCUA_HIGH_SERVICES
     assert not (set(rs) & (OPCUA_CRITICAL_SERVICES | OPCUA_HIGH_SERVICES))
@@ -337,3 +337,37 @@ def test_opcua_encrypted_and_unsecured_metadata_on_real_captures():
         cap.stop()
     assert st["enc"]["opcua_encrypted"] >= 1 and st["enc"]["opcua_unsecured"] >= 1
     assert st["signed"]["opcua_encrypted"] == 0
+
+
+def test_opcua_policy_events_native_equals_python_and_alert_on_real_captures():
+    """The security policy is negotiated in clear even when bodies are ciphertext: both decoders report it, and ENG-07
+    flags policy None / deprecated SHA-1 policies (LOW/MEDIUM posture findings, once per client/server/policy per hour)."""
+    import asyncio
+    from scapy.utils import PcapReader
+    from scapy.layers.inet import IP, TCP
+    from src.capture.ot import parse_opcua_policy
+    from src.engines.eng07_ot_anomaly import OTIndustrialAnomalyDetector
+    from src.flow_mapping import map_record
+    seen = {}
+    for name in ("opcua-encrypted.pcap", "opcua-signed.pcap"):
+        f = PUB / "opcua" / name
+        if not f.exists():
+            pytest.skip("public sample not downloaded")
+        py = []
+        for pkt in PcapReader(str(f)):
+            if IP in pkt and TCP in pkt and pkt[TCP].dport == 4840:
+                pol = parse_opcua_policy(bytes(pkt[TCP].payload))
+                if pol:
+                    py.append(pol)
+        rs = [r for _t, r in _native_records(f, {"opcua"}) if r["function"] == "SECURE_CHANNEL_POLICY"]
+        assert py == [r["detail"] for r in rs]
+        seen[name] = py
+
+        async def go():
+            eng = OTIndustrialAnomalyDetector()
+            return [a for r in rs if (a := await eng.score(map_record(r, "opcua")))]
+        alerts = asyncio.run(go())
+        weak = {p for p in py if p in ("None", "Basic128Rsa15", "Basic256")}
+        assert len(alerts) == len({(r["id.orig_h"], r["id.resp_h"], r["detail"]) for r in rs if r["detail"] in weak})
+        assert all(a.threat_class == "INSECURE_CONFIGURATION" for a in alerts)
+    assert "None" in seen["opcua-encrypted.pcap"]        # this capture opens a policy-None channel (see the counter test)

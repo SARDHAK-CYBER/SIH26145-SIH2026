@@ -194,11 +194,11 @@ def test_live_agent_phase_split_and_dedup():
     assert len([a for a in got if a["threat_class"] == "DATA_EXFILTRATION"]) == 1
 
 
-def test_forwarder_batches_without_blocking():
+def test_forwarder_batches_without_blocking(tmp_path):
     from src.capture.forwarder import HttpAlertForwarder
-    fwd = HttpAlertForwarder("http://127.0.0.1:59999", batch=3, flush_s=0.2)  # nothing listening
+    fwd = HttpAlertForwarder("http://127.0.0.1:59999", batch=3, flush_s=0.2, spool_dir=str(tmp_path))  # nothing listening
     for i in range(5):
         fwd({"alert_id": str(i)})
     import time as _t; _t.sleep(0.6)
     fwd.stop()
-    assert fwd.dropped >= 3  # POSTs failed fast, alerts accounted for, no exception raised
+    assert fwd.spooled >= 3 and fwd.dropped == 0  # POSTs failed fast; alerts went to the on-disk spool, no exception raised

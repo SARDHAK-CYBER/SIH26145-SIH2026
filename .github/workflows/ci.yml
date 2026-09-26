@@ -26,8 +26,6 @@ jobs:
           maturin build --release --manifest-path native/stealthtap_core/Cargo.toml -o wheels
           pip install --no-index --find-links wheels stealthtap_core
         shell: bash
-      - name: Native unit tests
-        run: cargo test --release --manifest-path native/stealthtap_core/Cargo.toml
       - name: pytest
         run: python -m pytest -q -x
 

@@ -1,4 +1,6 @@
 from __future__ import annotations
+import os
+import uuid
 from typing import Optional
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
@@ -88,13 +90,23 @@ OPCUA_CRITICAL_SERVICES = {"WRITE", "CALL", "HISTORY_UPDATE", "DELETE_NODES"}
 OPCUA_HIGH_SERVICES = {"ADD_NODES", "ADD_REFERENCES", "DELETE_REFERENCES"}
 
 
+# OPC UA security policies that offer no protection (None) or rely on SHA-1 / PKCS#1 v1.5 (deprecated by the OPC Foundation).
+OPCUA_WEAK_POLICIES = {"None": ("LOW", 60.0, "no message signing or encryption -- commands and values can be read or altered on the path"),
+                       "Basic128Rsa15": ("MEDIUM", 70.0, "deprecated policy (SHA-1, RSA PKCS#1 v1.5)"),
+                       "Basic256": ("MEDIUM", 70.0, "deprecated policy (SHA-1)")}
+OPCUA_POLICY_REALERT_S = 3600.0
+
+
 class OTIndustrialAnomalyDetector(Detector):
     name = "ENG-07-OT"
+
+    def __init__(self) -> None:
+        self._opcua_policy_seen: dict[tuple, float] = {}
 
     def _ics_alert(self, flow: dict, protocol: str, severity: str, confidence: float, mitre: tuple, evidence: dict,
                    transport: str = "TCP") -> Alert:
         return Alert(
-            alert_id=flow["flow_uid"], timestamp=flow["ts"], severity=severity, confidence_score=confidence,
+            alert_id=uuid.uuid4().hex, timestamp=flow["ts"], severity=severity, confidence_score=confidence,
             threat_class="ICS_UNAUTHORIZED_CONTROL_COMMAND",
             flow_identifier=FlowIdentifier(src_ip=flow["src_ip"], src_port=flow["src_port"],
                                            dst_ip=flow["dst_ip"], dst_port=flow["dst_port"], protocol=transport),
@@ -129,6 +141,28 @@ class OTIndustrialAnomalyDetector(Detector):
 
         if proto == "opcua":
             svc = str(flow.get("opcua_service", "")).upper()
+            if svc == "SECURE_CHANNEL_POLICY":
+                weak = OPCUA_WEAK_POLICIES.get(str(flow.get("opcua_policy", "")))
+                if weak is None or os.environ.get("OPCUA_POLICY_ALERTS", "1") == "0":
+                    return None
+                key = (flow["src_ip"], flow["dst_ip"], flow["dst_port"], flow.get("opcua_policy"))
+                ts = float(flow["ts"])
+                if ts - self._opcua_policy_seen.get(key, -1e18) < OPCUA_POLICY_REALERT_S:
+                    return None
+                if len(self._opcua_policy_seen) > 20000:
+                    self._opcua_policy_seen.clear()
+                self._opcua_policy_seen[key] = ts
+                sev, conf, why = weak
+                return Alert(
+                    alert_id=uuid.uuid4().hex, timestamp=flow["ts"], severity=sev, confidence_score=conf,
+                    threat_class="INSECURE_CONFIGURATION",
+                    flow_identifier=FlowIdentifier(src_ip=flow["src_ip"], src_port=flow["src_port"],
+                                                   dst_ip=flow["dst_ip"], dst_port=flow["dst_port"], protocol="TCP"),
+                    mitre_attack=MitreAttack(tactic="Collection", technique_id="T0830", technique_name="Adversary-in-the-Middle"),
+                    evidence={"protocol": "OPC UA", "security_policy": flow.get("opcua_policy"), "why": why,
+                              "note": "policy is negotiated in clear; with SignAndEncrypt the message bodies stay uninspectable"},
+                    forensics={"raw_segment_hash_sha256": flow.get("segment_hash", "")},
+                )
             if svc in OPCUA_CRITICAL_SERVICES or svc in OPCUA_HIGH_SERVICES:
                 critical = svc in OPCUA_CRITICAL_SERVICES
                 return self._ics_alert(flow, "OPC UA", "CRITICAL" if critical else "HIGH", 88.0 if critical else 76.0,
@@ -159,7 +193,7 @@ class OTIndustrialAnomalyDetector(Detector):
             if fc in DNP3_CRITICAL_FUNCTIONS or fc in DNP3_HIGH_FUNCTIONS:
                 critical = fc in DNP3_CRITICAL_FUNCTIONS
                 return Alert(
-                    alert_id=flow["flow_uid"], timestamp=flow["ts"],
+                    alert_id=uuid.uuid4().hex, timestamp=flow["ts"],
                     severity="CRITICAL" if critical else "HIGH",
                     confidence_score=94.0 if critical else 80.0,
                     threat_class="ICS_UNAUTHORIZED_CONTROL_COMMAND",
@@ -181,7 +215,7 @@ class OTIndustrialAnomalyDetector(Detector):
             func_code = flow.get("modbus_func", "")
             if func_code in DANGEROUS_MODBUS_FUNCTIONS:
                 return Alert(
-                    alert_id=flow["flow_uid"],
+                    alert_id=uuid.uuid4().hex,
                     timestamp=flow["ts"],
                     severity="HIGH",
                     confidence_score=95.0,
@@ -205,7 +239,7 @@ class OTIndustrialAnomalyDetector(Detector):
             # matches the pattern of catching the command being issued.
             if cip_service in DANGEROUS_CIP_SERVICES and not is_response:
                 return Alert(
-                    alert_id=flow["flow_uid"],
+                    alert_id=uuid.uuid4().hex,
                     timestamp=flow["ts"],
                     severity="HIGH",
                     confidence_score=85.0,  # slightly below Modbus's 95 -- real evidence exists, but can't yet name the exact operation

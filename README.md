@@ -19,12 +19,14 @@ Latest measured result (25 real attack captures — Hydra brute force, BlackEner
 
 | Config | Attacks detected | Benign captures clean | Benign flow false-positive rate |
 |---|---|---|---|
-| Rule engines only | 18/25 (72%, 95% CI 52–86%) | 1/2 | 0.48% |
-| AI models only | 9/25 (36%, 95% CI 20–55%) | 0/2 | 0.64% |
-| Hybrid (rules + AI) | 20/25 (80%, 95% CI 61–91%) | 0/2 | 1.12% |
+| Rule engines only | 24/25 (96%, 95% CI 80–99%) | 1/2 | 0.16% (1 of 624 flows) |
+| AI models only | 5/25 (20%, 95% CI 9–39%) | 2/2 | 0.00% |
+| Hybrid (rules + AI) | 25/25 (100%, 95% CI 87–100%) | 1/2 | 0.16% (1 of 624 flows) |
+
+**Read the 25/25 correctly.** The previous run missed six captures (`distcc_exec_backdoor`, `smtp`, `tomcat` and their `*2` twins — Metasploit sessions with no volumetric signature). ENG-14 (below) was written *after* inspecting those files, so their detection is **in-sample**: it shows the rules do what they claim on real traffic, not that the same recall will hold on unseen exploits. The one alert on the "benign" `normal.pcap` is a true positive — that file contains a real nmap-style SYN scan of the router. Benign evidence is still small (624 flows in two files); a 20-minute real Wi-Fi capture is reported separately in `docs/PRD.md` §13.
 
 **What this means in practice:**
-- Rules carry detection; the shipped ML models do not generalize well alone. The `flow` model (trained on 8 DDoS captures) is now gated to **corroboration-only** — it can raise an alert on its own only above 2.0 confidence, i.e. never — because standalone it flagged ordinary DNS-over-UDP flows as `VOLUMETRIC_DDOS` at 99% confidence on live home-network traffic (its training set is DDoS-shaped 4-feature flows, not general traffic).
+- Rules carry detection; the shipped ML models do not generalize well alone. The `flow` model (trained on 8 DDoS captures, features: duration, bytes, protocol) is a **DDoS-shape detector**: measured on real flows it fires on 99.8% of DDoS-capture flows and on **0%** of the intrusion captures. On 820 real benign flows it crosses 0.6 in 1.6% and 0.98 in none. It stays **corroboration-only** (`ML_FLOW_STANDALONE_CONFIDENCE`, default off; ≥0.98 measured clean on those 820 flows) because closed-port/half-open benign flows look like SYN-flood flows and 820 flows cannot bound that at scale. (An earlier "19% false-positive rate" figure came from the *retrained* comparison model in `scripts/retrain_flow_hard_negatives.py`, not the shipped one — corrected in `docs/PRD.md` §13.)
 - The DNS DGA model is solid (674,898 rows, real held-out precision 0.94/recall 0.88) and is used as shipped.
 - Every "recall" number above has a **wide confidence interval** — 25 files is a small, non-independent sample (several are near-duplicate pairs from one lab). Treat these numbers as a floor and a methodology, not a market claim.
 - This measured run used the in-process parser only (Zeek/Suricata require Docker, which was unavailable when this run was taken) — Docker-path rule recall should be measured separately and is expected to be higher with Suricata's signature set included.
@@ -50,6 +52,14 @@ Same rule as accuracy: measured, not asserted.
 Methodology note: this dev machine showed real, substantial throughput swings (not code regressions) purely from other concurrent load on the box — running the full Docker analysis stack alongside a wall-clock benchmark cut measured pps by 5-10x with zero code changes. Where that matters, prefer the CPU-time-profiled number (isolated from system scheduling noise) over a single wall-clock run.
 
 **What would close the remaining gap**: the remaining ~7 engines (ENG-03/04/07/09/11 and the Suricata/YARA/BZAR Docker-only engines) are either already cheap (stateless or exact-match), Docker-only (can't run in the hot path regardless), or lower-volume in practice — diminishing returns from porting them individually. The larger remaining lever is the ONNX inference cost itself (now the single biggest remaining line item) and further architectural work on how many flows reach Python at all. See `docs/PRD.md` §11 for the full methodology and every number behind this table.
+
+### Update 2026-09-27 — deployment hardening, ENG-14, OPC UA policy, tenancy, backups
+
+* **Access control.** API key required on the API and the sensor (`STEALTHTAP_API_KEY`; compose refuses to start without one); Postgres/Redis/OpenSearch/Redpanda published on loopback only; dashboard prompts for the key; refuses non-loopback bind without a key. Optional per-tenant keys isolate stored alerts, uploaded captures and jobs. TLS is *not* included — front it with a reverse proxy. Details and limits: `docs/OPERATIONS.md`.
+* **ENG-14 — attacks on plain-text services**, decided from decoded payloads (Rust decoders + Python twin, parity-tested on real captures): distcc command execution, SMTP account enumeration (VRFY/EXPN, RCPT harvesting with refusals), HTTP Basic default credentials / guessing / code-deployment endpoints (Tomcat manager WAR upload, Jenkins script console). Live replay of the real corpus: **15/15** unique attack captures detected (was 11/14). The upload path now runs the same native payload decoders, so an uploaded pcap and a live capture reach the same verdict (and S7comm/IEC-104/BACnet/OPC UA/PROFINET events now reach ENG-07 on upload too).
+* **OPC UA SignAndEncrypt.** Ciphertext bodies remain uninspectable (a passive sensor has no keys), but the security policy is negotiated in clear: channels using policy `None` or deprecated SHA-1 policies now raise `INSECURE_CONFIGURATION` findings (LOW/MEDIUM, once per client/server/policy per hour; `OPCUA_POLICY_ALERTS=0` disables).
+* **Resilience.** Alert spool on disk if the API/DB is down (re-sent in order), scheduled `pg_dump` backups with a restore drill (row counts identical), systemd unit and Windows auto-restart task for the sensor, CI (`.github/workflows/ci.yml`).
+* Fixed: ICS alerts reused the flow uid as `alert_id`, so a second ICS alert on the same flow was silently dropped by the database's `ON CONFLICT DO NOTHING`.
 
 ### Update 2026-09-26 (second pass) — separate dashboards, native capture engine, real-data live path
 
@@ -114,7 +124,7 @@ Ingest paths ──────────────────────�
                                                     builder, not static charts)
 ```
 
-## The 13 detection engines
+## The 14 detection engines
 
 | Engine | Threat class | Method |
 |---|---|---|
@@ -124,13 +134,14 @@ Ingest paths ──────────────────────�
 | ENG-04 | Encrypted malware (JA4) | Real JA4 TLS fingerprint (live path) matched against threat intel |
 | ENG-05 | Reconnaissance | Fan-out of **unanswered probe-shaped** flows per source per 5 min (excludes normal browsing) |
 | ENG-06 | Data exfiltration | Per-flow byte-ratio (with a volume floor) + accumulated low-and-slow ratio over 5 min |
-| ENG-07 | OT/ICS anomaly | Modbus + DNP3 dangerous function codes |
+| ENG-07 | OT/ICS anomaly | Modbus, DNP3, S7comm, IEC-104, EtherNet/IP-CIP, BACnet, OPC UA, PROFINET-DCP dangerous commands; OPC UA weak security policies |
 | ENG-08 | Malicious files | YARA scan of Zeek-extracted cleartext files |
 | ENG-09 | HTTP threats | Suspicious user-agent + high-entropy URI |
 | ENG-10 | Signature match | Suricata ET Open (20,829 rules) |
 | ENG-11 | Kerberoasting | Kerberos service-ticket request pattern |
 | ENG-12 | BZAR notices | Zeek BZAR ATT&CK-for-ICS notices |
 | ENG-13 | Brute force / credential stuffing | Connection-attempt rate to auth ports (10 attempts/60s, below both measured real attack rates) |
+| ENG-14 | Plain-text service attacks | distcc non-compiler jobs, SMTP account enumeration, HTTP default credentials / auth guessing / deployment endpoints (payload-decoded) |
 
 Plus **the live-learning baseline** (`src/inference/online_baseline.py`): learns per-service (protocol, port) flow statistics from *your* traffic (minimum 1,500 flows / 10 minutes), then flags conformal-calibrated outliers — no attack labels, no pre-trained data, works uni-directionally.
 
@@ -156,11 +167,11 @@ Isolation Forests are trained but demoted to advisory everywhere (F1 < 0.3 on he
 ## Quick start — Docker (full stack, Linux or Windows)
 
 ```bash
-cp .env.example .env   # set real passwords, never commit .env
+cp .env.example .env   # set real passwords AND STEALTHTAP_API_KEY (>=16 random chars), never commit .env
 docker compose up -d --build     # services restart on failure and are health-gated
 python scripts/system_check.py   # full-stack check -> docs/reports/LATEST.md
 ```
-Dashboard: http://localhost:4173 · API: http://localhost:8000
+Dashboard: http://localhost:4173 (asks for the API key) · API: http://localhost:8000 (`X-API-Key` header). Ports bind to 127.0.0.1; see `docs/OPERATIONS.md` before exposing them.
 
 ## Quick start — bare service (no Docker)
 
@@ -194,6 +205,7 @@ Zeek (BSD), Suricata (GPLv2), YARA (BSD), ICSNPP (BSD-3), XGBoost/scikit-learn/O
 
 - `docs/PRIORITIES.md` — living priority list (auto-refreshed status block + hand-maintained items)
 - `docs/reports/LATEST.md` — latest full system-check report; `docs/reports/history.csv` — trend
+- `docs/OPERATIONS.md` — access control, tenancy, backup/restore drill, alert spool, sensor auto-restart, HA design and its limits
 - `docs/PRD.md` — full requirements, methodology, root-cause analysis, roadmap
 - `native/README.md` — native Rust core: scope, validation methodology, measured performance, what's still Python-only
 - `docs/LIVE_CAPTURE_DEPLOYMENT.md` — deploying the live/streaming sensor

@@ -1,0 +1,28 @@
+# Live sensor as a system service (Linux). Install:
+#   sudo cp packaging/systemd/stealthtap-sensor.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#   sudo systemctl enable --now stealthtap-sensor
+# Configure in /etc/stealthtap/sensor.env :  STEALTHTAP_API_KEY=...  STEALTHTAP_API_URL=http://api-host:8000  CAPTURE_IFACE=eth1
+[Unit]
+Description=StealthTap live sensor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/stealthtap/sensor.env
+WorkingDirectory=/opt/stealthtap
+ExecStart=/opt/stealthtap/venv/bin/python -m src.capture.live_agent run --iface ${CAPTURE_IFACE} --bpf "ip or ip6" --buffer-mb 128 --json
+# raw capture needs only these two capabilities -- no root
+User=stealthtap
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/stealthtap
+Environment=STEALTHTAP_SPOOL_DIR=/var/lib/stealthtap/spool
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

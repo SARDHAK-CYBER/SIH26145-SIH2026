@@ -19,7 +19,7 @@ from typing import Any, Iterator, Optional
 
 from src.capture.appsvc import parse_appsvc
 from src.capture.kerberos import parse_kdc_reply
-from src.capture.ot import parse_bacnet, parse_enip, parse_iec104, parse_opcua, parse_profinet_dcp, parse_s7comm
+from src.capture.ot import parse_bacnet, parse_enip, parse_iec104, parse_opcua, parse_opcua_policy, parse_profinet_dcp, parse_s7comm
 from src.capture.ja4 import ja4_from_client_hello, sni_from_client_hello
 from src.flow_orientation import sender_is_originator
 
@@ -258,7 +258,15 @@ class FlowAssembler:
                         "segment_hash": _seg_hash(flow.uid, svc, cls, inst),
                     })
             if rec is None and dport == 4840:
-                o = parse_opcua(payload)
+                pol = parse_opcua_policy(payload)
+                if pol is not None:
+                    rec = ("opcua", {
+                        "uid": flow.uid, "ts": ts, "id.orig_h": src_ip, "id.orig_p": sport,
+                        "id.resp_h": dst_ip, "id.resp_p": dport, "proto": "tcp",
+                        "function": "SECURE_CHANNEL_POLICY", "detail": pol, "code": 0,
+                        "segment_hash": _seg_hash(flow.uid, "SECURE_CHANNEL_POLICY", pol),
+                    })
+                o = parse_opcua(payload) if rec is None else None
                 if o is not None:
                     function, detail, code = o
                     self.stats["opcua"] = self.stats.get("opcua", 0) + 1

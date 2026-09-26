@@ -619,7 +619,20 @@ impl LiveFlowAssembler {
                 if pl.len() >= 28 && &pl[0..3] == b"MSG" && parse_opcua(pl).is_none() { self.stats.opcua_encrypted += 1; }
                 if pl.len() >= 16 && &pl[0..3] == b"OPN" {
                     let n = u32::from_le_bytes([pl[12], pl[13], pl[14], pl[15]]) as usize;
-                    if let Some(uri) = pl.get(16..16 + n) { if uri.ends_with(b"#None") { self.stats.opcua_unsecured += 1; } }
+                    if let Some(uri) = pl.get(16..16 + n) {
+                        if uri.ends_with(b"#None") { self.stats.opcua_unsecured += 1; }
+                        // the policy is negotiated in clear even when everything after it is ciphertext: report it so
+                        // ENG-07 can flag channels that are unsigned/unencrypted or use a deprecated (SHA-1) policy
+                        if let Some(pos) = uri.iter().rposition(|&b| b == b'#') {
+                            let policy = String::from_utf8_lossy(&uri[pos + 1..]).chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(48).collect::<String>();
+                            if !policy.is_empty() {
+                                let function = "SECURE_CHANNEL_POLICY".to_string();
+                                out.push(Immediate::Ot(OtOut { kind: "opcua", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                                    resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), policy.clone()]),
+                                    function, detail: policy, code: 0, class_id: 0, instance_id: 0, response: false }));
+                            }
+                        }
+                    }
                 }
                 if let Some((function, detail, code)) = parse_opcua(l4.payload) {
                     self.stats.opcua += 1;

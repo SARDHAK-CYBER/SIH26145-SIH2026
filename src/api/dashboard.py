@@ -103,7 +103,8 @@ async def _analysis_from_alerts(request: Request):
     rows = []
     if pool is not None:
         async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM alerts ORDER BY ts DESC LIMIT 500")
+            rows = await conn.fetch("SELECT * FROM alerts WHERE tenant = $1 ORDER BY ts DESC LIMIT 500",
+                                    getattr(request.state, "tenant", None) or "default")
     alerts = []
     sev: dict[str, int] = {}
     tc: dict[str, int] = {}

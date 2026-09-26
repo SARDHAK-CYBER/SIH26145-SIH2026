@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import asyncpg
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -107,6 +107,9 @@ CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_threat_class ON alerts (threat_class);
 CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts (severity);
 CREATE INDEX IF NOT EXISTS idx_alerts_src_ip ON alerts (src_ip);
+-- multi-tenant isolation: every alert belongs to the tenant whose API key stored it
+ALTER TABLE alerts ADD COLUMN IF NOT EXISTS tenant TEXT NOT NULL DEFAULT 'default';
+CREATE INDEX IF NOT EXISTS idx_alerts_tenant_ts ON alerts (tenant, ts DESC);
 """
 
 
@@ -185,8 +188,12 @@ class FlowScoreRequest(BaseModel):
     mitre_technique_name: Optional[str] = None
 
 
+def tenant_of(request: Request) -> str:
+    return getattr(request.state, "tenant", None) or "default"
+
+
 @app.post("/score/{family}")
-async def score_flow(family: str, req: FlowScoreRequest):
+async def score_flow(family: str, req: FlowScoreRequest, request: Request):
     if model_server is None:
         raise HTTPException(503, "model server not initialized")
     if family not in ("flow", "dns", "tls", "modbus"):
@@ -236,18 +243,18 @@ async def score_flow(family: str, req: FlowScoreRequest):
         detection_mode=result["detection_mode"],
         model_scores=result["model_scores"],
     )
-    await _store_alert(alert)
+    await _store_alert(alert, tenant_of(request))
     return {"fired": True, "alert": json.loads(alert.model_dump_json())}
 
 
-async def _store_alert(alert: Alert) -> bool:
+async def _store_alert(alert: Alert, tenant: str = "default") -> bool:
     async with db_pool.acquire() as conn:
         await conn.execute(
             """INSERT INTO alerts (alert_id, ts, severity, confidence_score, threat_class,
                 src_ip, src_port, dst_ip, dst_port, protocol,
                 mitre_tactic, mitre_technique_id, mitre_technique_name,
-                evidence, forensics, detection_mode, model_scores, top_contributing_features)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+                evidence, forensics, detection_mode, model_scores, top_contributing_features, tenant)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                ON CONFLICT (alert_id) DO NOTHING""",
             alert.alert_id, datetime.fromtimestamp(alert.timestamp, tz=timezone.utc),
             alert.severity, alert.confidence_score, alert.threat_class,
@@ -256,13 +263,13 @@ async def _store_alert(alert: Alert) -> bool:
             alert.flow_identifier.protocol,
             alert.mitre_attack.tactic, alert.mitre_attack.technique_id, alert.mitre_attack.technique_name,
             alert.evidence, alert.forensics,
-            alert.detection_mode, alert.model_scores, alert.top_contributing_features,
+            alert.detection_mode, alert.model_scores, alert.top_contributing_features, tenant,
         )
     return True
 
 
 @app.post("/alerts/ingest")
-async def ingest_alerts(alerts: list[dict]):
+async def ingest_alerts(alerts: list[dict], request: Request):
     """Bulk-insert alerts into the shared store. Used by the live sensor
     (src/capture) so live-capture alerts land in the SAME `alerts` table
     the PCAP-upload path writes to -- one queryable history for the
@@ -272,7 +279,7 @@ async def ingest_alerts(alerts: list[dict]):
     stored = 0
     for raw in alerts:
         try:
-            stored += 1 if await _store_alert(Alert.model_validate(raw)) else 0
+            stored += 1 if await _store_alert(Alert.model_validate(raw), tenant_of(request)) else 0
         except Exception as exc:
             # one bad record must not fail the batch
             print(f"[api] /alerts/ingest skipped a record: {exc}")
@@ -281,13 +288,14 @@ async def ingest_alerts(alerts: list[dict]):
 
 @app.get("/alerts")
 async def list_alerts(
+    request: Request,
     threat_class: Optional[str] = None,
     severity: Optional[str] = None,
     since: Optional[str] = None,
     limit: int = Query(100, le=1000),
 ):
-    conditions = []
-    params: list = []
+    params: list = [tenant_of(request)]
+    conditions = ["tenant = $1"]
     if threat_class:
         params.append(threat_class)
         conditions.append(f"threat_class = ${len(params)}")
@@ -297,21 +305,21 @@ async def list_alerts(
     if since:
         params.append(datetime.fromisoformat(since))
         conditions.append(f"ts >= ${len(params)}")
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where = f"WHERE {' AND '.join(conditions)}"
     params.append(limit)
     query = f"SELECT * FROM alerts {where} ORDER BY ts DESC LIMIT ${len(params)}"
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(query, *params)
-    return [dict(r) for r in rows]
+    return [{k: v for k, v in dict(r).items() if k != "tenant"} for r in rows]
 
 
 @app.get("/alerts/{alert_id}")
-async def get_alert(alert_id: str):
+async def get_alert(alert_id: str, request: Request):
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM alerts WHERE alert_id = $1", alert_id)
+        row = await conn.fetchrow("SELECT * FROM alerts WHERE alert_id = $1 AND tenant = $2", alert_id, tenant_of(request))
     if not row:
         raise HTTPException(404, "alert not found")
-    return dict(row)
+    return {k: v for k, v in dict(row).items() if k != "tenant"}
 
 
 @app.get("/health")

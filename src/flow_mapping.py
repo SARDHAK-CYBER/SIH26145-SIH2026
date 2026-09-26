@@ -112,6 +112,7 @@ def map_record(rec: dict[str, Any], log_type: str) -> dict[str, Any]:
     elif log_type == "opcua":
         flow["protocol_analyzed"] = "opcua"
         flow["opcua_service"] = rec.get("function", "")
+        flow["opcua_policy"] = rec.get("detail", "") if rec.get("function") == "SECURE_CHANNEL_POLICY" else ""
     elif log_type == "bacnet":
         flow["protocol_analyzed"] = "bacnet"
         flow["bacnet_service"] = rec.get("function", "")

@@ -71,3 +71,48 @@ def test_real_apps_are_protected(monkeypatch):
     # a 401 must still carry CORS headers so the browser dashboard can read it and prompt for the key
     r = c.get("/capture/status", headers={"Origin": "http://localhost:4173"})
     assert r.status_code == 401 and r.headers.get("access-control-allow-origin")
+
+
+def test_tenant_keys_bind_requests_to_tenants(monkeypatch):
+    monkeypatch.setenv("STEALTHTAP_API_KEY", KEY)
+    monkeypatch.setenv("STEALTHTAP_TENANT_KEYS", f"acme={'a' * 20},globex={'g' * 20}")
+    app = FastAPI()
+
+    @app.get("/who")
+    def who(request: __import__("fastapi").Request):
+        return {"tenant": request.state.tenant}
+
+    app.add_middleware(security.ApiKeyMiddleware)
+    c = TestClient(app)
+    assert c.get("/who", headers={"X-API-Key": "a" * 20}).json() == {"tenant": "acme"}
+    assert c.get("/who", headers={"X-API-Key": "g" * 20}).json() == {"tenant": "globex"}
+    assert c.get("/who", headers={"X-API-Key": KEY}).json() == {"tenant": "default"}
+    assert c.get("/who", headers={"X-API-Key": "b" * 20}).status_code == 401
+    monkeypatch.setenv("STEALTHTAP_TENANT_KEYS", "acme=short")
+    with pytest.raises(SystemExit):
+        security.require_key_for_bind("127.0.0.1")
+
+
+def test_captures_are_invisible_to_other_tenants(tmp_path, monkeypatch):
+    import src.api.pcap_analysis as pa
+    monkeypatch.setattr(pa, "CAPTURE_STORE", tmp_path)
+    pcap = bytes.fromhex("d4c3b2a1") + bytes(20)
+    aid = "12345678-1234-5678-1234-567812345678"
+    assert pa._store_capture(aid, pcap, "acme")
+
+    class Req:
+        def __init__(self, tenant):
+            self.state = type("S", (), {"tenant": tenant})()
+    pa._check_owner(aid, Req("acme"))
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as e:
+        pa._check_owner(aid, Req("globex"))
+    assert e.value.status_code == 404
+
+
+def test_access_log_redacts_query_key():
+    import logging
+    rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                            ("1.2.3.4:5", "GET", "/capture/stream?api_key=SECRETVALUE&x=1", "1.1", 200), None)
+    assert security._RedactApiKey().filter(rec)
+    assert "SECRETVALUE" not in rec.getMessage() and "api_key=REDACTED&x=1" in rec.getMessage()

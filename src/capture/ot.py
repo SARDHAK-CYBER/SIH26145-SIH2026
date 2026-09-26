@@ -195,6 +195,19 @@ def parse_opcua(p: bytes) -> Optional[tuple[str, str, int]]:
     return (name, "plain", tid) if name else None
 
 
+def parse_opcua_policy(p: bytes) -> Optional[str]:
+    """Security-policy name (None, Basic256, Basic256Sha256, ...) negotiated by a client OpenSecureChannel chunk. The URI is
+    sent in clear even when all later traffic is encrypted. Twin of the OPN branch in live.rs."""
+    if len(p) < 16 or p[:3] != b"OPN":
+        return None
+    n = int.from_bytes(p[12:16], "little")
+    uri = p[16:16 + n]
+    if len(uri) != n or b"#" not in uri:
+        return None
+    name = "".join(c for c in uri.rsplit(b"#", 1)[1].decode("ascii", "ignore") if c.isalnum() or c == "_")[:48]
+    return name or None
+
+
 def parse_profinet_dcp(frame: bytes) -> Optional[tuple[str, str, int]]:
     """(function, option blocks touched, code) of a PROFINET-DCP REQUEST in a raw Ethernet frame (ethertype 0x8892).
     Twin of parse_profinet_dcp in live.rs."""

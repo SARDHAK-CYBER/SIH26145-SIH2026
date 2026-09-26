@@ -71,6 +71,22 @@ services:
       timeout: 3s
       retries: 12
 
+  # Scheduled pg_dump of the alert store into the stealthtap_backups volume (see scripts/pg_backup_loop.sh, pg_restore.sh).
+  backup:
+    image: postgres:16
+    entrypoint: ["sh", "/scripts/pg_backup_loop.sh"]
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD:?set a real password in .env, do not use a default}
+      - BACKUP_INTERVAL_HOURS=${BACKUP_INTERVAL_HOURS:-24}
+      - BACKUP_KEEP=${BACKUP_KEEP:-14}
+    volumes:
+      - ./scripts:/scripts:ro
+      - stealthtap_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   opensearch:
     # Kept for now (existing OT/IT batch path still writes here). Once
     # the PostgreSQL-backed API and React/Grafana dashboard are the
@@ -161,6 +177,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://stealthtap:${POSTGRES_PASSWORD:?set a real password in .env}@postgres:5432/stealthtap
       - STEALTHTAP_API_KEY=${STEALTHTAP_API_KEY:?set STEALTHTAP_API_KEY (>=16 random chars) in .env}
+      - STEALTHTAP_TENANT_KEYS=${STEALTHTAP_TENANT_KEYS:-}    # optional multi-tenant: "acme=<key>,globex=<key>"
       - MODELS_DIR=/models
       - ZEEK_INCOMING_DIR=/incoming
       - ZEEK_OUTGOING_DIR=/outgoing
@@ -222,7 +239,8 @@ services:
     tmpfs: ["/tmp"]
     environment:
       - STEALTHTAP_API_URL=${STEALTHTAP_API_URL:-http://127.0.0.1:8000}
-      - STEALTHTAP_API_KEY=${STEALTHTAP_API_KEY:?set STEALTHTAP_API_KEY in .env}
+      - STEALTHTAP_API_KEY=${STEALTHTAP_SENSOR_KEY:-${STEALTHTAP_API_KEY:?set STEALTHTAP_API_KEY in .env}}
+      - STEALTHTAP_SPOOL_DIR=/spool          # alerts survive an API/DB outage here and are re-sent in order
       - REDIS_URL=${SENSOR_REDIS_URL:-redis://127.0.0.1:6379/0}
       - MODELS_DIR=/models
       - CAPTURE_IFACE=${CAPTURE_IFACE:-eth0}
@@ -231,12 +249,15 @@ services:
       - LIVE_HIGHSPEED_MBPS=${LIVE_HIGHSPEED_MBPS:-200}
     volumes:
       - ./models:/models:ro
+      - stealthtap_sensor_spool:/spool
     restart: unless-stopped
     # Headless auto-start on the configured interface. Drop `command:` to
     # run `serve` instead and drive start/stop from the dashboard.
     command: ["run", "--iface", "${CAPTURE_IFACE:-eth0}", "--bpf", "${CAPTURE_BPF:-ip or ip6}", "--buffer-mb", "128", "--json"]
 
 volumes:
+  stealthtap_backups:
+  stealthtap_sensor_spool:
   stealthtap_zeek_logs:
   stealthtap_relay_socket:
   stealthtap_postgres_data:
