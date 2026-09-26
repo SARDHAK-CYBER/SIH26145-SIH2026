@@ -1,0 +1,154 @@
+{
+ "summary": {
+  "seconds": 12.3,
+  "files": 1,
+  "packets": 4477950,
+  "bytes": 612958722,
+  "avg_pps": 364413,
+  "avg_gbit_s": 0.399,
+  "peak_pps": 379320.5,
+  "alerts_by_class": {
+   "C2_BEACONING": 1,
+   "RECONNAISSANCE": 2,
+   "VOLUMETRIC_DDOS": 2,
+   "NETWORK_INTRUSION_ATTEMPT": 2,
+   "BEHAVIORAL_ANOMALY": 1
+  },
+  "max_rss_mb": 245,
+  "records_dropped_last": 0
+ },
+ "samples": [
+  {
+   "t": 1,
+   "file": "netbios_ssn2.pcap",
+   "pps": 0,
+   "mbps": 0,
+   "pend": 0,
+   "flows": 0,
+   "alerts": 7,
+   "cpu": 195.8,
+   "rss": 227
+  },
+  {
+   "t": 2,
+   "file": "netbios_ssn2.pcap",
+   "pps": 0,
+   "mbps": 0,
+   "pend": 0,
+   "flows": 0,
+   "alerts": 7,
+   "cpu": 212.5,
+   "rss": 237
+  },
+  {
+   "t": 3,
+   "file": "netbios_ssn2.pcap",
+   "pps": 349210.8,
+   "mbps": 382.41,
+   "pend": 0,
+   "flows": 0,
+   "alerts": 7,
+   "cpu": 201.6,
+   "rss": 245
+  },
+  {
+   "t": 4,
+   "file": "netbios_ssn2.pcap",
+   "pps": 349210.8,
+   "mbps": 382.41,
+   "pend": 0,
+   "flows": 0,
+   "alerts": 8,
+   "cpu": 218.7,
+   "rss": 241
+  },
+  {
+   "t": 5,
+   "file": "netbios_ssn2.pcap",
+   "pps": 358258.9,
+   "mbps": 392.319,
+   "pend": 2713,
+   "flows": 3056,
+   "alerts": 8,
+   "cpu": 209.4,
+   "rss": 241
+  },
+  {
+   "t": 6,
+   "file": "netbios_ssn2.pcap",
+   "pps": 358258.9,
+   "mbps": 392.319,
+   "pend": 0,
+   "flows": 6102,
+   "alerts": 8,
+   "cpu": 221.9,
+   "rss": 240
+  },
+  {
+   "t": 7,
+   "file": "netbios_ssn2.pcap",
+   "pps": 352833.4,
+   "mbps": 386.377,
+   "pend": 0,
+   "flows": 0,
+   "alerts": 8,
+   "cpu": 198.4,
+   "rss": 241
+  },
+  {
+   "t": 8,
+   "file": "netbios_ssn2.pcap",
+   "pps": 352833.4,
+   "mbps": 386.377,
+   "pend": 0,
+   "flows": 0,
+   "alerts": 8,
+   "cpu": 214.1,
+   "rss": 240
+  },
+  {
+   "t": 9,
+   "file": "netbios_ssn2.pcap",
+   "pps": 372870.4,
+   "mbps": 408.319,
+   "pend": 793,
+   "flows": 12210,
+   "alerts": 8,
+   "cpu": 201.5,
+   "rss": 234
+  },
+  {
+   "t": 10,
+   "file": "netbios_ssn2.pcap",
+   "pps": 372870.4,
+   "mbps": 408.319,
+   "pend": 0,
+   "flows": 3056,
+   "alerts": 8,
+   "cpu": 210.7,
+   "rss": 237
+  },
+  {
+   "t": 11,
+   "file": "netbios_ssn2.pcap",
+   "pps": 379320.5,
+   "mbps": 415.383,
+   "pend": 0,
+   "flows": 3056,
+   "alerts": 8,
+   "cpu": 203.1,
+   "rss": 237
+  },
+  {
+   "t": 12,
+   "file": "netbios_ssn2.pcap",
+   "pps": 379320.5,
+   "mbps": 415.383,
+   "pend": 0,
+   "flows": 3056,
+   "alerts": 8,
+   "cpu": 196.9,
+   "rss": 237
+  }
+ ]
+}
