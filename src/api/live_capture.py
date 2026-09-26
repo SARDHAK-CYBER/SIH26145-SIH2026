@@ -222,7 +222,7 @@ def coverage(known: str = ""):
     extra = {x.strip() for x in known.split(",") if x.strip()}
     seen_ips = {h["ip"] for h in rows}
     local = [h for h in rows if h["ip"] not in own and not h["ip"].startswith(("224.", "239.", "255.", "ff", "fe80", "169.254.255"))
-             and h["ip"] != "0.0.0.0"]
+             and h["ip"] not in ("0.0.0.0", "::")]
     visible = [h for h in local if h["tcp"] + h["udp"] > 0 and h["tx_pkts"] > 0]
     known_only = [h for h in local if h not in visible]
     silent = sorted(extra - seen_ips - own)

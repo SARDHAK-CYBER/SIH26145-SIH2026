@@ -86,3 +86,17 @@ on both OSes. Linux capture sensors can add `--features afxdp` (AF_XDP).
 | Whole-network coverage | **Measured, deployment doc** | `/capture/coverage` + Hosts-page card compute visible-vs-known devices (verdict full/partial/own-traffic-only, blind-spot list from an active sweep); `docs/DEPLOYMENT_COVERAGE.md` gives mirror/TAP/gateway/bridge placement. Placement itself is a deployment choice |
 | OPC UA SignAndEncrypt | **Inherent** | Ciphertext cannot be inspected by a passive sensor without the session keys; metadata (SNI/JA4-style, sizes, timing) only |
 | Live NIC re-run on the newest code | **Blocked** | Needs an elevated sensor started with the new code; 6+ UAC requests this session were not approved |
+
+## Live NIC validation on the newest code — 2026-09-26 (real Wi-Fi, elevated sensor, `docs/reports/live_nic_validation.json`)
+
+| Metric | Result |
+|---|---|
+| Engine | native, 4 assembler shards |
+| Capture ratio (engine vs the NIC's own counter, 60 s, real internet downloads) | **1.0039** (529,507 vs 527,445 packets) |
+| Drops | kernel 0, records 0, user 0 |
+| Peak rate | 175.7 Mbit/s (the internet link is the limit) |
+| Devices seen | 294 hosts (183 local), 72 IPv6 hosts (all link-local; this network has no global IPv6) |
+| Alerts / ML alerts | 0 / 0 on ordinary traffic |
+| Coverage verdict | *partial* — 155 of 183 local devices have visible unicast traffic (84.7%) |
+
+Root cause of the repeated "sensor never starts": every extra sensor tried to write the same `sensor.log`, which the first elevated sensor still held open; the launcher now logs to `sensor-<port>.log`. Note: one earlier validator run crashed with `KeyError: 'capture'` because a second validator was stopping the same capture — run one validator per sensor.

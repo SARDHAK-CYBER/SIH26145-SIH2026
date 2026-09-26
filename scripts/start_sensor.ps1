@@ -21,4 +21,4 @@ if (-not $isAdmin) {
 }
 Set-Location $repo
 $env:SCAPY_USE_PCAPDNET = '1'
-& "$repo\venv\Scripts\python.exe" -m src.capture.live_agent serve --port $Port *> "$repo\sensor.log"
+& "$repo\venv\Scripts\python.exe" -m src.capture.live_agent serve --port $Port *> "$repo\sensor-$Port.log"
