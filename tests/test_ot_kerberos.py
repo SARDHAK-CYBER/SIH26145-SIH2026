@@ -138,3 +138,40 @@ def test_bacnet_write_property_alerts():
     a = loop.run_until_complete(OTIndustrialAnomalyDetector().score(flow))
     loop.close()
     assert a is not None and a.severity == "HIGH"
+
+
+@pytest.mark.parametrize("name,expect", [("opcua-signed.pcap", {"READ", "CREATE_SESSION", "ACTIVATE_SESSION", "CLOSE_SESSION"}),
+                                         ("opcua-encrypted.pcap", {"GET_ENDPOINTS"})])
+def test_opcua_native_equals_python_on_real_wireshark_captures(name, expect):
+    f = PUB / "opcua" / name
+    if not f.exists():
+        pytest.skip("public sample not downloaded")
+    from scapy.utils import PcapReader
+    from scapy.layers.inet import TCP
+    from src.capture.ot import parse_opcua
+    py = []
+    for pkt in PcapReader(str(f)):
+        if TCP in pkt and pkt[TCP].dport == 4840 and bytes(pkt[TCP].payload):
+            r = parse_opcua(bytes(pkt[TCP].payload))
+            if r:
+                py.append(r[0])
+    rs = [r["function"] for _t, r in _native_records(f, {"opcua"})]
+    assert sorted(py) == sorted(rs) and expect <= set(rs)
+    from src.engines.eng07_ot_anomaly import OPCUA_CRITICAL_SERVICES, OPCUA_HIGH_SERVICES
+    assert not (set(rs) & (OPCUA_CRITICAL_SERVICES | OPCUA_HIGH_SERVICES))
+
+
+def test_opcua_write_request_alerts():
+    """CONSTRUCTED chunk (real captures hold no writes): WriteRequest (TypeId 673) must decode and alert."""
+    import asyncio
+    from src.capture.ot import parse_opcua
+    from src.engines.eng07_ot_anomaly import OTIndustrialAnomalyDetector
+    from src.flow_mapping import map_record
+    chunk = b"MSG" + b"F" + (40).to_bytes(4, "little") + bytes(16) + bytes([0x01, 0x00, 0xA1, 0x02]) + bytes(12)
+    assert parse_opcua(chunk)[0] == "WRITE"
+    flow = map_record({"uid": "O1", "ts": 1.0, "id.orig_h": "10.0.0.9", "id.resp_h": "10.0.0.20", "id.orig_p": 50000,
+                       "id.resp_p": 4840, "function": "WRITE", "detail": "plain", "code": 673}, "opcua")
+    loop = asyncio.new_event_loop()
+    a = loop.run_until_complete(OTIndustrialAnomalyDetector().score(flow))
+    loop.close()
+    assert a is not None and a.severity == "CRITICAL"

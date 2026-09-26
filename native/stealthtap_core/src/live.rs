@@ -123,7 +123,7 @@ pub enum Immediate { Dns(DnsOut), Ssl(SslOut), Modbus(ModbusOut), Dnp3(Dnp3Out),
 #[derive(Default, Clone)]
 pub struct Stats {
     pub packets: u64, pub non_ip: u64, pub flows_seen: u64,
-    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub conn: u64,
+    pub dns: u64, pub ssl: u64, pub modbus: u64, pub dnp3: u64, pub http: u64, pub kerberos: u64, pub s7comm: u64, pub iec104: u64, pub cip: u64, pub bacnet: u64, pub opcua: u64, pub conn: u64,
 }
 
 // Function-code name tables -- identical to flow_assembler.py's _MODBUS_FC / _DNP3_FC.
@@ -326,6 +326,27 @@ fn parse_bacnet(p: &[u8]) -> Option<(String, String, u32)> {
         }
         _ => None,
     }
+}
+
+/// OPC UA binary (TCP/4840), client -> server MSG chunk: `MSG` `F` size(4) | channel(4) token(4) | seq(4) req(4) | body,
+/// where the body starts with the request's TypeId NodeId. In security mode None/Sign the body is readable and the
+/// TypeId names the service; in SignAndEncrypt it is ciphertext and is (honestly) not inspected.
+fn parse_opcua(p: &[u8]) -> Option<(String, String, u32)> {
+    if p.len() < 28 || &p[0..3] != b"MSG" { return None; }
+    let body = &p[24..];
+    let id: u32 = match body[0] {
+        0x00 => body[1] as u32,
+        0x01 => u16::from_le_bytes([*body.get(2)?, *body.get(3)?]) as u32,
+        0x02 => u32::from_le_bytes([*body.get(3)?, *body.get(4)?, *body.get(5)?, *body.get(6)?]),
+        _ => return None,
+    };
+    let name = match id {
+        422 => "FIND_SERVERS", 428 => "GET_ENDPOINTS", 446 => "OPEN_SECURE_CHANNEL", 461 => "CREATE_SESSION", 467 => "ACTIVATE_SESSION",
+        473 => "CLOSE_SESSION", 486 => "ADD_NODES", 492 => "ADD_REFERENCES", 498 => "DELETE_NODES", 504 => "DELETE_REFERENCES",
+        527 => "BROWSE", 554 => "TRANSLATE_BROWSE_PATHS", 631 => "READ", 664 => "HISTORY_READ", 673 => "WRITE", 700 => "HISTORY_UPDATE",
+        712 => "CALL", 751 => "CREATE_MONITORED_ITEMS", 787 => "CREATE_SUBSCRIPTION", 826 => "PUBLISH", _ => return None,
+    };
+    Some((name.to_string(), "plain".to_string(), id))
 }
 
 fn parse_dnp3(p: &[u8], s_ip: &str, s_p: u16, d_ip: &str, d_p: u16, ts: f64, uid: &str) -> Option<Dnp3Out> {
@@ -546,6 +567,13 @@ impl LiveFlowAssembler {
                             resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
                             function, detail, code: svc as u32, class_id: class, instance_id: inst, response: false }));
                     }
+                }
+            } else if l4.dport == 4840 {
+                if let Some((function, detail, code)) = parse_opcua(l4.payload) {
+                    self.stats.opcua += 1;
+                    out.push(Immediate::Ot(OtOut { kind: "opcua", uid: uid.clone(), ts, orig_h: src_ip.clone(), orig_p: l4.sport,
+                        resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
+                        function, detail, code, class_id: 0, instance_id: 0, response: false }));
                 }
             } else if l4.dport == 2404 {
                 if let Some((function, detail, code)) = parse_iec104(l4.payload) {

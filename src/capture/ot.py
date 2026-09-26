@@ -165,6 +165,36 @@ def parse_bacnet(p: bytes) -> Optional[tuple[str, str, int]]:
     return None
 
 
+_OPCUA_SERVICES = {
+    422: "FIND_SERVERS", 428: "GET_ENDPOINTS", 446: "OPEN_SECURE_CHANNEL", 461: "CREATE_SESSION", 467: "ACTIVATE_SESSION",
+    473: "CLOSE_SESSION", 486: "ADD_NODES", 492: "ADD_REFERENCES", 498: "DELETE_NODES", 504: "DELETE_REFERENCES",
+    527: "BROWSE", 554: "TRANSLATE_BROWSE_PATHS", 631: "READ", 664: "HISTORY_READ", 673: "WRITE", 700: "HISTORY_UPDATE",
+    712: "CALL", 751: "CREATE_MONITORED_ITEMS", 787: "CREATE_SUBSCRIPTION", 826: "PUBLISH",
+}
+
+
+def parse_opcua(p: bytes) -> Optional[tuple[str, str, int]]:
+    """(service, 'plain', request TypeId) of a client MSG chunk (TCP/4840) whose body is readable (security mode
+    None/Sign). SignAndEncrypt bodies are ciphertext and yield None. Twin of parse_opcua in live.rs."""
+    if len(p) < 28 or p[:3] != b"MSG":
+        return None
+    body = p[24:]
+    f = body[0]
+    try:
+        if f == 0x00:
+            tid = body[1]
+        elif f == 0x01:
+            tid = int.from_bytes(body[2:4], "little") if len(body) >= 4 else None
+        elif f == 0x02:
+            tid = int.from_bytes(body[3:7], "little") if len(body) >= 7 else None
+        else:
+            return None
+    except IndexError:
+        return None
+    name = _OPCUA_SERVICES.get(tid) if tid is not None else None
+    return (name, "plain", tid) if name else None
+
+
 def parse_iec104(p: bytes) -> Optional[tuple[str, str, int]]:
     """(type name, 'type=.. cot=..', type id) of the most command-like I-frame ASDU in a segment."""
     off = 0

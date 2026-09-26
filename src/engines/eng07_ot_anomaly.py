@@ -79,6 +79,13 @@ BACNET_HIGH_SERVICES = {"WRITE_PROPERTY", "WRITE_PROPERTY_MULTIPLE", "CREATE_OBJ
                         "CONFIRMED_PRIVATE_TRANSFER", "UNCONFIRMED_PRIVATE_TRANSFER", "TIME_SYNCHRONIZATION", "UTC_TIME_SYNCHRONIZATION"}
 
 
+# OPC UA services that change a server's address space or process values (decoded from the request TypeId; validated on
+# Wireshark's real opcua-signed capture: READ / CREATE|ACTIVATE|CLOSE_SESSION only). Reads, browsing, subscriptions and
+# session management are ordinary client traffic. Bodies in SignAndEncrypt mode are ciphertext and cannot be inspected.
+OPCUA_CRITICAL_SERVICES = {"WRITE", "CALL", "HISTORY_UPDATE", "DELETE_NODES"}
+OPCUA_HIGH_SERVICES = {"ADD_NODES", "ADD_REFERENCES", "DELETE_REFERENCES"}
+
+
 class OTIndustrialAnomalyDetector(Detector):
     name = "ENG-07-OT"
 
@@ -103,6 +110,15 @@ class OTIndustrialAnomalyDetector(Detector):
                 return self._ics_alert(flow, "S7comm", "CRITICAL" if critical else "HIGH", 92.0 if critical else 80.0,
                                        _S7_MITRE.get(fn, ("T0855", "Unauthorized Command Message")),
                                        {"function_code": fn, "impact": "controller program/mode change" if critical else "live value write / program upload"})
+            return None
+
+        if proto == "opcua":
+            svc = str(flow.get("opcua_service", "")).upper()
+            if svc in OPCUA_CRITICAL_SERVICES or svc in OPCUA_HIGH_SERVICES:
+                critical = svc in OPCUA_CRITICAL_SERVICES
+                return self._ics_alert(flow, "OPC UA", "CRITICAL" if critical else "HIGH", 88.0 if critical else 76.0,
+                                       ("T0836", "Modify Parameter") if svc == "WRITE" else ("T0855", "Unauthorized Command Message"),
+                                       {"function_code": svc})
             return None
 
         if proto == "bacnet":

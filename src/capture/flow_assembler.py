@@ -18,7 +18,7 @@ import time
 from typing import Any, Iterator, Optional
 
 from src.capture.kerberos import parse_kdc_reply
-from src.capture.ot import parse_bacnet, parse_enip, parse_iec104, parse_s7comm
+from src.capture.ot import parse_bacnet, parse_enip, parse_iec104, parse_opcua, parse_s7comm
 from src.capture.ja4 import ja4_from_client_hello, sni_from_client_hello
 from src.flow_orientation import sender_is_originator
 
@@ -236,6 +236,17 @@ class FlowAssembler:
                         "function": f"0x{svc:02X}", "detail": f"class={cls} instance={inst}",
                         "service": svc, "class_id": cls, "instance_id": inst, "response": False,
                         "segment_hash": _seg_hash(flow.uid, svc, cls, inst),
+                    })
+            if rec is None and dport == 4840:
+                o = parse_opcua(payload)
+                if o is not None:
+                    function, detail, code = o
+                    self.stats["opcua"] = self.stats.get("opcua", 0) + 1
+                    rec = ("opcua", {
+                        "uid": flow.uid, "ts": ts, "id.orig_h": src_ip, "id.orig_p": sport,
+                        "id.resp_h": dst_ip, "id.resp_p": dport, "proto": "tcp",
+                        "function": function, "detail": detail, "code": code,
+                        "segment_hash": _seg_hash(flow.uid, function, detail),
                     })
             if rec is None and dport in (102, 2404):
                 kind, parsed = (("s7comm", parse_s7comm(payload)) if dport == 102 else ("iec104", parse_iec104(payload)))
