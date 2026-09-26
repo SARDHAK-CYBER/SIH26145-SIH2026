@@ -117,6 +117,7 @@ def main() -> None:
               "but live capture needs raw-socket privileges.", file=sys.stderr)
 
     try:
+        import src  # noqa: F401  -- installs the scapy/Npcap import guard first
         from scapy.config import conf as _c
         _c.use_pcap = True
         _c.manufdb = None

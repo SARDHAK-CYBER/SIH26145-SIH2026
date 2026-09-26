@@ -13,6 +13,17 @@ run it standalone via `python -m src.capture.live_agent serve`.
     GET  /capture/status          live counters (packets, flows, alerts, drops)
     GET  /capture/alerts?limit=   recent alerts (poll fallback)
     GET  /capture/stream          text/event-stream of alerts as they fire
+
+  Live dashboard data (native capture engine):
+    POST /capture/replay          {path, loops, speed} replay a real pcap through the SAME live pipeline
+    GET  /capture/series?seconds= per-second pps / Mbit/s / flows / drops / alerts
+    GET  /capture/summary         alerts by class + severity
+    GET  /capture/hosts           every host seen (bytes, packets, MAC, local/remote, gateway guess)
+    GET  /capture/protocols       protocol mix (packets + bytes)
+    GET  /capture/flows           heaviest active flows
+    GET  /capture/packets         packet list from the in-memory ring (after=, limit=, filter=)
+    GET  /capture/packet/{id}     Wireshark-style layer tree + hex for one packet
+    GET  /capture/export.pcap     download ring packets (ids= or filter=) as a pcap
 """
 from __future__ import annotations
 
@@ -20,8 +31,12 @@ import asyncio
 import json
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+import ipaddress
+import os
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from src.capture.backends import CaptureError, capabilities
@@ -79,6 +94,130 @@ def start(req: StartRequest):
         raise HTTPException(422, str(exc))
     _agent = agent
     return _agent.status()
+
+
+class ReplayRequest(BaseModel):
+    path: str
+    loops: int = 1          # 0 = forever (soak)
+    speed: float = 0.0      # 0 = as fast as possible, 1.0 = original timing
+
+
+def _allowed_replay_path(path: str) -> Path:
+    p = Path(path).expanduser().resolve()
+    if p.suffix.lower() != ".pcap" or not p.is_file():
+        raise HTTPException(422, f"{path!r} is not an existing classic .pcap file")
+    extra = [Path(x).resolve() for x in os.environ.get("STEALTHTAP_REPLAY_DIRS", "").split(os.pathsep) if x]
+    roots = [Path.cwd().resolve(), Path.home().resolve(), *extra]
+    if not any(r == p or r in p.parents for r in roots):
+        raise HTTPException(403, "replay files must live under the working directory, the home directory or "
+                                 "STEALTHTAP_REPLAY_DIRS")
+    return p
+
+
+@router.post("/replay")
+def replay(req: ReplayRequest):
+    global _agent
+    if _agent is not None and _agent.status()["running"]:
+        raise HTTPException(409, "a capture/replay is already running; stop it first")
+    path = _allowed_replay_path(req.path)
+    agent = LiveAgent("pcap-replay", None, alert_sink=make_forwarder())
+    try:
+        agent.start_replay(str(path), loops=req.loops, speed=req.speed)
+    except CaptureError as exc:
+        raise HTTPException(422, str(exc))
+    _agent = agent
+    return _agent.status()
+
+
+def _need_agent():
+    if _agent is None:
+        raise HTTPException(409, "no capture running -- start one first")
+    return _agent
+
+
+@router.get("/series")
+def series(seconds: int = 300):
+    return _need_agent().series(seconds)
+
+
+@router.get("/summary")
+def summary():
+    return _need_agent().summary()
+
+
+def _is_local(ip: str) -> bool:
+    try:
+        a = ipaddress.ip_address(ip)
+        return a.is_private or a.is_link_local or a.is_loopback
+    except ValueError:
+        return False
+
+
+@router.get("/hosts")
+def hosts(limit: int = 500, scope: str = "all"):
+    rows = _need_agent().hosts(limit)
+    # A MAC that fronts many remote IPs is the first-hop gateway, not those hosts.
+    remote_by_mac: dict[str, int] = {}
+    for h in rows:
+        if h["mac"] and not _is_local(h["ip"]):
+            remote_by_mac[h["mac"]] = remote_by_mac.get(h["mac"], 0) + 1
+    out = []
+    for h in rows:
+        local = _is_local(h["ip"])
+        h["local"] = local
+        h["gateway_for_remote"] = bool(h["mac"] and local and remote_by_mac.get(h["mac"], 0) >= 3)
+        if h["mac"] and not local:
+            h["mac"] = None      # a remote host's L2 source is the gateway's MAC, not its own
+        if scope == "local" and not local:
+            continue
+        if scope == "remote" and local:
+            continue
+        out.append(h)
+    return out
+
+
+@router.get("/protocols")
+def protocols():
+    return sorted(_need_agent().protocols(), key=lambda r: -r["bytes"])
+
+
+@router.get("/flows")
+def flows(n: int = 50):
+    return _need_agent().top_flows(n)
+
+
+@router.get("/packets")
+def packets(after: int = 0, limit: int = Query(200, le=2000), filter: str = ""):
+    return _need_agent().packets(after, limit, filter)
+
+
+@router.get("/packet/{pid}")
+def packet(pid: int):
+    got = _need_agent().packet(pid)
+    if got is None:
+        raise HTTPException(404, "packet has scrolled out of the ring (or never existed)")
+    ts, wire, raw = got
+    from src.api.packet_detail import dissect
+    d = dissect(bytes(raw), ts, wire)
+    d["id"] = pid
+    return d
+
+
+@router.get("/export.pcap")
+def export_pcap(ids: str = "", filter: str = "", limit: int = 5000):
+    agent = _need_agent()
+    if ids:
+        wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()][:limit]
+    else:
+        wanted = [r["id"] for r in agent.packets(0, limit, filter)]
+    pk = []
+    for i in wanted:
+        got = agent.packet(i)
+        if got:
+            pk.append((got[0], bytes(got[2])))
+    from src.api.packet_detail import to_pcap_bytes
+    return Response(to_pcap_bytes(pk), media_type="application/vnd.tcpdump.pcap",
+                    headers={"Content-Disposition": 'attachment; filename="stealthtap-selection.pcap"'})
 
 
 @router.post("/stop")

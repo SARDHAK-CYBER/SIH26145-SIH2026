@@ -36,7 +36,7 @@ def _hello(host: bytes) -> bytes:
 
 
 def _pkt(payload: bytes, sport=50000):
-    p = Ether() / IP(src="10.0.0.5", dst="93.184.216.34") / TCP(sport=sport, dport=443, flags="PA", seq=1) / Raw(payload)
+    p = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src="10.0.0.5", dst="93.184.216.34") / TCP(sport=sport, dport=443, flags="PA", seq=1) / Raw(payload)
     p.time = 1.0
     return p
 

@@ -16,6 +16,7 @@ import hashlib
 import os
 from typing import Any
 
+import src  # noqa: F401  -- installs the scapy/Npcap import guard before scapy loads
 from scapy.all import PcapReader, IP, IPv6, TCP, UDP, DNS, DNSQR
 
 from src.flow_orientation import sender_is_originator

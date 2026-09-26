@@ -38,6 +38,7 @@ can see thousands of records in one file) should actually use.
 from __future__ import annotations
 
 import json
+import threading
 import os
 from pathlib import Path
 from typing import Optional
@@ -184,7 +185,18 @@ class FamilyModels:
             self.xgb_session = ort.InferenceSession(str(xgb_path), sess_options=opts, providers=["CPUExecutionProvider"])
             self._warm_up(self.xgb_session)
             print(f"[model_server] loaded {xgb_path}")
-        if if_path.exists():
+        # An untrusted IsolationForest never influences an alert, and on the live path
+        # (skip_untrusted_iforest) it is never even RUN -- so don't load it. Measured on
+        # this machine: each of the three IF models costs 12-26 s of onnxruntime graph
+        # initialisation (~65 s total startup) for a model that is then ignored.
+        skip_if = self.skip_untrusted_iforest and not self.iforest_trusted
+        # The IsolationForest ONNX graphs are thousands of tiny nodes: 10-30 s EACH of
+        # onnxruntime graph initialisation, during which the GIL is held (measured: a
+        # background thread does not help -- it froze the whole process). They are
+        # ADVISORY only (F1 < IFOREST_MIN_F1: they never decide an alert), so they are
+        # opt-in: STEALTHTAP_LOAD_IFOREST=1 restores the advisory `isolation_forest`
+        # entry in model_scores at the price of ~1 minute of start-up.
+        if if_path.exists() and not skip_if and (self.iforest_trusted or os.environ.get("STEALTHTAP_LOAD_IFOREST") == "1"):
             self.iforest_session = ort.InferenceSession(str(if_path), sess_options=opts, providers=["CPUExecutionProvider"])
             self._warm_up(self.iforest_session)
             print(f"[model_server] loaded {if_path}")

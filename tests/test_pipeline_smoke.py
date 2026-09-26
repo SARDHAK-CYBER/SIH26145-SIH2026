@@ -390,11 +390,11 @@ def test_pcap_parser_orients_midstream_flow_and_skips_dns_responses(tmp_path):
     from scapy.all import Ether, IP, TCP, UDP, DNS, DNSQR, DNSRR, wrpcap
     pkts = [
         # mid-stream: server (443) sends first -> must NOT be the originator
-        Ether() / IP(src="93.184.216.34", dst="192.168.0.5") / TCP(sport=443, dport=51000, flags="PA") / (b"x" * 900),
-        Ether() / IP(src="192.168.0.5", dst="93.184.216.34") / TCP(sport=51000, dport=443, flags="A"),
+        Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src="93.184.216.34", dst="192.168.0.5") / TCP(sport=443, dport=51000, flags="PA") / (b"x" * 900),
+        Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src="192.168.0.5", dst="93.184.216.34") / TCP(sport=51000, dport=443, flags="A"),
         # DNS query + its response: only the query may become a dns record
-        Ether() / IP(src="192.168.0.5", dst="192.168.0.1") / UDP(sport=40000, dport=53) / DNS(rd=1, qd=DNSQR(qname="example.com")),
-        Ether() / IP(src="192.168.0.1", dst="192.168.0.5") / UDP(sport=53, dport=40000)
+        Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src="192.168.0.5", dst="192.168.0.1") / UDP(sport=40000, dport=53) / DNS(rd=1, qd=DNSQR(qname="example.com")),
+        Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src="192.168.0.1", dst="192.168.0.5") / UDP(sport=53, dport=40000)
         / DNS(qr=1, qd=DNSQR(qname="example.com"), an=DNSRR(rrname="example.com", rdata="93.184.216.34")),
     ]
     p = tmp_path / "t.pcap"

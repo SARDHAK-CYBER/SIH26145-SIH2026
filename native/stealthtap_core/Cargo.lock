@@ -462,6 +462,7 @@ name = "stealthtap_core"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "libloading",
  "libxdp-sys",
  "pyo3",
  "sha2",

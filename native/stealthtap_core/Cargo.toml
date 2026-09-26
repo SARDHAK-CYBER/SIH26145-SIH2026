@@ -17,6 +17,8 @@ sha2 = "0.10"
 # engines are stateful and processing-order-sensitive (see the comment on
 # `conn` below) -- measured directly against eval_real_traffic.py.
 indexmap = "2"
+# Runtime loading of libpcap/Npcap (no SDK / import library needed at build time).
+libloading = "0.8"
 
 # Linux-only: AF_XDP capture (src/afxdp.rs). Gated at the dependency level,
 # not just with #[cfg] in code, so a Windows build (this project's primary

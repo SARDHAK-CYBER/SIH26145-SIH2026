@@ -5,6 +5,8 @@ this makes `import scapy.layers.inet` return instantly. No effect on
 Linux/CI (where it's already fast)."""
 import os
 
+import src  # noqa: F401  -- scapy/Npcap import guard (src/scapy_safe.py) must precede any scapy import
+
 os.environ.setdefault("SCAPY_USE_PCAPDNET", "1")
 os.environ.setdefault("SCAPY_MANUFDB", "")
 try:
@@ -23,3 +25,4 @@ try:
     conf.noenum = True
 except Exception:
     pass
+

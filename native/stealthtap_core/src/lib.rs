@@ -11,11 +11,13 @@
 
 #[cfg(all(target_os = "linux", feature = "afxdp"))]
 mod afxdp;
+mod capture;
 mod eng01;
 mod eng02;
 mod eng05;
 mod eng06;
 mod eng13;
+mod inventory;
 mod ja4;
 mod live;
 mod parse;
@@ -115,7 +117,55 @@ fn live_conn_to_dict(py: Python<'_>, r: &live::LiveConnRecord) -> PyResult<PyObj
     Ok(d.into())
 }
 
-fn conn_batch_to_pylist(py: Python<'_>, records: Vec<live::LiveConnRecord>) -> PyResult<PyObject> {
+
+/// One immediately-emitted record (dns/ssl/modbus/dnp3/http) as (log_type, dict) -- the single
+/// place this mapping lives, shared by LiveFlowAssembler.process() and NativeCapture.poll().
+pub(crate) fn immediate_to_dict<'py>(py: Python<'py>, rec: &Immediate) -> PyResult<(&'static str, Bound<'py, PyDict>)> {
+    let d = PyDict::new_bound(py);
+    let base = |d: &Bound<'py, PyDict>, uid: &str, ts: f64, oh: &str, op: u16, rh: &str, rp: u16| -> PyResult<()> {
+        d.set_item("uid", uid)?; d.set_item("ts", ts)?;
+        d.set_item("id.orig_h", oh)?; d.set_item("id.orig_p", op)?;
+        d.set_item("id.resp_h", rh)?; d.set_item("id.resp_p", rp)?;
+        Ok(())
+    };
+    let lt = match rec {
+        Immediate::Dns(r) => {
+            base(&d, &r.uid, r.ts, &r.orig_h, r.orig_p, &r.resp_h, r.resp_p)?;
+            d.set_item("proto", r.proto)?; d.set_item("query", &r.query)?;
+            d.set_item("qtype_name", &r.qtype_name)?; d.set_item("segment_hash", &r.segment_hash)?;
+            "dns"
+        }
+        Immediate::Ssl(r) => {
+            base(&d, &r.uid, r.ts, &r.orig_h, r.orig_p, &r.resp_h, r.resp_p)?;
+            d.set_item("proto", r.proto)?; d.set_item("ja4", &r.ja4)?; d.set_item("sni", &r.sni)?;
+            d.set_item("segment_hash", &r.segment_hash)?;
+            "ssl"
+        }
+        Immediate::Modbus(r) => {
+            base(&d, &r.uid, r.ts, &r.orig_h, r.orig_p, &r.resp_h, r.resp_p)?;
+            d.set_item("proto", "tcp")?; d.set_item("func", &r.func)?;
+            d.set_item("register", r.register)?; d.set_item("segment_hash", &r.segment_hash)?;
+            "modbus"
+        }
+        Immediate::Dnp3(r) => {
+            base(&d, &r.uid, r.ts, &r.orig_h, r.orig_p, &r.resp_h, r.resp_p)?;
+            d.set_item("proto", "tcp")?; d.set_item("fc_request", &r.fc_request)?;
+            d.set_item("segment_hash", &r.segment_hash)?;
+            "dnp3"
+        }
+        Immediate::Http(r) => {
+            base(&d, &r.uid, r.ts, &r.orig_h, r.orig_p, &r.resp_h, r.resp_p)?;
+            d.set_item("proto", "tcp")?; d.set_item("method", &r.method)?;
+            d.set_item("uri", &r.uri)?; d.set_item("user_agent", &r.user_agent)?;
+            d.set_item("request_body_len", r.request_body_len)?;
+            d.set_item("segment_hash", &r.segment_hash)?;
+            "http"
+        }
+    };
+    Ok((lt, d))
+}
+
+pub(crate) fn conn_batch_to_pylist(py: Python<'_>, records: Vec<live::LiveConnRecord>) -> PyResult<PyObject> {
     let list = PyList::empty_bound(py);
     for r in &records {
         let tup = (("conn").to_string(), live_conn_to_dict(py, r)?);
@@ -151,56 +201,8 @@ impl LiveFlowAssembler {
     fn process(&mut self, py: Python<'_>, ts: f64, data: &[u8]) -> PyResult<PyObject> {
         let records = self.inner.process(ts, data);
         let list = PyList::empty_bound(py);
-        for rec in records {
-            let (log_type, d) = match rec {
-                Immediate::Dns(r) => {
-                    let d = PyDict::new_bound(py);
-                    d.set_item("uid", &r.uid)?; d.set_item("ts", r.ts)?;
-                    d.set_item("id.orig_h", &r.orig_h)?; d.set_item("id.orig_p", r.orig_p)?;
-                    d.set_item("id.resp_h", &r.resp_h)?; d.set_item("id.resp_p", r.resp_p)?;
-                    d.set_item("proto", r.proto)?; d.set_item("query", &r.query)?;
-                    d.set_item("qtype_name", &r.qtype_name)?; d.set_item("segment_hash", &r.segment_hash)?;
-                    ("dns", d)
-                }
-                Immediate::Ssl(r) => {
-                    let d = PyDict::new_bound(py);
-                    d.set_item("uid", &r.uid)?; d.set_item("ts", r.ts)?;
-                    d.set_item("id.orig_h", &r.orig_h)?; d.set_item("id.orig_p", r.orig_p)?;
-                    d.set_item("id.resp_h", &r.resp_h)?; d.set_item("id.resp_p", r.resp_p)?;
-                    d.set_item("proto", r.proto)?; d.set_item("ja4", &r.ja4)?; d.set_item("sni", &r.sni)?;
-                    d.set_item("segment_hash", &r.segment_hash)?;
-                    ("ssl", d)
-                }
-                Immediate::Modbus(r) => {
-                    let d = PyDict::new_bound(py);
-                    d.set_item("uid", &r.uid)?; d.set_item("ts", r.ts)?;
-                    d.set_item("id.orig_h", &r.orig_h)?; d.set_item("id.orig_p", r.orig_p)?;
-                    d.set_item("id.resp_h", &r.resp_h)?; d.set_item("id.resp_p", r.resp_p)?;
-                    d.set_item("proto", "tcp")?; d.set_item("func", &r.func)?;
-                    d.set_item("register", r.register)?; d.set_item("segment_hash", &r.segment_hash)?;
-                    ("modbus", d)
-                }
-                Immediate::Dnp3(r) => {
-                    let d = PyDict::new_bound(py);
-                    d.set_item("uid", &r.uid)?; d.set_item("ts", r.ts)?;
-                    d.set_item("id.orig_h", &r.orig_h)?; d.set_item("id.orig_p", r.orig_p)?;
-                    d.set_item("id.resp_h", &r.resp_h)?; d.set_item("id.resp_p", r.resp_p)?;
-                    d.set_item("proto", "tcp")?; d.set_item("fc_request", &r.fc_request)?;
-                    d.set_item("segment_hash", &r.segment_hash)?;
-                    ("dnp3", d)
-                }
-                Immediate::Http(r) => {
-                    let d = PyDict::new_bound(py);
-                    d.set_item("uid", &r.uid)?; d.set_item("ts", r.ts)?;
-                    d.set_item("id.orig_h", &r.orig_h)?; d.set_item("id.orig_p", r.orig_p)?;
-                    d.set_item("id.resp_h", &r.resp_h)?; d.set_item("id.resp_p", r.resp_p)?;
-                    d.set_item("proto", "tcp")?; d.set_item("method", &r.method)?;
-                    d.set_item("uri", &r.uri)?; d.set_item("user_agent", &r.user_agent)?;
-                    d.set_item("request_body_len", r.request_body_len)?;
-                    d.set_item("segment_hash", &r.segment_hash)?;
-                    ("http", d)
-                }
-            };
+        for rec in &records {
+            let (log_type, d) = immediate_to_dict(py, rec)?;
             list.append((log_type, d))?;
         }
         Ok(list.into())
@@ -244,6 +246,8 @@ impl LiveFlowAssembler {
 fn stealthtap_core(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_pcap, m)?)?;
     m.add_class::<LiveFlowAssembler>()?;
+    m.add_class::<capture::NativeCapture>()?;
+    m.add_class::<capture::PcapIndex>()?;
     m.add_class::<NativeEng01>()?;
     m.add_class::<NativeEng02>()?;
     m.add_class::<NativeEng05>()?;

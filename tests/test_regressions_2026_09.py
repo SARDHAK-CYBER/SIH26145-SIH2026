@@ -29,7 +29,7 @@ core = pytest.importorskip("stealthtap_core")
 
 
 def _tcp(src, dst, sport, dport, ts, payload=b"", flags="PA"):
-    p = Ether() / IP(src=src, dst=dst) / TCP(sport=sport, dport=dport, flags=flags) / Raw(payload)
+    p = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src=src, dst=dst) / TCP(sport=sport, dport=dport, flags=flags) / Raw(payload)
     p.time = ts
     return p
 
@@ -63,7 +63,7 @@ def test_expire_scales_linearly_not_quadratically():
 
 # ------------------------------------------------------------------ IPv6
 def _dns_v6(src, dst):
-    p = Ether() / IPv6(src=src, dst=dst) / UDP(sport=54321, dport=53) / DNS(rd=1, qd=DNSQR(qname="example.com"))
+    p = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IPv6(src=src, dst=dst) / UDP(sport=54321, dport=53) / DNS(rd=1, qd=DNSQR(qname="example.com"))
     p.time = 1000.0
     return p
 
@@ -83,13 +83,13 @@ def test_ipv6_native_matches_python_including_flow_uid(dst):
 
 def test_ipv6_extension_headers_are_walked():
     from scapy.layers.inet6 import IPv6ExtHdrHopByHop
-    p = Ether() / IPv6(src="2001:db8::1", dst="2001:db8::2") / IPv6ExtHdrHopByHop() / UDP(sport=5000, dport=53) / DNS(rd=1, qd=DNSQR(qname="ext.example.org"))
+    p = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IPv6(src="2001:db8::1", dst="2001:db8::2") / IPv6ExtHdrHopByHop() / UDP(sport=5000, dport=53) / DNS(rd=1, qd=DNSQR(qname="ext.example.org"))
     rs = core.LiveFlowAssembler(60.0).process(1.0, bytes(p))
     assert [t for t, _ in rs] == ["dns"] and rs[0][1]["query"] == "ext.example.org"
 
 
 def test_ipv4_still_works():
-    p = Ether() / IP(src="10.0.0.9", dst="10.0.0.53") / UDP(sport=5555, dport=53) / DNS(rd=1, qd=DNSQR(qname="v4.example.org"))
+    p = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / IP(src="10.0.0.9", dst="10.0.0.53") / UDP(sport=5555, dport=53) / DNS(rd=1, qd=DNSQR(qname="v4.example.org"))
     rs = core.LiveFlowAssembler(60.0).process(1.0, bytes(p))
     assert rs and rs[0][1]["id.orig_h"] == "10.0.0.9"
 

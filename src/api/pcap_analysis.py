@@ -98,6 +98,16 @@ ANALYSIS_TIMEOUT_SECONDS = float(os.environ.get("ANALYSIS_TIMEOUT_SECONDS", "600
 SURICATA_MAX_BYTES = int(os.environ.get("SURICATA_MAX_BYTES", str(40 * 1024 * 1024)))
 JOB_TTL_SECONDS = 3600
 
+# --- uploaded-capture store (packet inspector) ------------------------------
+# The uploaded file is kept on disk under its analysis id so the dashboard can page
+# through its packets (Wireshark-style) after the analysis finishes. Bounded by age
+# and total size; oldest goes first.
+CAPTURE_STORE = Path(os.environ.get("STEALTHTAP_CAPTURE_STORE", "data/captures"))
+CAPTURE_STORE_MAX_BYTES = int(os.environ.get("STEALTHTAP_CAPTURE_STORE_MAX_BYTES", str(4 * 1024 ** 3)))
+CAPTURE_TTL_SECONDS = float(os.environ.get("STEALTHTAP_CAPTURE_TTL_S", str(24 * 3600)))
+_INDEXES: "dict[str, Any]" = {}     # analysis_id -> native PcapIndex (small LRU)
+_INDEX_LOCK = threading.Lock()
+
 _ANALYSIS_POOL = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_ANALYSES, thread_name_prefix="analysis")
 _inflight = 0
 _inflight_lock = threading.Lock()
@@ -508,8 +518,60 @@ def _release() -> None:
         _inflight = max(0, _inflight - 1)
 
 
+_CLASSIC_PCAP_MAGICS = (bytes.fromhex("d4c3b2a1"), bytes.fromhex("a1b2c3d4"),
+                       bytes.fromhex("4d3cb2a1"), bytes.fromhex("a1b23c4d"))
+
+
+def _store_capture(analysis_id: str, contents: bytes) -> bool:
+    """Persist a classic pcap for the inspector (pcapng isn't indexable). Best-effort."""
+    if contents[:4] not in _CLASSIC_PCAP_MAGICS:
+        return False
+    try:
+        CAPTURE_STORE.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        files = sorted(CAPTURE_STORE.glob("*.pcap"), key=lambda f: f.stat().st_mtime)
+        total = sum(f.stat().st_size for f in files)
+        for f in files:                     # age + size eviction, oldest first
+            if now - f.stat().st_mtime > CAPTURE_TTL_SECONDS or total + len(contents) > CAPTURE_STORE_MAX_BYTES:
+                total -= f.stat().st_size
+                f.unlink(missing_ok=True)
+                with _INDEX_LOCK:
+                    _INDEXES.pop(f.stem, None)
+        if len(contents) > CAPTURE_STORE_MAX_BYTES:
+            return False
+        (CAPTURE_STORE / f"{analysis_id}.pcap").write_bytes(contents)
+        return True
+    except OSError:
+        return False
+
+
+def _get_index(analysis_id: str):
+    try:
+        uuid.UUID(analysis_id)
+    except ValueError:
+        raise HTTPException(400, "bad analysis id")
+    path = CAPTURE_STORE / f"{analysis_id}.pcap"
+    if not path.is_file():
+        raise HTTPException(404, "capture not stored (pcapng, expired, or analysed before the inspector existed)")
+    with _INDEX_LOCK:
+        idx = _INDEXES.get(analysis_id)
+    if idx is None:
+        try:
+            from stealthtap_core import PcapIndex
+        except ImportError:
+            raise HTTPException(501, "packet inspector needs the native module (stealthtap_core)")
+        idx = PcapIndex(str(path))
+        with _INDEX_LOCK:
+            if len(_INDEXES) >= 8:
+                _INDEXES.pop(next(iter(_INDEXES)))
+            _INDEXES[analysis_id] = idx
+    return idx
+
+
 async def _analyze_contents(contents: bytes, filename: str, app_state) -> dict:
     parser_used = "zeek"
+    analysis_id = str(uuid.uuid4())
+    stored = await asyncio.to_thread(_store_capture, analysis_id, contents)
     t0 = time.time()
     # Zeek parsing and Suricata signature matching are fully
     # independent services -- run them concurrently rather than one
@@ -569,7 +631,9 @@ async def _analyze_contents(contents: bytes, filename: str, app_state) -> dict:
     }
 
     return {
-        "analysis_id": str(uuid.uuid4()),
+        "analysis_id": analysis_id,
+        "inspectable": stored,
+        "capture_bytes": len(contents),
         "filename": filename,
         "parser_used": parser_used,  # "zeek" or "scapy_fallback" -- tells you which path actually ran
         "packet_summary": {
@@ -665,3 +729,50 @@ async def analyze_job(job_id: str):
     if job["status"] == "error":
         return JSONResponse({"job_id": job_id, "status": "error", "error": job["error"]}, status_code=job.get("http_status", 500))
     return {"job_id": job_id, "status": "running", "elapsed_s": round(time.time() - job["created"], 1)}
+
+
+# --------------------------------------------------------------------------
+# Packet inspector for uploaded captures
+# --------------------------------------------------------------------------
+@router.get("/analyze/{analysis_id}/packets")
+async def capture_packets(analysis_id: str, start: int = 0, limit: int = 200, filter: str = ""):
+    """Page through the uploaded capture. `start` is a 0-based packet index; the reply's
+    `next` is where to continue (== total when exhausted). `filter`: whitespace-separated
+    case-insensitive terms that must all match a row, `!term` negates ("tcp 10.0.0.5 !dns")."""
+    idx = _get_index(analysis_id)
+    limit = max(1, min(limit, 1000))
+    rows, nxt = await asyncio.to_thread(idx.page, max(0, start), limit, filter)
+    t0, t1 = idx.span()
+    return {"total": idx.count(), "next": nxt, "rows": rows, "first_ts": t0, "last_ts": t1}
+
+
+@router.get("/analyze/{analysis_id}/packet/{n}")
+async def capture_packet(analysis_id: str, n: int):
+    idx = _get_index(analysis_id)
+    got = await asyncio.to_thread(idx.packet, n)
+    if got is None:
+        raise HTTPException(404, "no such packet")
+    ts, wire, raw = got
+    from src.api.packet_detail import dissect
+    d = await asyncio.to_thread(dissect, bytes(raw), ts, wire)
+    d["id"] = n
+    return d
+
+
+@router.get("/analyze/{analysis_id}/export.pcap")
+async def capture_export(analysis_id: str, filter: str = "", limit: int = 20000):
+    """Download the packets matching `filter` as a pcap (the whole file when no filter)."""
+    from fastapi.responses import FileResponse, Response
+    idx = _get_index(analysis_id)
+    if not filter.strip():
+        return FileResponse(idx.path(), media_type="application/vnd.tcpdump.pcap",
+                            filename=f"{analysis_id}.pcap")
+    rows, _ = await asyncio.to_thread(idx.page, 0, min(limit, 100000), filter)
+    pk = []
+    for r in rows:
+        got = await asyncio.to_thread(idx.packet, r["id"])
+        if got:
+            pk.append((got[0], bytes(got[2])))
+    from src.api.packet_detail import to_pcap_bytes
+    return Response(to_pcap_bytes(pk), media_type="application/vnd.tcpdump.pcap",
+                    headers={"Content-Disposition": 'attachment; filename="stealthtap-selection.pcap"'})

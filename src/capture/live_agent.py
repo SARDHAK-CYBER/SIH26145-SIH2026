@@ -60,6 +60,18 @@ except ImportError:
 
 _FORCE_PYTHON_LIVE_ASSEMBLER = os.environ.get("STEALTHTAP_FORCE_PYTHON_LIVE_ASSEMBLER") == "1"
 
+try:
+    # Whole-hot-path native capture (libpcap/Npcap read loop + flow assembly +
+    # host inventory + packet ring, all in one GIL-free Rust thread) -- see
+    # native/stealthtap_core/src/capture.rs. Python only sees batched records.
+    from stealthtap_core import NativeCapture, PcapIndex  # noqa: F401
+    NATIVE_CAPTURE_AVAILABLE = True
+except ImportError:
+    NativeCapture = None  # type: ignore[assignment,misc]
+    PcapIndex = None  # type: ignore[assignment,misc]
+    NATIVE_CAPTURE_AVAILABLE = False
+_FORCE_PYTHON_CAPTURE = os.environ.get("STEALTHTAP_CAPTURE", "").lower() in ("python", "scapy", "afxdp", "afpacket")
+
 from src.capture.scoring import (
     ScoringEngine, DISPATCH_IMMEDIATE as _DISPATCH_IMMEDIATE,
     DISPATCH_CONN_SNAPSHOT as _DISPATCH_CONN_SNAPSHOT,
@@ -114,6 +126,35 @@ class _RateMonitor:
                 "high_speed": bool(flags), "high_speed_flags": flags}
 
 
+class _NativeAssembler:
+    """FlowAssembler-shaped view over a NativeCapture, so the scoring loop and
+    status() don't care which assembler sits behind them."""
+
+    def __init__(self, cap):
+        self.cap = cap
+
+    def snapshot(self):
+        return self.cap.snapshot(4000)
+
+    def expire(self, now=None):
+        return self.cap.expire(now)
+
+    def flush(self):
+        return self.cap.flush()
+
+    def active_flows(self):
+        return self.cap.active_flows()
+
+    @property
+    def stats(self):
+        return self.cap.stats()
+
+
+class _NativeBackendInfo:
+    name = "native-pcap"
+    kernel_level = True
+
+
 def _pctl(sorted_vals, q):
     if not sorted_vals:
         return None
@@ -165,6 +206,13 @@ class LiveAgent:
         self._scoring: Optional[ScoringEngine] = None   # num_workers == 1: in-process
         self._pool: Optional[EngineWorkerPool] = None    # num_workers  > 1: multi-core
         self._ml_buf: dict[str, list] = {}    # family -> [(flow, t_arr), ...], batched by _flush_ml_immediate
+        self._ncap = None                     # NativeCapture when the native hot path is in use
+        self._replay_source = False           # True while a pcap file (not a NIC) feeds the pipeline
+        self._series: deque = deque(maxlen=1800)   # per-second telemetry for the dashboard (30 min)
+        self._series_last = (time.monotonic(), 0, 0)
+        self._class_counts: dict[str, int] = {}
+        self._sev_counts: dict[str, int] = {}
+        self._replay_done = False
 
     # ---------------- engine wiring ----------------
     def _build_engines(self):
@@ -257,6 +305,13 @@ class LiveAgent:
     def start(self, backend_factory=None) -> None:
         if self._running.is_set():
             return
+        if backend_factory is None and NATIVE_CAPTURE_AVAILABLE and not _FORCE_PYTHON_CAPTURE:
+            try:
+                self._start_native()
+                return
+            except CaptureError as exc:
+                print(f"[live_agent] native capture unavailable ({exc}); falling back to the Python backend")
+                self._ncap = None
         self._build_engines()
         self._running.set()
         self._started_at = time.time()
@@ -277,9 +332,56 @@ class LiveAgent:
         print(f"[live_agent] capturing on {self.iface_req!r} via {self._backend.name} "
               f"(kernel_level={self._backend.kernel_level}, buffer={self.buffer_mb}MiB)")
 
-    def replay_pcap(self, path: str, realtime: bool = False) -> None:
+    def _start_native(self, pcap: Optional[str] = None, realtime: bool = False, loops: int = 1,
+                      speed: Optional[float] = None) -> None:
+        """Native hot path. `pcap` replays a classic pcap file through the IDENTICAL code
+        (NIC read loop -> assembler -> records); otherwise it captures self.iface."""
+        ring = int(os.environ.get("STEALTHTAP_RING_PACKETS", "50000"))
+        try:
+            if pcap:
+                cap = NativeCapture(pcap=pcap, loops=loops,
+                                    speed=(speed if speed is not None else (1.0 if realtime else 0.0)),
+                                    ring_packets=ring, idle_timeout_s=60.0)
+            else:
+                cap = NativeCapture(iface=self.iface, bpf=self.bpf, buffer_mb=self.buffer_mb,
+                                    promisc=self.promisc, ring_packets=ring, idle_timeout_s=60.0)
+            self._build_engines()
+            cap.start()
+        except OSError as exc:
+            raise CaptureError(str(exc))
+        self._ncap = cap
+        self._assembler = _NativeAssembler(cap)
+        self._replay_source = bool(pcap)
+        self._backend = _NativeBackendInfo()
+        self.stats["backend"] = "native-pcap-replay" if pcap else "native-pcap"
+        self.stats["kernel_level"] = not pcap
+        self._running.set()
+        self._started_at = time.time()
+        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True, name="live-detect")
+        self._loop_thread.start()
+        print(f"[live_agent] {'replaying ' + pcap if pcap else 'capturing on ' + repr(self.iface_req)} "
+              f"via native pcap engine (GIL-free capture+assembly thread)")
+
+    def start_replay(self, path: str, loops: int = 1, speed: float = 0.0) -> None:
+        """Non-blocking replay of a classic pcap through the live pipeline (loops=0: forever;
+        speed=0: as fast as possible, 1.0: original timing). Native engine only."""
+        if not NATIVE_CAPTURE_AVAILABLE:
+            raise CaptureError("pcap replay needs the native module (stealthtap_core) -- build it with maturin")
+        self._start_native(pcap=path, loops=loops, speed=speed)
+
+    def replay_pcap(self, path: str, realtime: bool = False, loops: int = 1, speed: Optional[float] = None) -> None:
         """Drive the SAME live pipeline from a pcap file -- for demos/CI
         where kernel capture isn't available."""
+        if NATIVE_CAPTURE_AVAILABLE and not self._running.is_set() and self._ncap is None:
+            try:
+                self._start_native(pcap=path, realtime=realtime, loops=loops, speed=speed)
+                if loops == 0:
+                    return          # endless soak replay: the caller drives and stops it
+                self._loop_thread.join()    # consumer exits once the file is exhausted AND dispatched
+                return
+            except CaptureError as exc:     # e.g. pcapng -- fall through to the Python readers
+                print(f"[live_agent] native replay unavailable ({exc}); using the Python reader")
+                self._ncap = None
         from scapy.all import PcapReader
         if not self._running.is_set():
             self._build_engines()
@@ -320,12 +422,14 @@ class LiveAgent:
 
     def stop(self) -> None:
         self._running.clear()
-        if self._backend is not None:
+        if self._backend is not None and hasattr(self._backend, "stop"):
             self._backend.stop()
         if self._loop is not None:
             self._loop.call_soon_threadsafe(lambda: None)
+        if self._ncap is not None:
+            self._ncap.stop()       # capture thread first, so the consumer's final drain sees everything
         if self._loop_thread is not None:
-            self._loop_thread.join(timeout=5)
+            self._loop_thread.join(timeout=15)
         if self._pool is not None:
             self._pool.drain(timeout=10.0)   # score what the shutdown flush routed to workers
             for alert in self._pool.drain_alerts():
@@ -336,7 +440,7 @@ class LiveAgent:
     def _run_loop(self) -> None:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._consume())
+        self._loop.run_until_complete(self._consume_native() if self._ncap is not None else self._consume())
 
     _DRAIN_BATCH = 512   # packets pulled per loop pass before checking the cadence
 
@@ -369,27 +473,11 @@ class LiveAgent:
                 for alert in self._pool.drain_alerts():
                     self._emit(alert, alert.pop("_t_arr", None))
 
+            self._sample_series()
             now = time.monotonic()
             if now - last_tick >= SNAPSHOT_INTERVAL_S:
                 last_tick = now
-                for _lt, rec in self._assembler.snapshot():
-                    await self._dispatch_conn("conn_snapshot", rec, _DISPATCH_CONN_SNAPSHOT)
-                expired = [r for lt, r in self._assembler.expire() if lt == "conn"]
-                for rec in expired:
-                    await self._dispatch_conn("conn_expire", rec, _DISPATCH_CONN_EXPIRE)
-                if self._scoring is not None:
-                    # in-process mode: batch the ONNX call here, same as before.
-                    for alert in await self._scoring.ml_batch_conn(expired):
-                        self._emit(alert, None)
-                    for rec in expired:
-                        b_alert = self._scoring.observe_baseline(rec)
-                        if b_alert is not None:
-                            self._emit(b_alert, None)
-                # pool mode: each worker batches its own shard's ML call and
-                # observes its own shard's baseline, draining every loop
-                # iteration above -- no extra drain needed here.
-                kstats = self._backend.kernel_stats() if hasattr(self._backend, "kernel_stats") else None
-                self._rate_view = self._rate.sample(self._assembler.stats["packets"], self._bytes, kstats)
+                await self._tick()
 
         for _lt, rec in self._assembler.flush():
             await self._dispatch_conn("conn_flush", rec, _DISPATCH_CONN_EXPIRE)
@@ -397,6 +485,95 @@ class LiveAgent:
         if self._pool is not None:
             for alert in self._pool.drain_alerts():
                 self._emit(alert, alert.pop("_t_arr", None))
+
+
+    async def _tick(self, expire_now: Optional[float] = None) -> None:
+        """Every SNAPSHOT_INTERVAL_S: re-score active flows, expire idle ones, sample rates."""
+        for _lt, rec in self._assembler.snapshot():
+            await self._dispatch_conn("conn_snapshot", rec, _DISPATCH_CONN_SNAPSHOT)
+        expire_kw = {} if expire_now is None else {"now": expire_now}
+        expired = [r for lt, r in self._assembler.expire(**expire_kw) if lt == "conn"]
+        for rec in expired:
+            await self._dispatch_conn("conn_expire", rec, _DISPATCH_CONN_EXPIRE)
+        if self._scoring is not None:
+            # in-process mode: batch the ONNX call here, same as before.
+            for alert in await self._scoring.ml_batch_conn(expired):
+                self._emit(alert, None)
+            for rec in expired:
+                b_alert = self._scoring.observe_baseline(rec)
+                if b_alert is not None:
+                    self._emit(b_alert, None)
+        # pool mode: each worker batches its own shard's ML call and
+        # observes its own shard's baseline, draining every loop
+        # iteration -- no extra drain needed here.
+        if self._ncap is not None:
+            st = self._ncap.stats()
+            self._rate_view = self._rate.sample(st["recv"], st["bytes"], {"drop": st["kernel_drop"]})
+        else:
+            kstats = self._backend.kernel_stats() if hasattr(self._backend, "kernel_stats") else None
+            self._rate_view = self._rate.sample(self._assembler.stats["packets"], self._bytes, kstats)
+
+    def _sample_series(self, force: bool = False) -> None:
+        """One telemetry point per second for the live dashboard's charts."""
+        now = time.monotonic()
+        t0, p0, b0 = self._series_last
+        if not force and now - t0 < 1.0:
+            return
+        if self._ncap is not None:
+            st = self._ncap.stats()
+            pk, by, kd = st["recv"], st["bytes"], st["kernel_drop"]
+            flows, pending = st["active_flows"], st["pending_records"]
+        else:
+            pk, by, kd = self._assembler.stats["packets"], self._bytes, 0
+            flows, pending = self._assembler.active_flows(), self._q.qsize()
+        dt = max(now - t0, 1e-6)
+        self._series.append({"t": round(time.time(), 2), "pps": round((pk - p0) / dt), "mbps": round((by - b0) * 8 / dt / 1e6, 3),
+                             "flows": flows, "pending": pending, "kdrop": kd, "alerts": self.stats["alerts"],
+                             "udrop": self.stats["dropped"]})
+        self._series_last = (now, pk, by)
+
+    async def _consume_native(self) -> None:
+        """Consumer for the native hot path: capture + assembly already happened in the
+        Rust thread; this only dispatches the records it produced."""
+        cap = self._ncap
+        loop = asyncio.get_running_loop()
+        last_tick = time.monotonic()
+        while self._running.is_set():
+            recs = cap.poll(0, 4000)
+            if not recs and not cap.finished():
+                recs = await loop.run_in_executor(None, cap.poll, 100, 4000)
+            if recs:
+                mono, wall = time.monotonic(), time.time()
+                for log_type, rec in recs:
+                    arr = rec.pop("_arr", None)
+                    t_arr = mono - (wall - arr) if arr else None
+                    await self._dispatch_immediate(log_type, rec, t_arr)
+            await self._flush_ml_immediate()
+            if self._pool is not None:
+                self._pool.flush()
+                for alert in self._pool.drain_alerts():
+                    self._emit(alert, alert.pop("_t_arr", None))
+            self._sample_series()
+            now = time.monotonic()
+            if now - last_tick >= SNAPSHOT_INTERVAL_S:
+                last_tick = now
+                await self._tick(cap.stats()["last_ts"] if self._replay_source else None)
+            if self._replay_source and cap.finished() and cap.pending() == 0 and not recs:
+                break            # a replayed file is exhausted and fully dispatched
+        while True:              # final drain (stop() halts the capture thread first)
+            recs = cap.poll(0, 4000)
+            if not recs:
+                break
+            for log_type, rec in recs:
+                rec.pop("_arr", None)
+                await self._dispatch_immediate(log_type, rec, None)
+        for _lt, rec in self._assembler.flush():
+            await self._dispatch_conn("conn_flush", rec, _DISPATCH_CONN_EXPIRE)
+        await self._flush_ml_immediate()
+        if self._pool is not None:
+            for alert in self._pool.drain_alerts():
+                self._emit(alert, alert.pop("_t_arr", None))
+        self._replay_done = True
 
     async def _dispatch_immediate(self, log_type: str, rec: dict, t_arr: Optional[float]) -> None:
         if self._pool is not None:
@@ -457,6 +634,9 @@ class LiveAgent:
             alert.setdefault("evidence", {})["detection_latency_ms"] = round(lat_ms, 2)
 
         self.stats["alerts"] += 1
+        tc, sev = alert.get("threat_class", "?"), alert.get("severity", "?")
+        self._class_counts[tc] = self._class_counts.get(tc, 0) + 1
+        self._sev_counts[sev] = self._sev_counts.get(sev, 0) + 1
         self._recent.append(alert)
         for sink in self._sinks:
             try:
@@ -477,7 +657,8 @@ class LiveAgent:
 
     def status(self) -> dict:
         return {
-            "running": self._running.is_set(),
+            "running": self._running.is_set() and not self._replay_done,
+            "finished": self._replay_done,
             "interface": self.iface_req,
             "capture_name": self.iface,
             "bpf": self.bpf,
@@ -494,15 +675,46 @@ class LiveAgent:
             "num_workers": self.num_workers_req,
             "engine_pool_dropped": (self._pool.dropped if self._pool else 0),
             "snapshot_interval_s": SNAPSHOT_INTERVAL_S,
+            "native": self._ncap is not None,
+            "source": "pcap-replay" if self._replay_source else ("interface" if self._ncap is not None else "python"),
+            "capture": (self._ncap.stats() if self._ncap is not None else None),
+            "capture_error": (self._ncap.error() if self._ncap is not None else None),
             **self.stats,
         }
+
+    # ---- dashboard introspection (native hot path only; empty otherwise) ----
+    @property
+    def native(self) -> bool:
+        return self._ncap is not None
+
+    def series(self, seconds: int = 300) -> list[dict]:
+        return list(self._series)[-max(1, seconds):]
+
+    def summary(self) -> dict:
+        return {"alerts_by_class": dict(self._class_counts), "alerts_by_severity": dict(self._sev_counts)}
+
+    def hosts(self, limit: int = 500) -> list[dict]:
+        return self._ncap.hosts(limit) if self._ncap else []
+
+    def protocols(self) -> list[dict]:
+        return self._ncap.protocols() if self._ncap else []
+
+    def top_flows(self, n: int = 50) -> list[dict]:
+        return [r for _t, r in self._ncap.top_flows(n)] if self._ncap else []
+
+    def packets(self, after_id: int = 0, limit: int = 200, flt: str = "") -> list[dict]:
+        return self._ncap.packets(after_id, limit, flt) if self._ncap else []
+
+    def packet(self, pid: int):
+        return self._ncap.packet(pid) if self._ncap else None
 
     def pending_work(self) -> int:
         """Packet queue depth PLUS anything still queued in the engine pool
         (if active). "packet queue empty" alone under-counts once records
         have been routed to worker processes -- their queues drain on their
         own schedule."""
-        return self._q.qsize() + (self._pool.pending() if self._pool else 0)
+        return (self._q.qsize() + (self._ncap.pending() if self._ncap else 0)
+                + (self._pool.pending() if self._pool else 0))
 
     def recent_alerts(self, limit: int = 100) -> list[dict]:
         return list(self._recent)[-limit:]

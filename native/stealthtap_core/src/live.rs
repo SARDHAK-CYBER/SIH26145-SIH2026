@@ -15,6 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use indexmap::IndexMap;
 use sha2::{Digest, Sha256};
 
+use crate::inventory::{classify, Inventory};
 use crate::ja4::ja4_and_sni;
 use crate::parse::{flow_uid, parse_dns_query, parse_ip_header, parse_l4, qtype_name,
                    sender_is_originator, strip_link_layer, LINKTYPE_ETHERNET};
@@ -213,11 +214,12 @@ pub struct LiveFlowAssembler {
     dirty: HashSet<FlowKey>,              // matches Python's plain `set` -- no order guarantee there either
     idle_timeout_s: f64,
     pub stats: Stats,
+    pub inv: Inventory,                   // passive host/protocol inventory (see inventory.rs)
 }
 
 impl LiveFlowAssembler {
     pub fn new(idle_timeout_s: f64) -> Self {
-        Self { flows: IndexMap::new(), dirty: HashSet::new(), idle_timeout_s, stats: Stats::default() }
+        Self { flows: IndexMap::new(), dirty: HashSet::new(), idle_timeout_s, stats: Stats::default(), inv: Inventory::new() }
     }
 
     /// One packet's raw bytes (as scapy's `bytes(pkt)` produces -- INCLUDING
@@ -236,7 +238,17 @@ impl LiveFlowAssembler {
             return out;
         };
 
-        let Some(l4) = parse_l4(proto_num, l4_payload) else { return out };
+        let src_mac = if data.len() >= 12 && data[6..12] != [0u8; 6] {
+            let mut m = [0u8; 6]; m.copy_from_slice(&data[6..12]); Some(m)
+        } else { None };
+        let wire = data.len() as u64;
+        let Some(l4) = parse_l4(proto_num, l4_payload) else {
+            self.inv.observe_ip(&src_ip, &dst_ip, wire, ts, 2, src_mac);
+            self.inv.observe_proto(if proto_num == 1 || proto_num == 58 { 24 } else if proto_num == 50 || proto_num == 51 { 30 } else { 29 }, wire);
+            return out;
+        };
+        self.inv.observe_ip(&src_ip, &dst_ip, wire, ts, if l4.proto == "tcp" { 0 } else { 1 }, src_mac);
+        self.inv.observe_proto(classify(l4.proto == "tcp", l4.sport, l4.dport), wire);
 
         // Unconditional: every TCP/UDP packet updates its flow's byte/packet
         // counters FIRST, exactly like flow_assembler.py's process() (which
@@ -402,6 +414,13 @@ impl LiveFlowAssembler {
     }
 
     pub fn active_flows(&self) -> usize { self.flows.len() }
+
+    /// The `n` heaviest active flows by total bytes (live "conversations" view).
+    pub fn top_flows(&self, n: usize) -> Vec<LiveConnRecord> {
+        let mut v: Vec<&LiveFlow> = self.flows.values().collect();
+        v.sort_by(|a, b| (b.orig_bytes + b.resp_bytes).cmp(&(a.orig_bytes + a.resp_bytes)));
+        v.into_iter().take(n).map(|f| f.to_conn()).collect()
+    }
 }
 
 fn canonical_key(src_ip: &str, sport: u16, dst_ip: &str, dport: u16, proto: &'static str) -> FlowKey {
