@@ -16,7 +16,7 @@ How this file works:
 ## Automated status
 
 <!-- AUTO-STATUS:BEGIN -->
-_Last automated check: **2026-09-26 22:50:05** · PASS 27 · WARN 0 · FAIL 0 · tests 148 · live pipeline 364,413 pps · hybrid recall 83.0% · flow FPR 0.167%_
+_Last automated check: **2026-09-26 23:11:12** · PASS 27 · WARN 0 · FAIL 0 · tests 166 · live pipeline 348,602 pps · hybrid recall 83.0% · flow FPR 0.167%_
 
 No FAIL or WARN in the latest run.
 
