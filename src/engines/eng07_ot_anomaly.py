@@ -33,7 +33,9 @@ DANGEROUS_MODBUS_FUNCTIONS = {
 # differentiator is deeper in the CIP request path (class/instance routing)
 # than was extracted here. This detects "a rare, PLC-control-family CIP
 # service was used" reliably; it does not yet label which one.
-DANGEROUS_CIP_SERVICES = {0x04, 0x10, 0x4B, 0x4F, 0x50}
+# Standard CIP state-control services -- added after a REAL capture (ITI cip_stop_plc.pcap: service 0x07 Stop to the
+# Program object, class 0x8E) went undetected: 0x05 Reset, 0x06 Start, 0x07 Stop change a controller's run state.
+DANGEROUS_CIP_SERVICES = {0x04, 0x05, 0x06, 0x07, 0x10, 0x4B, 0x4F, 0x50}
 
 # DNP3 (IEEE 1815) application-layer function codes that change outstation
 # state or device availability -- the DNP3 analogue of a Modbus write.

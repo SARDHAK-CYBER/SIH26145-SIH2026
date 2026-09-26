@@ -192,3 +192,20 @@ def test_profinet_dcp_native_equals_python_on_real_captures(name, expect_set):
     rs = [(r["function"], r["detail"]) for _t, r in _native_records(f, {"profinet"})]
     assert sorted(py) == sorted(rs) and rs
     assert any(fn == "DCP_SET" for fn, _ in rs) is expect_set
+
+
+def test_real_cip_stop_plc_and_s7_stop_are_detected():
+    """REAL command captures (ITI ICS-Security-Tools): a CIP Stop (0x07) and S7 PLC-stop requests must alert."""
+    import asyncio
+    from src.capture.live_agent import LiveAgent
+    import src  # noqa: F401
+    for name, expect in (("cip_stop_plc.pcap", "0x7"), ("snap7_s300_stop.pcapng", "PLC_STOP"), ("step7_s300_stop.pcapng", "PLC_STOP")):
+        f = PUB / "more" / name
+        if not f.exists():
+            pytest.skip("public sample not downloaded")
+        a = LiveAgent("pcap-replay", None)
+        a.start_replay(str(f), loops=1, speed=0.0)
+        a._loop_thread.join()
+        got = {str(x["evidence"].get("function_code") or x["evidence"].get("cip_service_code")) for x in a.recent_alerts(20)}
+        a.stop()
+        assert expect in got, (name, got)
