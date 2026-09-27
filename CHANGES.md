@@ -1,3 +1,13 @@
+# Blockers-pass, HA, accounts, reboot verification, docs restructure — 2026-09-27 (later)
+
+- Accounts: named users (scrypt), signed login tokens, roles viewer/analyst/sensor/admin, TOTP two-factor, self-service password change, audit log, per-tenant rate/analysis limits, role-aware dashboard UI. Verified end to end through TLS (20/20 checks + positive control).
+- High availability (single host, tested): API replicas behind the TLS proxy survived losing each replica in turn (235/235 requests OK); PostgreSQL hot standby lags ~0.4 s; manual failover drill 20 s. `docker compose --profile ha`, `scripts/pg_failover.sh`, `scripts/ha_failover_test.py`.
+- Real-tool out-of-sample testing: nmap/curl against a real Tomcat (3/3 detected, one gap fixed); nmap/smtplib against toy SMTP/distcc servers found and fixed a real distcc segmentation-reassembly miss.
+- Live-soak false positives found and fixed: flood-concentration threshold, directed-broadcast beacons, chatty-client exfiltration floor, TLS-keepalive Slowloris, OS-connectivity-check DGA misfire, and SSDP/mDNS/multicast-discovery false positives in the live-learning baseline (live-reconfirmed after the fix: 1,866 real SSDP + 16,187 real mDNS packets, 0 false alerts).
+- TLS reverse proxy (Caddy) in the compose stack; sensor auto-restart task rewritten to supervise itself and proved to survive both a manual kill and **a real reboot of the deployment machine** (sensor + all 13 containers + TLS came back with no manual step).
+- Site calibration tooling (`scripts/site_calibration.py`) and an operator allowlist (`config/allowlist.json`) for false-positive triage on a new network; 343 real ICS captures from public sources replayed (1 generic-engine alert in 5,497 flows); Modbus ML model found duplicating its own rule engine, now corroboration-only.
+- Docs restructured: `README.md` is now a short overview; deep technical reference moved to `docs/TECHNICAL.md`; install/deploy steps moved to `docs/INSTALLATION.md`. Details: `docs/PRD.md` §14.
+
 # Deployment hardening, ENG-14, real benign test, flow retrain — 2026-09-27
 
 - API key auth (API + sensor), loopback-only datastore ports, dashboard sign-in, optional per-tenant keys (alerts, captures, jobs), `.github/workflows/ci.yml`.
