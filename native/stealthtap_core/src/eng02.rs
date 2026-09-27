@@ -24,6 +24,9 @@ const PRUNE_EVERY: u32 = 5000;
 /// housekeeping, never a C2 channel: real Wi-Fi capture flagged a neighbour's LLMNR queries to 224.0.0.252.
 pub fn is_multicast_or_broadcast(ip: &str) -> bool {
     if ip == "255.255.255.255" || ip.starts_with("ff") || ip.starts_with("FF") { return ip.contains(':') || ip == "255.255.255.255"; }
+    // directed broadcast in private / link-local space (x.y.z.255, e.g. NetBIOS-NS to 169.254.255.255 on a real capture)
+    if ip.ends_with(".255") && (ip.starts_with("10.") || ip.starts_with("192.168.") || ip.starts_with("169.254.")
+        || (ip.starts_with("172.") && ip.split('.').nth(1).and_then(|o| o.parse::<u8>().ok()).map_or(false, |o| (16..=31).contains(&o)))) { return true; }
     match ip.split('.').next().and_then(|o| o.parse::<u8>().ok()) { Some(o) => (224..=239).contains(&o), None => false }
 }
 

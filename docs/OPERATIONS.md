@@ -34,7 +34,11 @@ Verified 2026-09-27 on the Docker stack: TLS 200, API 401 without / 200 with key
 
 **Verified end to end on the running Docker stack through the TLS proxy (2026-09-27, 20/20 checks + a positive control):** logins over TLS; wrong password 401; no credential 401; viewer reads but cannot upload/start capture (403); a sensor key cannot read alerts and can only ingest; acme's analyst uploads and analyses a capture; acme's viewer reads its packets while a globex admin gets 404 for the capture, its packets, its packet detail and its export; an alert ingested for acme is visible to acme, invisible to plant7 and globex, and a direct fetch by globex is 404; audit lines present, no secrets. Test users and keys were removed afterwards.
 
-**Still not there:** no SSO/OIDC, no password-reset flow, no MFA; the sensor process (host) has its own copy of the same middleware and needs the same users file and token secret to accept dashboard logins; a compromised admin credential is a compromised tenant.
+* **Two-factor (TOTP, RFC 6238):** a user with a `totp_secret` must also give a 6-digit code (one use per 30 s step, +-1 step of clock skew, checked against the RFC test vector). Enrol yourself in the API (`POST /auth/mfa/setup` then `/auth/mfa/enable`) or an administrator runs `scripts/manage_users.py mfa-setup <user>`; `mfa-reset` removes it. `STEALTHTAP_REQUIRE_MFA_ROLES=admin` refuses password-only logins for those roles. The dashboard sign-in asks for the code when the server says it is needed.
+* **Password change:** `POST /auth/password` (current + new, >= 12 characters, different from the user name and the old password); it invalidates every earlier session of that user. Administrators reset with `manage_users.py passwd`. The API container mounts `./config` read-write so self-service changes can be saved.
+* **Dashboard role awareness:** the upload button and the capture/replay/discovery controls are disabled with an explanation for roles that may not use them (verified in the browser with a viewer account); the server enforces the same rules with 403.
+
+**Still not there:** no SSO/OIDC (the usual route is an OIDC-aware reverse proxy such as oauth2-proxy in front of Caddy; not built or tested here, it needs an identity provider), no email-based password recovery (an administrator resets it), no MFA recovery codes; the sensor process (host) has its own copy of the same middleware and needs the same users file and token secret to accept dashboard logins; a compromised admin credential is a compromised tenant.
 
 ## 2. Multi-tenant isolation (implemented at the storage/API layer)
 
@@ -63,7 +67,7 @@ A sensor forwards with its tenant's key (`STEALTHTAP_SENSOR_KEY` in compose, oth
 * **Auto-restart of the sensor.** Docker: `restart: unless-stopped`. Linux: `packaging/systemd/stealthtap-sensor.service` (capabilities `CAP_NET_RAW`+`CAP_NET_ADMIN` only, `Restart=always`). Windows: `packaging/windows/install_sensor_task.ps1` registers an at-boot scheduled task that runs as SYSTEM (so Npcap's Administrators-only mode never prompts) and supervises the sensor itself in a loop (relaunch 3 s after any exit; Task Scheduler alone did not restart it when the wrapper exited cleanly, which the first install on 2026-09-27 showed). **Executed and proved on this machine:** installed with one UAC approval; the sensor on port 8100 ran as `NT AUTHORITY\SYSTEM`, captured on Wi-Fi without any prompt, and after `Stop-Process -Force` on it was back within ~15 s under a new PID. Not verified: behaviour across an actual reboot. The systemd unit was only syntax-checked (no Linux host here; verifying it needs a systemd image, which was not downloaded). **Reboot persistence is unverified:** after rebooting run `powershell -ExecutionPolicy Bypass -File scripts\verify_after_reboot.ps1` — it checks uptime, that the sensor answers and runs as SYSTEM, that capture works without a prompt, that Docker services and TLS came back, and exits non-zero if anything needed a manual step.
 * Containers use `restart: unless-stopped`; the API has a health check; Postgres/Redis/Redpanda health-gate their dependents.
 
-## 5. High availability: design (not built here)
+## 5. High availability (API tier and database standby built and tested on one Docker host; see limits)
 
 Everything above keeps a single node honest; it is not HA. The intended topology, and why each piece is safe to replicate:
 
@@ -74,7 +78,15 @@ Everything above keeps a single node honest; it is not HA. The intended topology
 | PostgreSQL | primary + streaming replica with automatic failover (Patroni / a managed service); backups as above | the only durable state |
 | Redis | Sentinel or a managed HA Redis, or leave the in-process store (single-process detectors do not need Redis) | soft state only |
 
-Nothing in this table has been exercised on a multi-node deployment; only single-node Docker and single-host Windows were available.
+### What was built and measured (2026-09-27, Docker profile `ha`)
+```
+STEALTHTAP_API_UPSTREAMS="api:8000 api2:8000" docker compose --profile ha up -d      # + one-time pg_hba rule, see docker-compose.yml comment
+python scripts/ha_failover_test.py
+```
+* **API replicas:** `api` and `api2` (same image, same config, shared capture volume and audit volume) behind the Caddy proxy with active health checks (`/health` every 3 s), client-IP affinity (so an async analysis job stays with the replica that holds it), 15 s ejection of a failed replica. **Measured through the TLS proxy with a poll every 0.25 s while each replica was stopped in turn: 235/235 requests succeeded, longest gap 0.5 s.**
+* **PostgreSQL standby:** `postgres-replica` (streaming replication, hot standby, created with `pg_basebackup`). An alert ingested through the API was visible on the standby **0.42 s** later.
+* **Database failover drill:** primary stopped, `scripts/pg_failover.sh` promoted the standby and re-pointed the API replicas: **20 s from primary stop to a working API on the promoted node**, the earlier marker alert present, new writes accepted. Failover is **manual** (a person or your orchestrator runs the script); automatic failover needs Patroni or a managed service. The old primary must not be restarted after promotion (it would diverge) and must be rebuilt as a standby.
+* **Limits that remain:** everything ran on one machine, so this proves the mechanisms, not survival of a host, rack or network failure; replication is asynchronous (a primary lost in the last fraction of a second can lose those alerts); in-memory state is per replica (async-job results, login lockout counters, the rate limiter, one-time-code replay memory) so a replica failure loses running jobs and the lockout/rate counters are per replica, not global; Redis, Redpanda and OpenSearch are single instances; sensors are not clustered (run one per tap; a standby sensor on the same tap is an operator decision).
 
 ## 6. Long-duration testing
 

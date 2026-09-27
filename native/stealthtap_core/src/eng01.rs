@@ -23,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 
 const WINDOW_SECONDS: f64 = 10.0;
 const FLOOD_THRESHOLD: u32 = 200;
-const MIN_FLOOD_CONCENTRATION_RATIO: f64 = 8.0;
+const MIN_FLOOD_CONCENTRATION_RATIO: f64 = 15.0; // was 8.0, see eng01_ddos.py
 const SPOOFED_MIN_PACKETS: u32 = 150;
 const SPOOFED_UNIQUENESS_RATIO: f64 = 0.85;
 const SLOWLORIS_DURATION_S: f64 = 120.0;

@@ -21,9 +21,9 @@
    "benign": true,
    "duplicate_of": null,
    "packets": 7035434,
-   "flows": 8590,
-   "seconds": 2.76,
-   "pps": 2549779,
+   "flows": 8593,
+   "seconds": 2.58,
+   "pps": 2724185,
    "alerts": 1,
    "by_class": {
     "C2_BEACONING": 1

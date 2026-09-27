@@ -65,6 +65,11 @@ def _is_multicast_or_broadcast(ip: str) -> bool:
     found on REAL Wi-Fi capture (a neighbour's LLMNR queries to 224.0.0.252:5355 were flagged)."""
     if ip == "255.255.255.255" or ip.lower().startswith("ff") and ":" in ip:
         return True
+    # directed broadcast in private / link-local space (x.y.z.255, e.g. NetBIOS-NS to 169.254.255.255 on a real capture); twin of eng02.rs
+    if ip.endswith(".255"):
+        parts = ip.split(".")
+        if len(parts) == 4 and (parts[0] == "10" or ip.startswith(("192.168.", "169.254.")) or (parts[0] == "172" and parts[1].isdigit() and 16 <= int(parts[1]) <= 31)):
+            return True
     try:
         return 224 <= int(ip.split(".")[0]) <= 239
     except ValueError:

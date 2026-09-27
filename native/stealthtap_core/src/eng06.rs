@@ -11,8 +11,8 @@ use std::collections::HashMap;
 
 const ACCUMULATION_WINDOW_SECONDS: f64 = 300.0;
 const ACCUMULATED_RATIO_THRESHOLD: f64 = 10.0;
-const MIN_ACCUMULATED_OUTBOUND_BYTES: i64 = 500_000;
-const MIN_ACCUMULATED_FLOWS: u32 = 5;   // low-and-slow = many flows (see eng06_exfiltration.py)
+const MIN_ACCUMULATED_OUTBOUND_BYTES: i64 = 1_000_000;
+const MIN_ACCUMULATED_FLOWS: u32 = 20;   // low-and-slow = many flows (see eng06_exfiltration.py)
 const KEEP_BUCKETS_BACK: i64 = 3;
 
 fn bucket_of(ts: f64) -> i64 {

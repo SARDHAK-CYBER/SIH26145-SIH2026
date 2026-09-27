@@ -124,3 +124,54 @@ def test_os_connectivity_check_domain_is_not_a_dga():
     from src.engines.eng03_dga_dns import DGADetector
     f = flow(dns_query="www.msftconnecttest.com", dns_qtype="A", dst_port=53, proto="UDP")
     assert run(DGADetector(model_server=None).score(f)) is None
+
+
+def test_netbios_to_link_local_broadcast_is_not_a_beacon():
+    """Live soak: NetBIOS name service (UDP 137) to 169.254.255.255 every ~108 s was flagged as C2 beaconing."""
+    async def go():
+        eng = C2BeaconingDetector(redis_client=MemoryStore(), key_prefix="nb:")
+        out = []
+        for i in range(12):
+            for dst in ("169.254.255.255", "192.168.1.255", "10.20.255.255", "172.20.5.255"):
+                out.append(await eng.score(flow(dst_ip=dst, dst_port=137, proto="UDP", ts=1_700_000_000.0 + i * 108.0)))
+        return out
+    assert not any(run(go()))
+
+
+def test_ordinary_directed_broadcast_rule_does_not_hide_public_hosts():
+    from src.engines.eng02_c2_beaconing import _is_multicast_or_broadcast as b
+    assert b("169.254.255.255") and b("192.168.7.255") and b("10.1.2.255") and b("172.31.9.255")
+    assert not b("8.8.8.255") and not b("172.32.0.255") and not b("192.169.1.255") and not b("10.1.2.254")
+
+
+def test_chatty_interactive_client_is_not_low_and_slow_exfiltration():
+    """Live soak: an interactive API session to one host reached 540 KB up at 14:1 within five minutes (about ten requests)."""
+    async def go():
+        eng = ExfiltrationDetector(redis_client=MemoryStore(), key_prefix="ch:")
+        hits = [await eng.score(flow(orig_bytes=54_000, resp_bytes=3_800, dst_ip="160.79.104.10", ts=1_700_000_000.0 + i * 25.0,
+                                     flow_uid=f"c{i}")) for i in range(10)]
+        # a real drip-feed: 40 flows x 30 KB to one host in five minutes still fires
+        drip = [await eng.score(flow(orig_bytes=30_000, resp_bytes=300, dst_ip="203.0.113.9", ts=1_700_001_000.0 + i * 5.0, flow_uid=f"d{i}"))
+                for i in range(40)]
+        return hits, drip
+    hits, drip = run(go())
+    assert not any(hits)
+    assert any(drip)
+
+
+@pytest.mark.parametrize("allow_native", [True, False])
+def test_busy_client_fanout_is_not_a_flood_but_a_real_flood_is(allow_native):
+    """Live soak: 200 flows in 10 s from one client over 16 CDN hosts (12.5 per host) and over 21 DNS names (9.5) fired the flood rule.
+    Every real single-source flood in the attack corpus concentrates >= 16.7 flows per destination."""
+    async def go():
+        eng = VolumetricDDoSDetector(redis_client=MemoryStore(), key_prefix=f"fo{allow_native}:", allow_native=allow_native)
+        busy = [await eng.score(flow(src_ip="10.0.0.5", dst_ip=f"104.16.{i % 16}.9", ts=1_700_000_000.0 + i * 0.04, flow_uid=f"b{i}")) for i in range(200)]
+        dns = [await eng.score(flow(src_ip="10.0.0.6", dst_ip="10.0.0.53", dst_port=53, proto="UDP", ts=1_700_000_020.0 + i * 0.04, flow_uid=f"n{i}"))
+               for i in range(200)]     # one resolver, many queries: conc = 200 -> would fire, so vary destinations like the real case:
+        dns2 = [await eng.score(flow(src_ip="10.0.0.7", dst_ip=f"10.0.0.{50 + i % 21}", dst_port=53, proto="UDP", ts=1_700_000_040.0 + i * 0.04,
+                                     flow_uid=f"m{i}")) for i in range(200)]
+        real = [await eng.score(flow(src_ip="10.0.0.8", dst_ip=f"172.16.0.{1 + i % 8}", ts=1_700_000_060.0 + i * 0.04, flow_uid=f"r{i}")) for i in range(200)]
+        return busy, dns2, real
+    busy, dns2, real = run(go())
+    assert not any(busy) and not any(dns2)              # 12.5 and 9.5 flows per destination
+    assert any(a and a.threat_class == "VOLUMETRIC_DDOS" for a in real)   # 25 per destination still fires

@@ -68,7 +68,7 @@ SPOOFED_UNIQUENESS_RATIO = 0.85  # raised from 0.7 -- real margin above measured
 # destination) has a concentration ratio of 200 -- comfortably above
 # this floor even with real margin, so this doesn't touch true-positive
 # detection of an actual flood.
-MIN_FLOOD_CONCENTRATION_RATIO = 8.0   # avg flows per distinct destination required to fire
+MIN_FLOOD_CONCENTRATION_RATIO = 15.0  # avg flows per distinct destination required to fire (was 8: a busy client's 200 flows/10 s over 16 CDN hosts = 12.5, over 21 DNS names = 9.5 fired on a real live soak; every real flood in the attack corpus is >= 16.7)
 
 
 class VolumetricDDoSDetector(Detector):

@@ -65,11 +65,11 @@ ACCUMULATION_TTL_SECONDS = int(ACCUMULATION_WINDOW_SECONDS * 2)
 # since sustained asymmetry over time is itself unusual regardless of
 # how loud any single flow was.
 ACCUMULATED_RATIO_THRESHOLD = 10.0
-MIN_ACCUMULATED_OUTBOUND_BYTES = 500_000  # ignore trivial cumulative volume -- avoids false positives on small, normal sessions
+MIN_ACCUMULATED_OUTBOUND_BYTES = 1_000_000  # (was 500 KB: an interactive AI/API session to one host reached 540 KB up / 14:1 in 5 min on a real live soak)  # ignore trivial cumulative volume -- avoids false positives on small, normal sessions
 # "Low-and-slow" means MANY flows: one ordinary upload that fits under the single-flow floor would
 # otherwise also trip the accumulated check (cumulative 601 KB, ratio 26 -- the same real benign
 # upload as above). Real drip exfiltration in the corpus spans hundreds of flows (unreallrcd: 1,363).
-MIN_ACCUMULATED_FLOWS = 5
+MIN_ACCUMULATED_FLOWS = 20   # was 5: chatty interactive clients make 5-15 requests in 5 minutes; low-and-slow exfiltration is many more
 
 
 class ExfiltrationDetector(Detector):
