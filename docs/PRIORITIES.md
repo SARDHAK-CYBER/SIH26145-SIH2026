@@ -112,12 +112,13 @@ Root cause of the repeated "sensor never starts": every extra sensor tried to wr
 | 30 | OPC UA channel security | **Partly** | Policy None / SHA-1 policies flagged; SignAndEncrypt bodies cannot be read without keys (permanent limit) |
 | 31 | Multi-tenant isolation | **Done for stored alerts/captures/jobs** | Per-tenant keys; not compute-isolated, OpenSearch path shared: `docs/OPERATIONS.md` §2 |
 | 32 | Backups / alert loss during outages | **Done** | Scheduled `pg_dump` + restore drill (identical rows), on-disk alert spool (`tests/test_forwarder_spool.py`) |
-| 33 | Sensor auto-restart | **Done (Windows), systemd untested** | Windows task installed and proved: runs as SYSTEM, no UAC for capture, killed sensor relaunched in ~15 s (`docs/OPERATIONS.md` §4). Reboot persistence not yet observed; systemd unit only syntax-checked |
+| 33 | Sensor auto-restart | **Done (Windows), systemd untested** | Windows task installed and proved: runs as SYSTEM, no UAC for capture, killed sensor relaunched in ~15 s, and survived a real reboot (`docs/OPERATIONS.md` §4). systemd unit only syntax-checked |
 | 37 | User logins / roles / audit | **Done** | Named users (scrypt), signed tokens, roles viewer/analyst/sensor/admin, audit log, login lockout, dashboard sign-in; verified end to end through TLS (`docs/OPERATIONS.md` §1b). No SSO/MFA/password reset |
 | 38 | Multi-tenant isolation verified on the running stack | **Done (data + rate/slots)** | 20/20 e2e checks + positive control; not cgroup compute isolation |
 | 39 | False positives on other networks | **Measured, procedure + allowlist in place** | 343 ICS captures: 1 generic alert / 5,497 flows; Modbus ML gated (13.8% of writes duplicated the rule); `docs/SITE_ONBOARDING.md`, `scripts/site_calibration.py`, `src/allowlist.py` |
 | 40 | ENG-14 out of sample | **HTTP rules: done; SMTP/distcc: still in-sample** | Real nmap/curl vs real Tomcat: 3/3 + clean benign control (`samples/lab_eng14`); one real gap found and fixed |
-| 41 | Reboot persistence, systemd, public certificate issuance | Open (need a reboot / Linux host / public DNS) | `scripts/verify_after_reboot.ps1` ready; Caddy ACME config validated at config level only |
+| 41 | Reboot persistence | **Done -- verified on a real reboot** | Sensor (SYSTEM, no prompt, 0 drops) and all 13 Docker containers + TLS came back automatically 2026-09-27; `scripts/verify_after_reboot.ps1` all-green. Docker Desktop's own autostart GUI toggle was OFF and did not matter -- don't rely on it. |
+| 47 | systemd unit, public certificate issuance | Open (need a Linux host / public DNS) | Caddy ACME config validated at config level only; systemd unit only syntax-checked |
 | 34 | High availability | Design only | `docs/OPERATIONS.md` §5; never run multi-node |
 | 35 | 24-72 h soak on a mirrored production link | Open | 4 h replay soak done (`docs/reports/soak_mixed_4h.json`); needs the real link |
 | 36 | TLS in front of API/dashboard | **Done (local CA)** | Caddy `proxy` service, HTTPS 443/8443, HSTS etc., plaintext ports loopback-only (`docs/OPERATIONS.md` §1). Public certificate issuance and the live sensor behind the proxy not verified |
