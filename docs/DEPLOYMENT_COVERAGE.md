@@ -1,7 +1,8 @@
 # Seeing the whole network — where to place the sensor
 
 A passive sensor can only inspect traffic that physically reaches its interface. StealthTap reports what it
-actually sees (`/capture/coverage`, the *Hosts* page banner) instead of assuming.
+actually sees (`/capture/coverage`, the *Hosts* page banner) instead of assuming. For switch SPAN/mirror
+configuration commands and TAP/data-diode hardware options, see [`MIRROR_PORT_SETUP.md`](MIRROR_PORT_SETUP.md).
 
 | Placement | Sees | How |
 |---|---|---|

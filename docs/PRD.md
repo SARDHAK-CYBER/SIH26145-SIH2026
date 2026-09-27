@@ -68,6 +68,9 @@ measured-not-asserted methodology applied throughout this document.
 | No payload storage | Alerts carry protocol *metadata* (DNS query name, JA4 fingerprint, Modbus function code) and a SHA-256 hash of the segment for forensic correlation — never raw payload bytes |
 | Real time | Live path scores each flow within one `SNAPSHOT_INTERVAL_S` (default 2s) of completion; p50/p95/p99 latency exposed via `/capture/status` |
 
+The switch- and hardware-side half of this requirement — SPAN/mirror port configuration by vendor, passive network TAPs,
+and hardware data diodes — is covered in [`MIRROR_PORT_SETUP.md`](MIRROR_PORT_SETUP.md).
+
 ## 3. System architecture
 
 Four ingestion paths converge on one flow-mapping layer and one set of 13 detection engines, so results are identical regardless of how traffic arrived:

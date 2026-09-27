@@ -104,6 +104,8 @@ sudo sysctl -w net.ipv6.conf.eth1.disable_ipv6=1     # optional
 
 A hardware data diode or a switch SPAN/mirror port feeding `eth1` is the
 intended source. The sensor never needs the NIC to have an address.
+For switch configuration by vendor and TAP/diode hardware options, see
+[`MIRROR_PORT_SETUP.md`](MIRROR_PORT_SETUP.md).
 
 ---
 

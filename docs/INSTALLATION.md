@@ -69,6 +69,10 @@ To also run the **live-capture tap** inside Docker (an alternative to the bare-s
 CAPTURE_IFACE=eth0 docker compose --profile tap up -d sensor
 ```
 
+`CAPTURE_IFACE` must be connected to a switch mirror/SPAN port or a network TAP, not an ordinary access port — see
+[`MIRROR_PORT_SETUP.md`](MIRROR_PORT_SETUP.md) for switch configuration by vendor, TAP/data-diode options, and how to
+verify the deployment is genuinely one-directional.
+
 ## Option B: bare service (no Docker)
 
 ```bash

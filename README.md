@@ -56,6 +56,8 @@ deployment: **[`docs/INSTALLATION.md`](docs/INSTALLATION.md)**.
 ## Documentation
 
 - **[`docs/INSTALLATION.md`](docs/INSTALLATION.md)** — install and deploy, step by step
+- **[`docs/MIRROR_PORT_SETUP.md`](docs/MIRROR_PORT_SETUP.md)** — switch SPAN/mirror configuration, network TAPs, and
+  hardware data diodes for a genuinely one-directional deployment
 - **[`docs/TECHNICAL.md`](docs/TECHNICAL.md)** — architecture, detection engines, ML models, OS-level capture internals, and
   every accuracy/speed/latency measurement in full
 - [`docs/SITE_ONBOARDING.md`](docs/SITE_ONBOARDING.md) — calibrating false alarms on a new network
