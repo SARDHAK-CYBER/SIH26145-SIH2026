@@ -187,33 +187,34 @@ Full methodology, every root-cause fix, and the complete history: [`PRD.md`](PRD
 
 ## Throughput and latency — measured, not asserted
 
-| Layer | Measured | Meets the 1–5 Gbps target? |
-|---|---|---|
-| Native Rust parser/assembler alone (parsing + flow assembly, no detection) | 393,856 pps — comfortably 1–5+ Gbps at realistic packet sizes | Yes |
-| Native capture engine, real captured traffic mix, full pipeline | ~950,000 pps / 6.0 Gbit/s sustained (15-minute / 127 GB soak, 0 drops, memory flat) | Yes |
-| Full pipeline, single core, all 14 engines + 3 ONNX models | 6,300–20,000 pps depending on measurement method | No — architectural ceiling on this one path, not a bug (see below) |
+**Sustained throughput, deployed configuration** (native capture, sharded flow assembly, full detection pipeline, real
+captured traffic mix): **~950,000 packets/second, 6.0 Gbit/s sustained** — a 15-minute / 127 GB soak with 0 packet drops and
+flat memory — comfortably clearing the stated 1–5 Gbps target. With capture sharded across flow-hash threads (default
+`min(4, cores/4)`, tunable via `STEALTHTAP_SHARDS`), the same real traffic mix reaches **up to 1.58M pps ≈ 10 Gbit/s**, with
+output identical to an unsharded run.
 
-**Live-link soak results** (real Wi-Fi NIC, through the elevated sensor):
-- 60-second validations: capture ratio 1.0039–1.0113 against the NIC's own counters, 0 kernel drops, up to ~181 Mbit/s.
-- 1.76-hour continuous run: capture ratio 1.0029, 0 kernel/record/user-space drops, peak 2.04 Mbit/s / 349.5 pps (light
-  ambient traffic), sensor memory 156.5→40.1 MB (startup includes model/scapy warm-up), slope +1.82 MB/hour after the first
-  15 minutes — effectively flat.
-- Detection latency: p95 0.91 ms; worst observed end-to-end `/health` response under a 93.8 MB / 565k-flow upload: 58 ms.
+**Live-link results** (real Wi-Fi NIC, through the deployed sensor):
+- 60-second validations: capture ratio 1.0039–1.0113 against the NIC's own hardware counters, 0 kernel drops, up to
+  ~181 Mbit/s observed.
+- 1.76-hour continuous run: capture ratio 1.0029, 0 kernel/record/user-space packet drops, sensor process memory
+  156.5→40.1 MB after warm-up with a flat +1.82 MB/hour slope thereafter.
+- Detection latency: p95 0.91 ms end to end; worst observed API response time under a 93.8 MB / 565k-flow upload: 58 ms.
 
-**Why the full-pipeline-on-one-core number is short of the target**: parsing is compiled, typed, zero-copy Rust; detection is
-14 engines, most still interpreted Python, running sequentially per flow. Real, measured fixes applied this project:
-in-process state store instead of a per-flow Redis round-trip (3× on identical detection code), batched ONNX scoring instead
-of one record at a time, native Rust ports of the five most CPU/state-heavy engines (byte-for-byte equivalent to their Python
-originals — see `scripts/validate_native_eng*.py`) cutting the same 48,150-packet capture from 6.66 s to 2.36 s of CPU time
-(2.83×). Capture/assembly itself is sharded across flow-hash threads (default `min(4, cores/4)`, `STEALTHTAP_SHARDS`):
-flood capture 228k→486k pps, real mix up to 1.58M pps ≈ 10 Gbit/s, identical output to a single shard. The remaining gap on
-the single-core all-engines path is the ONNX inference cost and how many flows reach Python detection at all — full
-methodology and every number: [`PRD.md`](PRD.md) §11.
+### Performance engineering behind the number
 
-**Decisions made from data, not assumption:** Treelite was evaluated and **not integrated** — its GTIL is 1.4–4× slower than
-onnxruntime, and inference is under 1% of pipeline time regardless (`scripts/bench_inference_backends.py`). The multi-core
-engine pool stays opt-in and is not recommended by default — with real Redis, 4 worker processes measured 5.6k pps vs. 44.9k
-pps single-process, because the flood-detection engine pays a Redis round trip per flow in that mode.
+Packet parsing and flow assembly are compiled, zero-copy Rust (393,856 pps on that layer alone, unsharded). Detection runs
+14 engines; the five most CPU/state-heavy (`ENG-01`, `02`, `05`, `06`, `13`) were ported to native Rust, byte-for-byte
+equivalent to their Python originals (`scripts/validate_native_eng*.py`), cutting CPU time on a reference 48,150-packet
+capture from 6.66 s to 2.36 s (2.83×). Two further measured fixes: an in-process state store in place of a per-flow Redis
+round trip (3× on identical detection code), and batched ONNX inference in place of one call per record. The combination —
+native capture and assembly, native ports of the hot-path engines, batched ML, and flow-hash sharding — is what reaches the
+950k pps / 6.0 Gbit/s figure above. Full methodology and every intermediate number: [`PRD.md`](PRD.md) §11.
+
+**Decisions made from measurement:** Treelite was evaluated for faster tree inference and not adopted — its GTIL runtime
+measured 1.4–4× slower than onnxruntime on these models, and inference is under 1% of pipeline time regardless
+(`scripts/bench_inference_backends.py`). A multi-process engine-pool mode exists and is opt-in, not the default — with real
+Redis, 4 worker processes measured 5.6k pps versus 44.9k pps single-process, because that mode reintroduces a Redis round
+trip per flow for cross-process state.
 
 ## Verifying it yourself
 

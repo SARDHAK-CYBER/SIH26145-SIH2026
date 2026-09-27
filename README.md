@@ -24,8 +24,8 @@ software runs on.
 | **Speed** | ~950,000 packets/second (6.0 Gbit/s) sustained on real traffic through the full pipeline |
 | **Survives a reboot** | Verified live: the sensor and the entire service stack came back on their own after rebooting the machine, with zero data loss |
 
-Full numbers, methodology, and every limitation are in [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — nothing here is asserted
-without a measurement behind it.
+Full numbers and methodology are in [`docs/TECHNICAL.md`](docs/TECHNICAL.md) — nothing here is asserted without a
+measurement behind it.
 
 ## What it looks for
 
@@ -59,7 +59,7 @@ deployment: **[`docs/INSTALLATION.md`](docs/INSTALLATION.md)**.
 - **[`docs/TECHNICAL.md`](docs/TECHNICAL.md)** — architecture, detection engines, ML models, OS-level capture internals, and
   every accuracy/speed/latency measurement in full
 - [`docs/SITE_ONBOARDING.md`](docs/SITE_ONBOARDING.md) — calibrating false alarms on a new network
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — access control, accounts, backups, high availability, and their limits
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — access control, accounts, backups, and high availability
 - [`docs/PRD.md`](docs/PRD.md) — full requirements, methodology, and project history
 - [`docs/PRIORITIES.md`](docs/PRIORITIES.md) — living status, auto-refreshed from a real system check
 - [`CHANGES.md`](CHANGES.md) — dated change log

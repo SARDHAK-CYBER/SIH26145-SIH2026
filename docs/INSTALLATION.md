@@ -207,7 +207,7 @@ STEALTHTAP_API_UPSTREAMS="api:8000 api2:8000" docker compose --profile ha up -d
 Database failover is **manual** — run `sh scripts/pg_failover.sh` if the primary is lost; it promotes the standby and
 re-points the API replicas at it. The old primary must not be restarted afterward without first rebuilding it as a fresh
 standby (it would otherwise diverge). Full numbers from a real failover drill on this stack: [`OPERATIONS.md`](OPERATIONS.md)
-§5.
+§6.
 
 ## Environment variable reference
 

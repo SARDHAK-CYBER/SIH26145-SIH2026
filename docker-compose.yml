@@ -223,7 +223,7 @@ services:
   # ── HIGH AVAILABILITY (profile "ha"): a second API replica and a PostgreSQL hot standby ───────────────────────────────────────
   #   docker compose exec -T postgres sh -c 'grep -q "replication stealthtap" $PGDATA/pg_hba.conf || echo "host replication stealthtap all scram-sha-256" >> $PGDATA/pg_hba.conf; psql -U stealthtap -c "select pg_reload_conf()"'
   #   STEALTHTAP_API_UPSTREAMS="api:8000 api2:8000" docker compose --profile ha up -d
-  # Failover of the database is MANUAL (scripts/pg_failover.sh); see docs/OPERATIONS.md section 5 for what is and is not covered.
+  # Failover of the database is MANUAL (scripts/pg_failover.sh); see docs/OPERATIONS.md section 6 for what is and is not covered.
   api2:
     profiles: ["ha"]
     extends:

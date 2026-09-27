@@ -347,5 +347,5 @@ The 1.76 h soak in §14.9 (`docs/reports/live_soak_wifi_fixed.json`) finished cl
 ### 14.5 Not done / cannot be done
 * **OPC UA SignAndEncrypt bodies** stay unreadable: decrypting needs the server's private key (not available to a passive sensor). Only the clear-text policy and channel metadata are used.
 * **24-72 h live-link soak** — a 4 h low-rate replay soak of the real corpus was run (`docs/reports/soak_mixed_4h.json`); a multi-day run on a mirrored production link needs that link.
-* **HA** — designed in `docs/OPERATIONS.md` §5, not exercised on multiple nodes; tenant isolation covers stored alerts/captures, not compute or the OpenSearch side path.
+* **HA** — mechanisms built and measured on one host per `docs/OPERATIONS.md` §6; not exercised across multiple physical hosts. Tenant isolation covers stored alerts/captures, not compute or the OpenSearch side path.
 * BACnet/OPC UA write and PROFINET factory-reset alerts are still validated only on independent-encoder / real-derived packets.

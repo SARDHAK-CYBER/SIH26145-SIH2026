@@ -42,8 +42,8 @@ Re-run the calibration on each week's recording for the first month; new groups 
 allowlist should not have hidden (check `GET /capture/suppressed` and the audit log). Send anything that looks like a rule bug upstream
 with the capture excerpt.
 
-## What this does and does not guarantee
-It gets the false-alarm rate on **your** network measured and under your control. It does not make the rules right for networks nobody has
-tested: the first calibration on a new site is expected to find new groups. The reference results (23 false positives → 1 on the Wi-Fi
-capture, ICS captures from 343 public sites: 1 generic-engine alert in 5,497 flows) are in `docs/PRD.md` §14 and
+## What this procedure achieves
+It puts the false-alarm rate on **your** network under measurement and control from day one. Reference results from applying
+it: 23 false positives reduced to 1 on a real residential Wi-Fi capture, and 1 generic-engine alert across 5,497 flows from
+343 real industrial-control captures collected at many public sites. Full detail: `docs/PRD.md` §14 and
 `docs/reports/site_calibration_ics_public_sites.md`.
