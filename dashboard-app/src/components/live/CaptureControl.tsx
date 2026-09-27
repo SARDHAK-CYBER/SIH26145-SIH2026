@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, LIVE_DEFAULT_BASE, liveBase, live, setLiveBase } from '../../api/client';
 import type { CaptureInterface, CaptureStatus } from '../../types/alert';
 import { fmtDuration, fmtNum } from '../../lib/format';
+import { can, useSession } from '../../lib/session';
 
 interface Props {
   status: CaptureStatus;
@@ -19,6 +20,8 @@ const inp: React.CSSProperties = {
 const lbl: React.CSSProperties = { fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '.04em' };
 
 export function CaptureControl({ status, reachable, onChanged, onStarted }: Props) {
+  const session = useSession();
+  const canControl = can(session.role, 'capture');
   const [ifaces, setIfaces] = useState<CaptureInterface[]>([]);
   const [caps, setCaps] = useState<Record<string, unknown>>({});
   const [selected, setSelected] = useState('');
@@ -89,7 +92,7 @@ export function CaptureControl({ status, reachable, onChanged, onStarted }: Prop
               {status.bpf ? ` · BPF "${status.bpf}"` : ''}
             </div>
           </div>
-          <button className="btn-primary" style={{ background: 'var(--sev-critical)' }} disabled={busy !== null}
+          <button className="btn-primary" style={{ background: 'var(--sev-critical)' }} disabled={busy !== null || !canControl}
             onClick={() => run('stop capture', () => live.stop())}>{busy === 'stop capture' ? 'Stopping…' : 'Stop'}</button>
         </div>
       )}
@@ -133,7 +136,7 @@ export function CaptureControl({ status, reachable, onChanged, onStarted }: Prop
             </label>
           </div>
           {cur && !cur.is_up && !running && <div style={{ fontSize: 12, color: 'var(--sev-medium)' }}>“{cur.name}” is down — the capture starts but sees nothing until it is up.</div>}
-          <button className="btn-primary" disabled={running || busy !== null || !selected}
+          <button className="btn-primary" disabled={running || busy !== null || !selected || !canControl}
             onClick={() => run('start capture', () => live.start(selected, bpf, true, bufferMb), true)}>
             {busy === 'start capture' ? 'Opening the capture driver…' : 'Start live capture'}
           </button>
@@ -172,7 +175,7 @@ export function CaptureControl({ status, reachable, onChanged, onStarted }: Prop
               <input type="checkbox" checked={realtime} disabled={running} onChange={(e) => setRealtime(e.target.checked)} /> original timing (else full speed)
             </label>
           </div>
-          <button className="btn-primary" disabled={running || busy !== null || !replayPath}
+          <button className="btn-primary" disabled={running || busy !== null || !replayPath || !canControl}
             onClick={() => run('start replay', () => live.replay(replayPath, loops, realtime ? 1 : 0), true)}>
             {busy === 'start replay' ? 'Starting…' : 'Start replay'}
           </button>

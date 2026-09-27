@@ -1,1 +1,3 @@
 Real traffic from scripts/lab/tomcat_lab.sh: nmap NSE http-default-accounts / http-brute and a curl WAR deployment against a real Tomcat 8.5 in an isolated Docker network, plus a benign control (browsing, one mistyped password, operator with a strong credential). Not used to write the ENG-14 rules.
+
+SMTP/distcc captures come from scripts/lab/smtp_distcc_lab.sh: real nmap NSE (distcc-cve2004-2687, smtp-enum-users) and Python smtplib clients against small toy servers (scripts/lab/servers.py). smtp_nmap_enum.pcap is nmap smtp-enum-users, which sent only 2 VRFY probes to this server -- below the rule threshold of 3, so it is intentionally NOT detected (a documented low-volume gap).

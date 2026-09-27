@@ -32,7 +32,9 @@ const SLOWLORIS_MAX_BYTES: f64 = 50.0;
 /// Slowloris holds HTTP connections open. Idle long-lived connections on other services are normal (push channels 5228/5223,
 /// Windows Delivery Optimization 7680, SSH/RDP/VNC/MQTT sessions...), and flagging them was the top false positive on a real
 /// 20-minute Wi-Fi capture. Port 0 = unknown (unit tests / sources without ports) keeps the old behaviour.
-pub const SLOWLORIS_PORTS: [u16; 13] = [80, 443, 3000, 5000, 8000, 8008, 8080, 8081, 8088, 8443, 8888, 9000, 9090];
+// 443/8443 are deliberately absent: a TLS flow whose first bytes were not seen (capture started mid-connection) shows only 1-byte TCP keepalives,
+// which looked like Slowloris on a real live capture (idle HTTPS connections to a CDN and an API host).
+pub const SLOWLORIS_PORTS: [u16; 11] = [80, 3000, 5000, 8000, 8008, 8080, 8081, 8088, 8888, 9000, 9090];
 pub fn slowloris_port(p: u16) -> bool { p == 0 || SLOWLORIS_PORTS.contains(&p) }
 // How many old buckets to retain before sweeping -- generous margin
 // above BUCKET_TTL_SECONDS/WINDOW_SECONDS=3 buckets, so a flow whose

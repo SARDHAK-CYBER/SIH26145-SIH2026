@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ApiError, network, type Coverage, type DiscoveredHost } from '../../api/client';
 import type { HostRow } from '../../types/alert';
 import { ago, fmtBytes, fmtNum } from '../../lib/format';
+import { can, useSession } from '../../lib/session';
 
 type Scope = 'all' | 'local' | 'remote';
 type SortKey = 'bytes' | 'pkts' | 'last' | 'ip';
@@ -97,6 +98,8 @@ const VERDICT_TEXT: Record<string, { label: string; color: string }> = {
 };
 
 function CoverageCard({ running }: { running: boolean }) {
+  const session = useSession();
+  const canControl = can(session.role, 'capture');
   const [cov, setCov] = useState<Coverage | null>(null);
   const [found, setFound] = useState<DiscoveredHost[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -132,7 +135,7 @@ function CoverageCard({ running }: { running: boolean }) {
           {cov ? <>{cov.visible_devices} of {cov.local_devices_known} local devices have visible unicast traffic<br />
             {cov.known_only_devices} known only from ARP / broadcast{found ? ' / active discovery' : ''}</> : 'waiting for capture…'}
         </div>
-        <button className="btn-ghost" style={{ marginLeft: 'auto' }} disabled={busy} onClick={discover}>
+        <button className="btn-ghost" style={{ marginLeft: 'auto' }} disabled={busy || !canControl} onClick={discover}>
           {busy ? 'Sweeping subnet…' : 'Discover devices on my subnet'}
         </button>
       </div>

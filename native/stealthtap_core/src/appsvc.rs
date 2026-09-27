@@ -85,11 +85,17 @@ fn distcc(p: &[u8]) -> Option<(String, String, u32)> {
         let n = hex(&p[i + 4..i + 12])?;
         let start = i + 12;
         let end = start.checked_add(n)?.min(p.len());
+        if args.is_empty() && end < start + n {
+            return None; // argv[0] cut off: wait for the rest (segmented sends), never classify a fragment
+        }
         args.push(lossy(&p[start..end], 160));
         i = start.checked_add(n)?;
         if i >= p.len() {
             break;
         }
+    }
+    if args.is_empty() {
+        return None;
     }
     let argv0 = args.first().map(|a| a.rsplit('/').next().unwrap_or("").to_ascii_lowercase()).unwrap_or_default();
     let is_compiler = COMPILERS.contains(&argv0.as_str())

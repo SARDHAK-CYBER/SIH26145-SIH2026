@@ -49,9 +49,9 @@ def test_eng01_slowloris_is_a_web_service_attack(engine_force_python):
 
     def idle(port):
         return flow(dst_port=port, duration_s=600.0, orig_bytes=20, resp_bytes=20, dst_ip=f"1.2.3.{port % 250}")
-    for quiet in (5228, 5223, 7680, 22, 3389, 1883):
+    for quiet in (5228, 5223, 7680, 22, 3389, 1883, 443, 8443):    # 443: idle TLS keepalives seen in a 2nd real capture
         assert run(eng.score(idle(quiet))) is None, quiet
-    for web in (80, 443, 8080):
+    for web in (80, 8080):
         a = run(eng.score(idle(web)))
         assert a is not None and a.threat_class == "SLOWLORIS", web
     a = run(eng.score(idle(0)))                                   # unknown port keeps the original behaviour
@@ -62,7 +62,8 @@ def test_native_eng01_port_gate_matches_python():
     core = pytest.importorskip("stealthtap_core")
     n = core.NativeEng01()
     assert n.check("10.0.0.5", "1.1.1.1", 1_700_000_000.0, 600.0, 40.0, 5228) is None
-    assert n.check("10.0.0.5", "1.1.1.2", 1_700_000_000.0, 600.0, 40.0, 443)["threat_class"] == "SLOWLORIS"
+    assert n.check("10.0.0.5", "1.1.1.2", 1_700_000_000.0, 600.0, 40.0, 80)["threat_class"] == "SLOWLORIS"
+    assert n.check("10.0.0.5", "1.1.1.4", 1_700_000_000.0, 600.0, 40.0, 443) is None
     assert n.check("10.0.0.5", "1.1.1.3", 1_700_000_000.0, 600.0, 40.0)["threat_class"] == "SLOWLORIS"   # port omitted -> unknown
 
 
@@ -116,3 +117,10 @@ def test_ordinary_upload_below_the_exfil_floor_is_quiet_but_bulk_is_not():
     small, bulk = run(go())
     assert small is None
     assert bulk is not None and bulk.threat_class == "DATA_EXFILTRATION"
+
+
+def test_os_connectivity_check_domain_is_not_a_dga():
+    """A live soak on the real network flagged www.msftconnecttest.com (Windows' internet-reachability probe) as a DGA at 70%."""
+    from src.engines.eng03_dga_dns import DGADetector
+    f = flow(dns_query="www.msftconnecttest.com", dns_qtype="A", dst_port=53, proto="UDP")
+    assert run(DGADetector(model_server=None).score(f)) is None

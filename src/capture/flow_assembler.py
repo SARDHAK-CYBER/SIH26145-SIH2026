@@ -70,7 +70,7 @@ def _flow_uid_l2(a: str, b: str) -> str:
 class _Flow:
     __slots__ = ("orig_ip", "orig_port", "resp_ip", "resp_port", "proto",
                  "first_ts", "last_ts", "orig_bytes", "resp_bytes", "orig_pkts",
-                 "resp_pkts", "uid", "emitted_ssl", "emitted_http")
+                 "resp_pkts", "uid", "emitted_ssl", "emitted_http", "dist_buf")
 
     def __init__(self, o_ip, o_p, r_ip, r_p, proto, ts):
         self.orig_ip, self.orig_port = o_ip, o_p
@@ -82,6 +82,7 @@ class _Flow:
         self.uid = _flow_uid(o_ip, o_p, r_ip, r_p, proto)
         self.emitted_ssl = False
         self.emitted_http = False
+        self.dist_buf = b""      # distcc handshake bytes so far (segmented sends); twin of LiveFlow.dist_buf in live.rs
 
     def add(self, src_ip, src_port, plen, ts):
         self.last_ts = max(self.last_ts, ts)
@@ -289,6 +290,16 @@ class FlowAssembler:
                     })
             if rec is None and dport not in (102, 2404, 4840, 44818) and 502 not in (sport, dport) and 20000 not in (sport, dport):
                 a = parse_appsvc(payload, sport, dport)
+                if a is not None:
+                    flow.dist_buf = b""
+                elif flow.dist_buf or (len(payload) >= 12 and payload.startswith(b"DIST")):
+                    if len(flow.dist_buf) + len(payload) > 4096:
+                        flow.dist_buf = b""
+                    else:
+                        flow.dist_buf += payload
+                        a = parse_appsvc(flow.dist_buf, sport, dport)
+                        if a is not None:
+                            flow.dist_buf = b""
                 if a is not None:
                     # plain-text service attacks; server->client evidence (401, SMTP 55x) is oriented like Zeek:
                     # originator = the client, so state is keyed per client

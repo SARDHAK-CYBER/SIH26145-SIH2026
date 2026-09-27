@@ -184,3 +184,65 @@ def test_client_ip_trusts_forwarded_for_only_from_the_proxy():
     assert accounts.client_ip("198.51.100.9", "203.0.113.7") == "198.51.100.9"                 # a remote peer cannot spoof it
     assert accounts.client_ip("172.18.0.14", "not-an-ip") == "172.18.0.14"
     assert accounts.client_ip("127.0.0.1", "") == "127.0.0.1"
+
+
+# ---- two-factor and password change -----------------------------------------------------------------------------------------
+def test_totp_matches_rfc6238_vector_and_rejects_replay():
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"                       # RFC 6238 test key "12345678901234567890"
+    assert accounts.totp_code(secret, at=59) == "287082"              # 6-digit tail of the RFC's 94287082
+    assert accounts.verify_totp("u1", secret, "287082", at=59)
+    assert not accounts.verify_totp("u1", secret, "287082", at=59)     # same step cannot be used twice
+    assert not accounts.verify_totp("u2", secret, "000000", at=59) and not accounts.verify_totp("u2", secret, "12ab56", at=59)
+    assert accounts.verify_totp("u3", secret, accounts.totp_code(secret, at=59 - 30), at=59)      # one step of clock skew is tolerated
+    assert not accounts.verify_totp("u4", secret, accounts.totp_code(secret, at=1000 - 120), at=1000)      # four steps old
+
+
+def test_login_with_mfa_and_enrolment(env):
+    c, tmp = env
+    monkey_secret = accounts.new_totp_secret()
+    accounts.users().update("ann", totp_secret=monkey_secret)
+    r = login(c, "ann", "analyst-password-1")
+    assert r.status_code == 401 and r.headers.get("x-otp-required") == "1"          # password right, code missing
+    assert c.post("/auth/login", json={"username": "ann", "password": "analyst-password-1", "otp": "000000"}).status_code == 401
+    code = accounts.totp_code(monkey_secret)
+    ok = c.post("/auth/login", json={"username": "ann", "password": "analyst-password-1", "otp": code})
+    assert ok.status_code == 200 and ok.json()["role"] == "analyst"
+    assert c.get("/auth/me", headers={"X-API-Key": ok.json()["token"]}).json()["mfa"] is True
+    assert c.post("/auth/login", json={"username": "ann", "password": "analyst-password-1", "otp": code}).status_code == 401   # replay
+    # self-service enrolment for a user without MFA
+    tok = login(c, "vera", "viewer-password-1").json()["token"]
+    H = {"X-API-Key": tok}
+    setup = c.post("/auth/mfa/setup", headers=H).json()
+    assert "otpauth://totp/StealthTap:vera" in setup["otpauth_uri"]
+    assert c.post("/auth/mfa/enable", headers=H, json={"otp": "000000"}).status_code == 422
+    assert c.post("/auth/mfa/enable", headers=H, json={"otp": accounts.totp_code(setup["secret"])}).status_code == 200
+    assert login(c, "vera", "viewer-password-1").headers.get("x-otp-required") == "1"          # now required
+
+
+def test_api_keys_cannot_use_user_endpoints(env):
+    c, _ = env
+    assert c.post("/auth/mfa/setup", headers={"X-API-Key": KEY}).status_code == 400
+    assert c.post("/auth/password", headers={"X-API-Key": KEY}, json={"current": "x", "new": "y" * 14}).status_code == 400
+
+
+def test_password_change_rules_and_session_invalidation(env):
+    c, _ = env
+    t1 = login(c, "ann", "analyst-password-1").json()["token"]
+    H = {"X-API-Key": t1}
+    assert c.post("/auth/password", headers=H, json={"current": "wrong", "new": "brand-new-password-9"}).status_code == 401
+    assert c.post("/auth/password", headers=H, json={"current": "analyst-password-1", "new": "short"}).status_code == 422
+    assert c.post("/auth/password", headers=H, json={"current": "analyst-password-1", "new": "analyst-password-1"}).status_code == 422
+    assert c.post("/auth/password", headers=H, json={"current": "analyst-password-1", "new": "brand-new-password-9"}).status_code == 200
+    assert c.get("/alerts", headers=H).status_code == 401                            # the old session died with the old password
+    time.sleep(1.2)
+    assert login(c, "ann", "analyst-password-1").status_code == 401
+    t2 = login(c, "ann", "brand-new-password-9")
+    assert t2.status_code == 200 and c.get("/alerts", headers={"X-API-Key": t2.json()["token"]}).status_code == 200
+
+
+def test_admin_role_can_be_required_to_use_mfa(env, monkeypatch):
+    c, _ = env
+    monkeypatch.setenv("STEALTHTAP_REQUIRE_MFA_ROLES", "admin")
+    r = login(c, "root", "admin-password-123")
+    assert r.status_code == 403 and "two-factor" in r.json()["detail"]
+    assert login(c, "vera", "viewer-password-1").status_code == 200                # other roles unaffected

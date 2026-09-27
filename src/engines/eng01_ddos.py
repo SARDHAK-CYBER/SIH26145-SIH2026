@@ -5,7 +5,7 @@ from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
 from src.engines.eng02_c2_beaconing import _is_multicast_or_broadcast
 
-SLOWLORIS_PORTS = frozenset({80, 443, 3000, 5000, 8000, 8008, 8080, 8081, 8088, 8443, 8888, 9000, 9090})
+SLOWLORIS_PORTS = frozenset({80, 3000, 5000, 8000, 8008, 8080, 8081, 8088, 8888, 9000, 9090})   # no 443/8443: idle TLS keepalives (see eng01.rs)
 
 try:
     # Native fast-path: the exact same thresholds/formulas below, moved

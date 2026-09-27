@@ -258,3 +258,48 @@ def test_lab_benign_control_stays_quiet():
     asm = core.LiveFlowAssembler(60.0)
     evs = [r for ts, raw in iter_raw_pcap(str(f)) for k, r in asm.process(ts, raw) if k == "appsvc"]
     assert len(evs) >= 5 and _score(evs) == []           # authenticated operator traffic + a typo, not an attack
+
+
+# ---- distcc handshake split across TCP segments (what the REAL nmap exploit script sends) -----------------------------------
+def test_distcc_split_across_segments_is_reassembled_and_matches_python():
+    seg1 = b"DIST00000001"
+    seg2 = b"ARGC00000003ARGV00000002shARGV00000002-cARGV0000000csh -c '(id)'"
+    frames = [_frame(seg1, 40000, 3632), _frame(seg2, 40000, 3632)]
+    evs = _native(frames)
+    assert [(e["function"], e["code"]) for e in evs] == [("distcc:sh", 1)]
+    assert _score(evs)[0].mitre_attack.technique_id == "T1190"
+    # a fragment whose argv[0] is cut off must never be classified (wait for the rest), in either decoder
+    assert parse_appsvc(b"DIST00000001ARGC00000003ARGV00000005g", 40000, 3632) is None
+    assert _native([_frame(b"DIST00000001ARGC00000003ARGV00000005g", 40000, 3632)]) == []
+    # ...and a compile job split the same way stays quiet
+    gcc = [_frame(b"DIST00000001", 40001, 3632), _frame(b"ARGC00000002ARGV00000003gccARGV00000002-c", 40001, 3632)]
+    assert _score(_native(gcc)) == []
+
+
+def test_python_assembler_reassembles_split_distcc_too():
+    from src.capture.flow_assembler import FlowAssembler
+    from scapy.layers.inet import IP as _IP
+    fa = FlowAssembler()
+    out = []
+    for i, seg in enumerate((b"DIST00000001", b"ARGC00000003ARGV00000002shARGV00000002-cARGV0000000csh -c '(id)'")):
+        pkt = Ether(src="02:00:00:00:00:01", dst="02:00:00:00:00:02") / _IP(src=CLIENT, dst=SERVER) / TCP(sport=40000, dport=3632, flags="PA", seq=1 + i, ack=1) / seg
+        pkt.time = 1_700_000_000.0 + i
+        out += [r for k, r in fa.process(pkt) if k == "appsvc"]
+    assert [(r["function"], r["code"]) for r in out] == [("distcc:sh", 1)]
+
+
+@pytest.mark.parametrize("name,technique,expect_alert", [
+    ("distcc_nmap_exploit.pcap", "T1190", True),          # real nmap NSE distcc-cve2004-2687
+    ("smtp_smtplib_enum.pcap", "T1087", True),            # a different client implementation enumerating accounts
+    ("smtp_benign.pcap", None, False),                    # ordinary delivery + a mailing-list run with ~10% stale addresses
+    ("smtp_nmap_enum.pcap", None, False),                 # nmap sent only 2 VRFY here: below the 3-probe threshold (documented gap)
+])
+def test_lab_smtp_and_distcc_captures(name, technique, expect_alert):
+    from src.capture.rawpcap import iter_raw_pcap
+    f = LAB / name
+    if not f.exists():
+        pytest.skip("lab capture not present")
+    asm = core.LiveFlowAssembler(60.0)
+    evs = [r for ts, raw in iter_raw_pcap(str(f)) for k, r in asm.process(ts, raw) if k == "appsvc"]
+    techs = {a.mitre_attack.technique_id for a in _score(evs)}
+    assert (technique in techs) if expect_alert else not techs

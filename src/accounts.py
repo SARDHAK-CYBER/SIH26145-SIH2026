@@ -17,6 +17,11 @@ used, so tokens die with the process). It is presented exactly like an API key (
 Passwords: scrypt (N=2^14, r=8, p=1) with a per-user salt; verification is constant-time and burns the same work for unknown
 users. Five failed logins for one (address, user) within five minutes lock that pair for five minutes.
 
+Two-factor: a user with a `totp_secret` (RFC 6238, SHA-1, 6 digits, 30 s, +-1 step, one-time use per step) must also present `otp` at
+login; enrol with POST /auth/mfa/setup + /auth/mfa/enable (or scripts/manage_users.py mfa-setup). STEALTHTAP_REQUIRE_MFA_ROLES=admin
+refuses password-only logins for those roles. Changing a password (POST /auth/password, or manage_users.py passwd) invalidates that
+user's earlier tokens. The config directory must be writable by the API for self-service changes.
+
 Audit log (STEALTHTAP_AUDIT_LOG, default data/audit/audit.jsonl, rotated at 10 MB x 5): one JSON line per request -- time, who
 (user name or "key:<tenant>/<role>", never a secret), tenant, role, method, path WITHOUT the query string, status, client address --
 plus login successes/failures.
@@ -41,6 +46,7 @@ ROLES = ("viewer", "analyst", "sensor", "admin")
 TOKEN_TTL_S = int(os.environ.get("STEALTHTAP_TOKEN_TTL_S", str(8 * 3600)))
 _SCRYPT = (2 ** 14, 8, 1)
 _secret_lock = threading.Lock()
+_write_lock = threading.Lock()
 _secret: Optional[bytes] = None
 
 
@@ -96,6 +102,27 @@ class Users:
         self._load()
         return bool(self._users)
 
+    def update(self, name: str, **fields) -> bool:
+        """Atomically rewrite users.json with `fields` merged into one user (None deletes a field). False if the user is gone/unwritable."""
+        with _write_lock:
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                for u in data.get("users", []):
+                    if u.get("name") == name:
+                        for k, v in fields.items():
+                            if v is None:
+                                u.pop(k, None)
+                            else:
+                                u[k] = v
+                        tmp = self.path.with_suffix(".tmp")
+                        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+                        tmp.replace(self.path)
+                        self._mtime, self._checked = None, 0.0
+                        return True
+            except OSError:
+                return False
+        return False
+
 
 _users: Optional[Users] = None
 
@@ -131,7 +158,7 @@ def _unb64(s: str) -> bytes:
 
 def sign_token(user: str, role: str, tenant: str, ttl: int = TOKEN_TTL_S) -> tuple[str, int]:
     exp = int(time.time()) + ttl
-    body = _b64(json.dumps({"u": user, "r": role, "t": tenant, "e": exp}, separators=(",", ":")).encode())
+    body = _b64(json.dumps({"u": user, "r": role, "t": tenant, "e": exp, "i": int(time.time())}, separators=(",", ":")).encode())
     sig = _b64(hmac.new(_token_secret(), body.encode(), hashlib.sha256).digest())
     return f"st1.{body}.{sig}", exp
 
@@ -147,6 +174,8 @@ def verify_token(token: str) -> Optional[dict]:
             return None
         u = users().get(d["u"])
         if u is None or u["role"] != d["r"] or u.get("tenant", "default") != d["t"]:   # revoked / changed since login
+            return None
+        if d.get("i", 0) < u.get("pw_changed", 0):                                       # password changed after this token was issued
             return None
         return {"name": d["u"], "role": d["r"], "tenant": d["t"]}
     except Exception:
@@ -199,13 +228,111 @@ class LoginThrottle:
 throttle = LoginThrottle()
 
 
-def login(username: str, password: str, client: str) -> Optional[dict]:
+# ------------------------------------------------------------------------------------------------------------------- TOTP
+def new_totp_secret() -> str:
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def _hotp(secret_b32: str, counter: int) -> str:
+    key = base64.b32decode(secret_b32 + "=" * (-len(secret_b32) % 8), casefold=True)
+    h = hmac.new(key, counter.to_bytes(8, "big"), hashlib.sha1).digest()
+    o = h[-1] & 0x0F
+    return "%06d" % ((int.from_bytes(h[o:o + 4], "big") & 0x7FFFFFFF) % 1_000_000)
+
+
+def totp_code(secret_b32: str, at: Optional[float] = None) -> str:
+    return _hotp(secret_b32, int((at if at is not None else time.time()) // 30))
+
+
+_totp_used: dict[str, int] = {}
+
+
+def verify_totp(user: str, secret_b32: str, code: str, at: Optional[float] = None) -> bool:
+    """+-1 step window; a code (step) can be used once per user, so a shoulder-surfed code cannot be replayed."""
+    code = (code or "").strip().replace(" ", "")
+    if not (code.isdigit() and len(code) == 6):
+        return False
+    now = int((at if at is not None else time.time()) // 30)
+    for step in (now, now - 1, now + 1):
+        if hmac.compare_digest(_hotp(secret_b32, step), code):
+            if _totp_used.get(user, -1) >= step:
+                return False
+            _totp_used[user] = step
+            return True
+    return False
+
+
+def otpauth_uri(user: str, secret_b32: str) -> str:
+    return f"otpauth://totp/StealthTap:{user}?secret={secret_b32}&issuer=StealthTap&period=30&digits=6"
+
+
+def password_problem(user: str, new: str, old: str = "") -> Optional[str]:
+    if len(new) < 12:
+        return "password must be at least 12 characters"
+    if new.lower() == user.lower() or new == old:
+        return "password must differ from the user name and from the current password"
+    return None
+
+
+def change_password(user: str, current: str, new: str, client: str) -> str:
+    """'ok' | 'bad_current' | 'weak:<why>' | 'locked' | 'unwritable'."""
+    key = (client, user)
+    if throttle.locked(key):
+        return "locked"
+    u = users().get(user)
+    if u is None or not verify_password(current, u["password_hash"]):
+        throttle.fail(key)
+        audit(user=user, tenant="-", role="-", method="PASSWORD", path="/auth/password", status=401, client=client)
+        return "bad_current"
+    why = password_problem(user, new, current)
+    if why:
+        return "weak:" + why
+    if not users().update(user, password_hash=hash_password(new), pw_changed=int(time.time()) + 1):
+        return "unwritable"
+    throttle.ok(key)
+    audit(user=user, tenant=u.get("tenant", "default"), role=u["role"], method="PASSWORD", path="/auth/password", status=200, client=client)
+    return "ok"
+
+
+_pending_mfa: dict[str, str] = {}
+
+
+def mfa_setup(user: str) -> Optional[dict]:
+    if users().get(user) is None:
+        return None
+    secret = new_totp_secret()
+    _pending_mfa[user] = secret
+    return {"secret": secret, "otpauth_uri": otpauth_uri(user, secret)}
+
+
+def mfa_enable(user: str, otp: str) -> bool:
+    secret = _pending_mfa.get(user)
+    if not secret or not verify_totp(user, secret, otp):
+        return False
+    if not users().update(user, totp_secret=secret):
+        return False
+    _pending_mfa.pop(user, None)
+    return True
+
+
+def login(username: str, password: str, client: str, otp: Optional[str] = None) -> Optional[dict]:
     key = (client, username)
     if throttle.locked(key):
         audit(user=username, tenant="-", role="-", method="LOGIN", path="/auth/login", status=429, client=client)
         return {"locked": True}
     u = users().get(username)
     if verify_password(password, u["password_hash"] if u else None):
+        if u.get("totp_secret"):
+            if not otp:
+                audit(user=username, tenant="-", role="-", method="LOGIN", path="/auth/login", status=401, client=client)
+                return {"otp_required": True}                                   # password right, second factor still needed
+            if not verify_totp(username, u["totp_secret"], otp):
+                throttle.fail(key)
+                audit(user=username, tenant="-", role="-", method="LOGIN", path="/auth/login", status=401, client=client)
+                return None
+        elif u["role"] in [r.strip() for r in os.environ.get("STEALTHTAP_REQUIRE_MFA_ROLES", "").split(",") if r.strip()]:
+            audit(user=username, tenant="-", role="-", method="LOGIN", path="/auth/login", status=403, client=client)
+            return {"mfa_enrollment_required": True}
         throttle.ok(key)
         tenant = u.get("tenant", "default")
         token, exp = sign_token(username, u["role"], tenant)
@@ -221,6 +348,8 @@ def allowed(role: str, method: str, path: str) -> bool:
     m = method.upper()
     if role == "admin":
         return True
+    if m == "POST" and role != "sensor" and (path == "/auth/password" or path.startswith("/auth/mfa/")):
+        return True                          # every signed-in user manages their own password / second factor
     if role == "sensor":
         return (m == "POST" and path == "/alerts/ingest") or (m in ("GET", "HEAD") and path == "/health")
     if m in ("GET", "HEAD", "OPTIONS"):

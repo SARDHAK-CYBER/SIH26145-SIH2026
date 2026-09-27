@@ -9,6 +9,8 @@ export function AuthGate() {
   const [mode, setMode] = useState<'user' | 'key'>('user');
   const [user, setUser] = useState('');
   const [secret, setSecret] = useState('');
+  const [otp, setOtp] = useState('');
+  const [needOtp, setNeedOtp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -25,19 +27,20 @@ export function AuthGate() {
     setBusy(true); setError(null);
     try {
       if (mode === 'user') {
-        const r = await auth.login(user.trim(), secret);
+        const r = await auth.login(user.trim(), secret, needOtp ? otp.trim() : undefined);
         setApiKey(r.token);
       } else {
         setApiKey(secret.trim());
       }
       window.location.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'sign-in failed');
+      if (err instanceof Error && err.message === 'otp required') { setNeedOtp(true); setError('Enter the 6-digit code from your authenticator app.'); }
+      else setError(err instanceof Error ? err.message : 'sign-in failed');
       setBusy(false);
     }
   }
 
-  const ready = secret.trim().length > 0 && (mode === 'key' || user.trim().length > 0);
+  const ready = secret.trim().length > 0 && (mode === 'key' || (user.trim().length > 0 && (!needOtp || otp.trim().length === 6)));
   return (
     <div role="dialog" aria-modal="true" aria-label="Sign in"
       style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,.55)' }}>
@@ -46,6 +49,10 @@ export function AuthGate() {
         {error && <div role="alert" style={{ fontSize: 12, color: 'var(--sev-critical)', lineHeight: 1.5 }}>{error}</div>}
         {mode === 'user' && (
           <input className="pk-input" autoFocus autoComplete="username" placeholder="Username" value={user} onChange={(e) => setUser(e.target.value)} />
+        )}
+        {mode === 'user' && needOtp && (
+          <input className="pk-input mono" autoFocus inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" maxLength={6}
+            value={otp} onChange={(e) => setOtp(e.target.value)} />
         )}
         <input className="pk-input mono" type="password" autoComplete={mode === 'user' ? 'current-password' : 'off'}
           placeholder={mode === 'user' ? 'Password' : 'API key'} value={secret} onChange={(e) => setSecret(e.target.value)} />

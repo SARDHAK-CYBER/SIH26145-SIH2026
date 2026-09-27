@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { can, useSession } from '../lib/session';
 
 interface Props {
   onAnalyze: (file: File) => void;
@@ -9,6 +10,8 @@ export function UploadPanel({ onAnalyze, isAnalyzing }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const session = useSession();
+  const allowed = can(session.role, 'upload');
 
   const handleFiles = useCallback((files: FileList | null) => {
     if (files && files[0]) setFile(files[0]);
@@ -102,10 +105,11 @@ export function UploadPanel({ onAnalyze, isAnalyzing }: Props) {
           <button
             type="button"
             className="btn-primary"
-            disabled={!file || isAnalyzing}
+            disabled={!file || isAnalyzing || !allowed}
+            title={allowed ? undefined : `Your role (${session.role}) cannot upload captures`}
             onClick={() => file && onAnalyze(file)}
           >
-            {isAnalyzing ? 'Running DPI Engine & ML…' : 'Execute Full Deep Packet Inspection'}
+            {!allowed ? `Read-only role (${session.role}): uploads need analyst or admin` : isAnalyzing ? 'Running DPI Engine & ML…' : 'Execute Full Deep Packet Inspection'}
           </button>
         </div>
       </div>

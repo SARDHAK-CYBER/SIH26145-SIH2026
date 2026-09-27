@@ -49,6 +49,8 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("add"); a.add_argument("name"); a.add_argument("--role", choices=accounts.ROLES, required=True); a.add_argument("--tenant", default="default")
     sub.add_parser("list")
+    m = sub.add_parser("mfa-setup"); m.add_argument("name")
+    z = sub.add_parser("mfa-reset"); z.add_argument("name")
     p = sub.add_parser("passwd"); p.add_argument("name")
     r = sub.add_parser("remove"); r.add_argument("name")
     args = ap.parse_args()
@@ -62,12 +64,24 @@ def main() -> None:
         if args.name not in users:
             sys.exit("no such user")
         users[args.name]["password_hash"] = accounts.hash_password(ask_password())
+        users[args.name]["pw_changed"] = int(__import__("time").time()) + 1          # invalidates this user's earlier tokens
+    elif args.cmd == "mfa-setup":
+        if args.name not in users:
+            sys.exit("no such user")
+        secret = accounts.new_totp_secret()
+        users[args.name]["totp_secret"] = secret
+        print("TOTP enabled for", args.name, "\nsecret:", secret, "\nURI   :", accounts.otpauth_uri(args.name, secret),
+              "\n(give it to the user once, over a trusted channel; it is not shown again)")
+    elif args.cmd == "mfa-reset":
+        if args.name not in users:
+            sys.exit("no such user")
+        users[args.name].pop("totp_secret", None)
     elif args.cmd == "remove":
         if users.pop(args.name, None) is None:
             sys.exit("no such user")
     else:
         for u in users.values():
-            print(f"{u['name']:<20} role={u['role']:<8} tenant={u.get('tenant', 'default')}")
+            print(f"{u['name']:<20} role={u['role']:<8} tenant={u.get('tenant', 'default')}  mfa={'on' if u.get('totp_secret') else 'off'}")
         return
     d["users"] = list(users.values())
     save(d)

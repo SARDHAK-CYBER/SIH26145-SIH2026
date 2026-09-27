@@ -88,6 +88,7 @@ services:
     restart: unless-stopped
 
   opensearch:
+    restart: unless-stopped
     # Kept for now (existing OT/IT batch path still writes here). Once
     # the PostgreSQL-backed API and React/Grafana dashboard are the
     # primary path, this can be retired -- don't remove it yet, there
@@ -100,6 +101,7 @@ services:
       - "127.0.0.1:9200:9200"     # loopback only: never publish a datastore to the network
 
   dashboards:
+    restart: unless-stopped
     image: opensearchproject/opensearch-dashboards:2.14.0
     environment:
       - OPENSEARCH_HOSTS=https://opensearch:9200
@@ -175,7 +177,7 @@ services:
       dockerfile: Dockerfile
     entrypoint: ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
-      - DATABASE_URL=postgresql://stealthtap:${POSTGRES_PASSWORD:?set a real password in .env}@postgres:5432/stealthtap
+      - DATABASE_URL=postgresql://stealthtap:${POSTGRES_PASSWORD:?set a real password in .env}@${DATABASE_HOST_OVERRIDE:-postgres}:5432/stealthtap
       - STEALTHTAP_API_KEY=${STEALTHTAP_API_KEY:?set STEALTHTAP_API_KEY (>=16 random chars) in .env}
       - STEALTHTAP_CORS_ORIGINS=${STEALTHTAP_CORS_ORIGINS:-http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,http://127.0.0.1:4173,https://localhost}
       - STEALTHTAP_TENANT_KEYS=${STEALTHTAP_TENANT_KEYS:-}    # optional tenant[/role]=key list, e.g. acme=<key>,globex/viewer=<key>
@@ -183,6 +185,7 @@ services:
       - STEALTHTAP_USERS=/config/users.json
       - STEALTHTAP_ALLOWLIST=/config/allowlist.json
       - STEALTHTAP_AUDIT_LOG=/audit/audit.jsonl
+      - STEALTHTAP_CAPTURE_STORE=/captures          # shared by all API replicas
       - MODELS_DIR=/models
       - ZEEK_INCOMING_DIR=/incoming
       - ZEEK_OUTGOING_DIR=/outgoing
@@ -192,8 +195,9 @@ services:
       - "127.0.0.1:8000:8000"     # plaintext stays on loopback; remote clients use the TLS proxy (:8443)
     volumes:
       - ./models:/models:ro
-      - ./config:/config:ro
+      - ./config:/config
       - stealthtap_audit:/audit
+      - stealthtap_captures:/captures
       - ./samples:/opt/stealthtap/samples:ro   # bundled pcap for GET /api/sample/analysis
       - stealthtap_zeek_incoming:/incoming
       - stealthtap_zeek_outgoing:/outgoing
@@ -216,7 +220,34 @@ services:
       suricata-batch:
         condition: service_started
 
+  # ── HIGH AVAILABILITY (profile "ha"): a second API replica and a PostgreSQL hot standby ───────────────────────────────────────
+  #   docker compose exec -T postgres sh -c 'grep -q "replication stealthtap" $PGDATA/pg_hba.conf || echo "host replication stealthtap all scram-sha-256" >> $PGDATA/pg_hba.conf; psql -U stealthtap -c "select pg_reload_conf()"'
+  #   STEALTHTAP_API_UPSTREAMS="api:8000 api2:8000" docker compose --profile ha up -d
+  # Failover of the database is MANUAL (scripts/pg_failover.sh); see docs/OPERATIONS.md section 5 for what is and is not covered.
+  api2:
+    profiles: ["ha"]
+    extends:
+      service: api
+    ports: !reset []
+  postgres-replica:
+    profiles: ["ha"]
+    image: postgres:16
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD:?set a real password in .env}
+      - POSTGRES_USER=stealthtap
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set a real password in .env}
+      - POSTGRES_DB=stealthtap
+    entrypoint: ["sh", "/scripts/pg_replica_entry.sh"]
+    volumes:
+      - ./scripts:/scripts:ro
+      - stealthtap_pg_replica:/var/lib/postgresql/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   dashboard:
+    restart: unless-stopped
     build:
       context: ./dashboard-app
       args:
@@ -234,6 +265,7 @@ services:
     environment:
       - STEALTHTAP_HOST=${STEALTHTAP_HOST:-localhost}
       - STEALTHTAP_TLS=${STEALTHTAP_TLS:-internal}
+      - STEALTHTAP_API_UPSTREAMS=${STEALTHTAP_API_UPSTREAMS:-api:8000}
     ports:
       - "${STEALTHTAP_BIND:-127.0.0.1}:443:443"
       - "${STEALTHTAP_BIND:-127.0.0.1}:8443:8443"
@@ -282,6 +314,8 @@ services:
     command: ["run", "--iface", "${CAPTURE_IFACE:-eth0}", "--bpf", "${CAPTURE_BPF:-ip or ip6}", "--buffer-mb", "128", "--json"]
 
 volumes:
+  stealthtap_pg_replica:
+  stealthtap_captures:
   stealthtap_audit:
   stealthtap_proxy_data:
   stealthtap_proxy_config:

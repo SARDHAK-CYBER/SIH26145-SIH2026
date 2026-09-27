@@ -108,7 +108,28 @@ _KNOWN_INFRA_REGISTRABLE_DOMAINS = {
     "msedge.net", "avcdn.net", "mozgcp.net", "akamaiedge.net", "akamaitechnologies.com",
     "cloudfront.net", "googleusercontent.com", "gvt1.com", "gvt2.com",
     "azureedge.net", "windows.net", "fastly.net", "cloudflare.net",
+    # OS connectivity checks and vendor infrastructure whose names are not attacker-registrable. www.msftconnecttest.com (the Windows
+    # "is the internet reachable" probe) was scored as a DGA at 70% by the model on a real live capture.
+    "msftconnecttest.com", "msftncsi.com", "windowsupdate.com", "microsoft.com", "gstatic.com", "apple.com", "icloud.com",
+    "mozilla.org", "mozilla.com", "ubuntu.com", "debian.org", "digicert.com",
 }
+
+
+def _load_site_domains() -> None:
+    """Site additions: one registrable domain per line in config/benign_domains.txt (STEALTHTAP_BENIGN_DOMAINS), '#' comments."""
+    import os
+    from pathlib import Path
+    p = Path(os.environ.get("STEALTHTAP_BENIGN_DOMAINS", "config/benign_domains.txt"))
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            d = line.split("#", 1)[0].strip().lower()
+            if d and "." in d:
+                _KNOWN_INFRA_REGISTRABLE_DOMAINS.add(d)
+    except OSError:
+        pass
+
+
+_load_site_domains()
 
 
 def _clamp01(x: float) -> float:

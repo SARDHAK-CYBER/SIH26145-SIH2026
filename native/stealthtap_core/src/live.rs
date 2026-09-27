@@ -58,6 +58,8 @@ pub struct LiveFlow {
     pub uid: String,
     pub emitted_ssl: bool,
     pub emitted_http: bool,
+    /// distcc handshake bytes seen so far on this flow (the real nmap exploit script sends `DIST........` and `ARGC...` as separate segments)
+    pub dist_buf: Vec<u8>,
 }
 
 impl LiveFlow {
@@ -647,7 +649,7 @@ impl LiveFlowAssembler {
                         resp_h: dst_ip.clone(), resp_p: l4.dport, segment_hash: seg_hash(&[uid.clone(), function.clone(), detail.clone()]),
                         function, detail, code, class_id: 0, instance_id: 0, response: false }));
                 }
-            } else if let Some((function, detail, code)) = crate::appsvc::parse_appsvc(l4.payload, l4.sport, l4.dport) {
+            } else if let Some((function, detail, code)) = self.appsvc_parse(&flow_key, l4.payload, l4.sport, l4.dport) {
                 // plain-text service attacks (SMTP enumeration, HTTP auth attempts/admin deploy, distcc). Server->client
                 // evidence (401, SMTP 55x) is oriented like Zeek: originator = the client, so state is keyed per client.
                 self.stats.appsvc += 1;
@@ -660,6 +662,21 @@ impl LiveFlowAssembler {
         }
 
         out
+    }
+
+    /// `parse_appsvc` plus a bounded per-flow reassembly buffer for the segmented distcc handshake.
+    fn appsvc_parse(&mut self, key: &FlowKey, p: &[u8], sport: u16, dport: u16) -> Option<(String, String, u32)> {
+        if let Some(r) = crate::appsvc::parse_appsvc(p, sport, dport) {
+            if let Some(f) = self.flows.get_mut(key) { f.dist_buf.clear(); }
+            return Some(r);
+        }
+        let f = self.flows.get_mut(key)?;
+        if f.dist_buf.is_empty() && !(p.len() >= 12 && p.starts_with(b"DIST")) { return None; }
+        if f.dist_buf.len() + p.len() > 4096 { f.dist_buf.clear(); return None; }
+        f.dist_buf.extend_from_slice(p);
+        let r = crate::appsvc::parse_appsvc(&f.dist_buf, sport, dport);
+        if r.is_some() { f.dist_buf.clear(); }
+        r
     }
 
     fn ensure_flow(&mut self, key: &FlowKey, src_ip: &str, sport: u16, dst_ip: &str, dport: u16,
@@ -675,7 +692,7 @@ impl LiveFlowAssembler {
             self.flows.insert(key.clone(), LiveFlow {
                 orig_ip, orig_port, resp_ip, resp_port, proto,
                 first_ts: ts, last_ts: ts, orig_bytes: 0, resp_bytes: 0,
-                orig_pkts: 0, resp_pkts: 0, uid, emitted_ssl: false, emitted_http: false,
+                orig_pkts: 0, resp_pkts: 0, uid, emitted_ssl: false, emitted_http: false, dist_buf: Vec::new(),
             });
             self.stats.flows_seen += 1;
         }

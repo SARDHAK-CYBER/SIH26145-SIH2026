@@ -48,11 +48,15 @@ def _distcc(p: bytes) -> Optional[tuple[str, str, int]]:
             n = int(p[i + 4:i + 12], 16)
         except ValueError:
             return None
+        if not args and i + 12 + n > len(p):
+            return None                      # argv[0] cut off: wait for the rest (segmented sends), never classify a fragment
         args.append(_clean(p[i + 12:i + 12 + n], 160))
         i += 12 + n
         if i >= len(p):
             break
-    argv0 = (args[0].rsplit("/", 1)[-1].lower() if args else "")
+    if not args:
+        return None
+    argv0 = args[0].rsplit("/", 1)[-1].lower()
     is_compiler = (argv0 in COMPILERS or argv0.endswith(("-gcc", "-g++")) or argv0.startswith(("gcc-", "g++-", "clang-")))
     return (f"distcc:{argv0}", " ".join(args[1:6])[:160], 0 if is_compiler else 1)
 
