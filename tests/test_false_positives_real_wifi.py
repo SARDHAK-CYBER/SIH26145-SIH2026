@@ -175,3 +175,42 @@ def test_busy_client_fanout_is_not_a_flood_but_a_real_flood_is(allow_native):
     busy, dns2, real = run(go())
     assert not any(busy) and not any(dns2)              # 12.5 and 9.5 flows per destination
     assert any(a and a.threat_class == "VOLUMETRIC_DDOS" for a in real)   # 25 per destination still fires
+
+
+def test_online_baseline_ignores_discovery_multicast_but_still_learns_and_scores_unicast():
+    """Live soak: three real devices' ordinary SSDP announcements (239.255.255.250:1900) were flagged as BEHAVIORAL_ANOMALY at
+    99% confidence even though the service had been seen during learning -- multicast discovery is high-variance by design and
+    is the wrong shape for a per-network statistical baseline."""
+    from src.inference.online_baseline import OnlineBaseline
+
+    def rec(dst, port=1900, proto="udp", ob=80, ts=0.0):
+        return {"id.orig_h": "10.0.0.9", "id.orig_p": 40000, "id.resp_h": dst, "id.resp_p": port, "proto": proto,
+                "orig_bytes": ob, "orig_pkts": 1, "resp_bytes": 0, "resp_pkts": 0, "duration": 0.01, "ts": ts, "uid": f"u{ts}"}
+
+    b = OnlineBaseline(learn_min_flows=30, learn_min_seconds=0.0, alpha=0.5)  # loose alpha: the point is the scoring PATH, not the exact p-value cutoff
+    t = 0.0
+    for i in range(30):
+        b.observe(rec("10.0.0.50", ts=t)); t += 1.0                      # ordinary unicast HTTP-ish traffic
+    for i in range(30):
+        b.observe(rec("239.255.255.250", ob=40 + i * 37, ts=t)); t += 1.0   # SSDP noise: never learned, wildly variable size
+    for i in range(5):
+        b.observe(rec("224.0.0.251", port=5353, ob=20 + i * 5, ts=t)); t += 1.0   # mDNS
+    assert b.stats["learned_flows"] == 30                                 # multicast never entered the learning set
+    assert b.armed
+    # a brand-new device announcing SSDP with a very different byte count must still stay quiet
+    assert b.observe(rec("239.255.255.250", ob=9000, ts=t)) is None
+    assert b.observe(rec("224.0.0.251", port=5353, ob=1, ts=t + 1)) is None
+    # but a real unicast outlier (a huge, unexplained upload to a normal host) is still caught
+    hit = None
+    for i in range(20):
+        a = b.observe(rec("10.0.0.51", ob=50_000_000, ts=t + 2 + i))
+        hit = hit or a
+    assert hit is not None and hit.threat_class == "BEHAVIORAL_ANOMALY"
+
+
+def test_discovery_multicast_helper_matches_real_soak_addresses():
+    from src.inference.online_baseline import _is_discovery_multicast
+    for ip in ("239.255.255.250", "224.0.0.251", "224.0.0.252", "ff02::c"):
+        assert _is_discovery_multicast({"id.resp_h": ip})
+    for ip in ("10.0.0.9", "192.168.1.50", "8.8.8.8"):
+        assert not _is_discovery_multicast({"id.resp_h": ip})

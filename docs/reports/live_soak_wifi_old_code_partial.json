@@ -1,0 +1,27 @@
+{
+ "note": "PARTIAL run of the old-code sensor, stopped early on purpose to restart the sensor on the fixed code",
+ "minutes": 47.1,
+ "samples": 94,
+ "status_poll_errors": 0,
+ "packets_seen": 9093414,
+ "kernel_drop": 0,
+ "if_drop": 0,
+ "records_dropped": 0,
+ "user_drops": 0,
+ "peak_mbps": 179.308,
+ "peak_pps": 15860.0,
+ "rss_start_mb": 74.4,
+ "rss_end_mb": 42.4,
+ "rss_max_mb": 86.3,
+ "rss_slope_mb_per_hour_after_15min": -3.35,
+ "detection_p95_ms": 0.91,
+ "alerts_reported_by_sensor": 91,
+ "alerts_saved_by_monitor": 50,
+ "alerts_by_class_saved": {
+  "DGA_DOMAIN": 1,
+  "VOLUMETRIC_DDOS": 19,
+  "C2_BEACONING": 25,
+  "SLOWLORIS": 3,
+  "DATA_EXFILTRATION": 2
+ }
+}

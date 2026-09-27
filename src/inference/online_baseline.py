@@ -39,6 +39,7 @@ from typing import Optional
 import numpy as np
 
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
+from src.engines.eng02_c2_beaconing import _is_multicast_or_broadcast
 
 _EPS = 1e-6
 _MIN_SERVICE_FLOWS = 20       # below this a service borrows the pooled profile
@@ -47,6 +48,16 @@ _NOVEL_SERVICE_BONUS = 3.0    # added z-score for a service unseen in learning
 
 def _service(rec: dict) -> tuple:
     return (str(rec.get("proto", "tcp")).lower(), int(rec.get("id.resp_p", 0) or 0))
+
+
+def _is_discovery_multicast(rec: dict) -> bool:
+    """Multicast/broadcast service-discovery traffic (SSDP 239.255.255.250:1900, mDNS 224.0.0.251:5353, LLMNR, NetBIOS,
+    WS-Discovery 239.255.255.250:3702, IPv6 ff02::/16 ...): high variance BY DESIGN -- different devices announce
+    different services, byte counts and intervals -- so a per-network statistical baseline is the wrong tool for it (a
+    real live soak flagged three different devices' ordinary SSDP announcements at 99% confidence although the service
+    itself had been seen during learning). Real point-to-point traffic to a specific host is unaffected. Twin check to
+    ENG-01/02's own multicast exclusion (src.engines.eng02_c2_beaconing._is_multicast_or_broadcast)."""
+    return _is_multicast_or_broadcast(str(rec.get("id.resp_h", "")))
 
 
 def _features(rec: dict, one_way: bool) -> np.ndarray:
@@ -170,6 +181,8 @@ class OnlineBaseline:
         if self.armed or not records:
             return
         for rec in records:
+            if _is_discovery_multicast(rec):
+                continue
             self._learn.append((_service(rec), _features(rec, self.one_way)))
         self.stats["learned_flows"] = len(self._learn)
 
@@ -205,6 +218,8 @@ class OnlineBaseline:
         now = now if now is not None else time.time()
         if self._t0 is None:
             self._t0 = now
+        if _is_discovery_multicast(rec):
+            return None
         svc, x = _service(rec), _features(rec, self.one_way)
 
         if not self.armed:

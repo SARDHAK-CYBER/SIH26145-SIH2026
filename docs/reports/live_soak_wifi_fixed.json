@@ -1,0 +1,25 @@
+{
+ "iface": "Wi-Fi",
+ "hours": 1.76,
+ "driver_streams": 1,
+ "packets_sensor": 678741,
+ "packets_nic": 676776,
+ "capture_ratio": 1.0029,
+ "kernel_drop": 0,
+ "records_dropped": 0,
+ "user_drops": 0,
+ "capture_restarts": 0,
+ "sensor_outages": [],
+ "rss_start_mb": 156.5,
+ "rss_end_mb": 40.1,
+ "rss_max_mb": 169.4,
+ "rss_slope_mb_per_hour_after_15min": 1.82,
+ "detection_latency_max_ms": 0.0,
+ "alerts_total": 340,
+ "alerts_by_class": {
+  "C2_BEACONING": 336,
+  "BEHAVIORAL_ANOMALY": 3,
+  "DATA_EXFILTRATION": 1
+ },
+ "alerts_per_hour": 193.55
+}
