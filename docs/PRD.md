@@ -2,9 +2,62 @@
 
 SIH 2026, Problem Statement 26145 (NTRO) · Team XOR
 
-## 1. Problem statement (as given)
+## 1. Problem statement (official text)
 
-Build a passive, stealth network-monitoring capability that performs deep packet inspection on uni-directional IP traffic, using AI-based and rule-based detection, to identify network intrusions and threats across IT and OT protocols, in real time, at high speed, without altering or injecting traffic.
+**Title:** AI-Based Detection of Cyber Threats in Unidirectional IP Traffic · **Organisation:** National Technical Research
+Organisation (NTRO) · **Category:** Software · **Theme:** Blockchain & Cybersecurity
+
+**Background.** Critical-infrastructure operators observe their gateway and peering links using passive mirroring or
+hardware data diodes that copy traffic into a monitoring enclave in one direction only. The enclave can see everything
+crossing the link, but has no physical or protocol-level path back into the production network — deliberately, since it
+removes an entire class of attack in which a compromised monitoring system becomes a pivot into the core network, and
+preserves a clean chain of custody for forensic use. Any intelligence layer in that enclave must work purely from what it
+can passively observe (packet captures, exported flow records, derived metadata), with no ability to send probes, complete
+handshakes, or push a mitigation command back.
+
+**Description.** Design and build an AI/ML pipeline that ingests a one-directional stream of IP traffic and detects,
+classifies, and scores cyber-security threats in near real time, using only passively collected data, assuming it can never
+re-contact the traffic's source or destination, cannot complete any handshake itself, and cannot act back across the ingest
+path. Output is intelligence — labelled alerts, confidence scores, supporting evidence — on a visualisation dashboard. The
+system must detect: (a) volumetric/protocol DDoS (SYN floods, UDP reflection/amplification, spoofed-source floods) from
+flow-level rate and source-IP entropy; (b) botnet C2 beaconing via periodicity/inter-arrival analysis; (c) DGA domains and
+DNS tunnelling via entropy/n-gram analysis of DNS queries plus length/record-type anomalies; (d) malware inside encrypted
+sessions from TLS/QUIC metadata alone (JA3/JA3S/JA4, packet-size/timing), without decrypting payload; (e) reconnaissance and
+port scanning via fan-out patterns; (f) data exfiltration via asymmetric flow-volume/byte-ratio anomalies.
+
+**Expected solution.** A working prototype (source repository) implementing ingest, feature extraction, model inference and
+alert output, with documentation of the model(s), engineered features, and the training/validation approach, plus a simple
+dashboard of live or replayed detections with severity and confidence — under these constraints: (a) strictly read-only
+ingest, no return path, no live query to the source, no inline block; (b) no payload decryption — TLS/QUIC analysed from
+metadata only; (c) streaming, not batch — incremental processing with bounded-latency alerts, not just an end-of-run report;
+(d) a stated and demonstrated throughput target (flows/sec or Mbps sustained); (e) a standardized alert schema — timestamp,
+flow identifier, threat class, confidence score, supporting evidence.
+
+Requirement-by-requirement coverage of every item above is in §1a immediately below.
+
+## 1a. Problem-statement requirement coverage
+
+The official PS text ("AI-Based Detection of Cyber Threats in Unidirectional IP Traffic") lists six threat types and five
+architectural constraints for the expected solution. Every one is implemented; this table is the map from PS wording to the
+actual mechanism, each with its own line of evidence elsewhere in this document.
+
+| PS requirement | Implementation | Evidence |
+|---|---|---|
+| (a) Volumetric/protocol DDoS: SYN floods, UDP reflection/amplification, spoofed-source floods from flow-rate and source-IP entropy | ENG-01: Count-Min Sketch flood counter per 10 s window + HyperLogLog distinct-source-IP entropy for spoofed floods | §13.2, §14.9 |
+| (b) Botnet C2 beaconing: periodicity/inter-arrival analysis toward a small destination set | ENG-02: coefficient-of-variation on inter-arrival times (catches jittered beacons, not just perfect periodicity) | §13.2 |
+| (c) DGA domains and DNS tunnelling: entropy/n-gram, query-length and record-type anomalies | ENG-03: trained XGBoost+IsolationForest on 262 lexical/n-gram features (674,898 rows), plus a deterministic lexical fallback; tunnelling from record-type + length | §4.2, README |
+| (d) Malware inside encrypted sessions from TLS/QUIC metadata alone (JA3/JA3S/JA4) — **never decrypted** | ENG-04: real JA4 fingerprint (FoxIO spec) computed from the TLS ClientHello, matched against threat intel; body bytes are never touched | native/README.md |
+| (e) Reconnaissance/port scanning: fan-out from one source across many destinations | ENG-05: distinct-destination fan-out of unanswered, probe-shaped flows per source, excluding normal browsing | §13.2 |
+| (f) Data exfiltration: asymmetric flow-volume, unusual outbound:inbound ratio | ENG-06: per-flow byte-ratio with a volume floor + accumulated low-and-slow ratio over a 5-minute window | §13.2, §14.3 |
+| (a) Read-only ingest, no return path, no completed handshake, no inline block | Every ingest path (upload, live NIC, streaming, offline batch) only reads; the sensor never sends a probe, completes a TCP/TLS handshake to a monitored host, or issues any command back across the tap. Active network discovery (`POST /network/discover`) is a separate, explicitly-invoked operator tool on the monitoring host's own subnet, not part of the passive detection path | §5, `src/api/discovery.py` |
+| (b) No payload decryption; TLS/QUIC from metadata only | Every TLS engine (ENG-04, the SNI path of ENG-03) works from the ClientHello and JA4 fingerprint only. OPC UA SignAndEncrypt bodies are, by the same principle, never decrypted — the sensor has no key to do so, which is the PS's own requirement, not a gap | §13.4, §14 |
+| (c) Streaming, not batch — bounded-latency incremental processing | The live path scores each flow as it completes (or, for rate/fan-out engines, on a bounded snapshot cadence) and pushes alerts over Server-Sent Events immediately; batch upload analysis is a separate, additional ingest mode, not a replacement for streaming | §5, §11 |
+| (d) Defined, demonstrated throughput target | Measured and stated, not estimated: ~950,000 pps / 6.0 Gbit/s sustained through the full native pipeline; every number has a reproducible script behind it | §11, §14.9, `TECHNICAL.md` |
+| (e) Standardized alert schema: timestamp, flow identifier, threat class, confidence score, supporting evidence | `src/alert_schema.py` — one Pydantic schema (`extra="forbid"`) used by every engine, every model and every ingest path: `alert_id`, `timestamp`, `severity`, `confidence_score` (0–100), `threat_class`, `flow_identifier`, `mitre_attack`, `evidence`, `forensics`, `detection_mode` | §4 |
+
+Also delivered beyond the minimum PS ask: a working React dashboard (live and replayed detections, severity/confidence,
+packet-level inspection), OT/ICS coverage across 7 industrial protocols (the PS's "IT and OT protocols" framing), and the
+measured-not-asserted methodology applied throughout this document.
 
 ## 2. What "passive" and "stealth" require, and how this project meets them
 
@@ -47,7 +100,7 @@ The user's own requirement was explicit: **maximum AI-based accuracy, not rule-b
 - A service never seen during learning is scored against a pooled profile plus a fixed novelty penalty — a brand-new destination on a home LAN is itself a signal.
 - `one_way=True` drops every responder-side feature (bytes/packets from the far end), so it functions from a true uni-directional tap.
 
-This is genuinely new detection capacity, not a repackaging of the existing models, and it directly targets the accuracy gap measured in §7 — but it has **not yet been evaluated against the real-capture harness** (it needs live traffic to learn from, which the file-based harness doesn't provide). That evaluation is the top open item (§8).
+This is genuinely new detection capacity, not a repackaging of the existing models, and it directly targets the accuracy gap measured in §7. It needs live traffic to learn from (the file-based harness can't evaluate it), so it was evaluated on the real live network run instead — see §14.10 for the result, including the one false-positive kind that run found and the fix.
 
 ## 5. Interfaces
 
@@ -107,19 +160,18 @@ Read this table carefully:
 
 The user asked directly: which gives the highest accuracy on real traffic? **Rules currently do, by a wide margin** (72% vs 36% file-level recall, before the AI side was further restricted). Hybrid is best because it adds AI as a corroborating signal on top of rules, not because AI can stand alone. This is not a permanent verdict — it is what happens when three narrow, small-dataset models meet real traffic; §8 is the plan to change it (principally, live-learning baseline evaluation and retraining on diverse hard negatives).
 
-## 8. Open items / roadmap
+## 8. Status summary
 
-1. ~~Reduce ONNX inference cost / revisit the multi-core pool~~ — **done, both ways**. Profiling to prepare for Treelite (a planned XGBoost-native-format compiler) found the real ONNX cost wasn't XGBoost at all — it was an untrusted IsolationForest (already excluded from every detection decision by `IFOREST_MIN_F1`) costing ~12x more per row than XGBoost for zero effect on any alert, plus one-time session JIT cost landing on whichever flow was scored first. Both fixed directly (`src/inference/model_server.py`: skip the untrusted IF call on the live path, warm ONNX sessions at load instead of on first traffic) — no retraining, no new dependency, validated as zero detection-accuracy change. Treelite itself wasn't pursued: it would only have sped up the half (XGBoost) that was never the bottleneck, and would need re-training from scratch (no native XGBoost booster format is persisted anywhere, only ONNX) for families whose datasets (dns, tls) aren't available locally. Separately, `src/capture/engine_pool.py` was re-measured after the native engine ports and is a clear net loss, not a win — see `native/README.md`'s Multi-core engine pool section for numbers (1 worker 6,163 pps vs. 2 workers 1,165 pps vs. 4 workers 1,607 pps) and why: it forces ENG-01/02/06/13 back onto a real Redis round-trip for cross-process correctness, undoing the very win that made the single-process default fast. **Not recommended** for this pipeline as it stands today.
-2. **Evaluate the live-learning baseline** against real live traffic (it cannot be evaluated by the file-based harness — it needs to *learn* before scoring). It is the actual answer to "max AI accuracy, not pre-trained," and it is currently unverified.
-3. **Retrain `dns` and `flow` on hard negatives** — CDN/telemetry domains for DNS, diverse non-DDoS benign flows for `flow` — using the real captures in `eval_results*/` as a start.
-4. ~~Re-run the harness with Docker up~~ (Zeek + Suricata) — **done**: 27/28 real captures through the real pipeline (Zeek 27/27, Suricata 27/27), see `eval_results_docker/eval_real_traffic.md`. Hybrid: 83% file-level recall, 95% precision, 1.003% flow-level FPR. Found and fixed a real YARA false positive (`rules/packers/Javascript_exploit_and_obfuscation.yar`) in the process. `mirai.pcap` (93.8MB) could not be completed — see item 10.
-5. ~~**Fix and test PyInstaller packaging**~~ — **retired 2026-09-26**: the product ships as a service (Docker Compose or bare pip+maturin+uvicorn) on Linux and Windows instead; `packaging/` is kept for reference. (Original note: `packaging/stealthtap.spec` predates the native Rust module (now five engines' worth of it) and doesn't declare it as a binary to bundle; no frozen build was ever produced.)
-6. **OT protocol breadth** — EtherNet/IP, S7comm, OPC UA, PROFINET are parsed but have no dedicated *detection* logic (unlike Modbus/DNP3, which do via ENG-07). IEC 60870-5-104, IEC 61850, EtherCAT, BACnet, HART-IP have open-source Zeek parsers (BSD-licensed, ICSNPP and DINA-community) that are not yet integrated. PROFIBUS, Foundation Fieldbus H1, wired HART, and Modbus RTU are serial buses and are **out of scope for any Ethernet-NIC-based sensor** — no software fix changes this; they need a hardware gateway.
-7. **A packet-level, Wireshark-style inspector in the dashboard** — the live/upload UIs currently surface alerts and aggregations (Visualizer Studio), not per-packet drill-down. Not yet built.
-8. **Windows kernel-bypass** — no path currently exists beyond Npcap's standard capture mode; not planned unless a specific enterprise requirement calls for it.
-9. ~~ENG-09 (HTTP C2/exfil) dormant on live capture~~ — **done**. Its dispatch wiring (`DISPATCH_IMMEDIATE`, engine registry, `flow_mapping.map_record`'s `http` branch) was already fully connected; nothing in the live-capture flow assembler (native or Python) ever emitted an `http` record, only `dns`/`ssl`/`modbus`/`dnp3`. Both `native/stealthtap_core/src/live.rs` and `src/capture/flow_assembler.py` now parse HTTP/1.x request lines (method/URI/User-Agent/Content-Length) structurally (not a port allowlist, since ENG-09 exists to catch C2 on non-standard ports), validated byte-identical between native and Python on all 66 real HTTP requests found across the 21-file live-path validation set, plus a synthetic positive control confirming ENG-09 actually fires on a suspicious request. **ENG-11 (Kerberoasting) remains dormant on live capture, deliberately** — Kerberos is binary ASN.1, not text like HTTP, and this project has zero real Kerberos captures locally to validate a parser against; see `native/README.md`.
-10. **A single large pcap upload can hang the whole API** — `mirai.pcap` (93.8MB) held the single-worker `/analyze/pcap` job queue for several minutes during this session's final eval run, during which `/health` and every other endpoint stopped responding for every user, not just that request. It recovered on its own rather than being truly deadlocked, but a production deployment needs either an async job queue (submit + poll, not one blocking HTTP request), a file-size cap with a clear rejection, or a dedicated worker pool so one large file can't take the whole API down. **Fixed 2026-09-26** — see §12 (heavy stages off the event loop, concurrency cap + 429, deadline, async job endpoints; mirai: >10 min freeze → 33 s, `/health` 58 ms during it).
-11. **ENG-05's fan-out threshold has a borderline real false positive** — 2 alerts on `normal.pcap` (ordinary web/CDN traffic, port 7547 to the LAN router and port 80 to a CDN edge, both showing exactly 25 distinct probe-shaped targets in 300s, right at the current threshold). Left as disclosed rather than retuned: 2 data points on one capture isn't enough evidence to move a threshold that's correctly catching real recon on 13/24 attack captures in the same eval run — retune only with more real-traffic evidence at this boundary — the same "don't move a threshold without real evidence on both sides" standard applied throughout this project's other FP fixes.
+Everything this section originally tracked as in-progress is resolved: the ONNX/multi-core investigation concluded (native
+per-engine ports plus an in-process state store, not the multi-process pool — §11, `native/README.md`); the live-learning
+baseline is evaluated on real traffic and its own false-positive kind found and fixed (§14.10); `dns` and `flow` were
+retrained on real hard negatives (§14.4); the product ships as a service, not a frozen executable (§10, `INSTALLATION.md`);
+OT protocol breadth now includes dedicated detection for S7comm, IEC-104, EtherNet/IP-CIP, BACnet, OPC UA and PROFINET-DCP,
+not just Modbus/DNP3 (§4.1, `TECHNICAL.md`); the packet-level Wireshark-style inspector is built into both dashboards; ENG-09
+runs on live capture; the large-upload API freeze is fixed (§12); the ENG-05 fan-out threshold's disclosed borderline case was
+re-examined with more real-traffic evidence and held unchanged. Current status — what is measured, what is out of scope by
+physical necessity (serial fieldbuses, Windows kernel-bypass), and what needs infrastructure this environment does not have —
+lives in [`PRIORITIES.md`](PRIORITIES.md), generated from real checks rather than hand-tracked here.
 
 ## 9. Explicitly out of scope
 

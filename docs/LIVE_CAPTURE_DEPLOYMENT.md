@@ -146,7 +146,7 @@ or add cores (FANOUT scales with them).
 ## 5. Accuracy vs. the problem statement
 
 Same engines and models as the PCAP path, so the evaluated numbers carry
-over (see `docs/PRD.md` §8 and `models/MANIFEST.json`):
+over (see `docs/PRD.md` §1a and `models/MANIFEST.json`):
 
 | PS threat class | Live detector | Basis |
 |---|---|---|
