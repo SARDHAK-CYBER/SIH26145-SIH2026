@@ -20,6 +20,7 @@ class InterfaceInfo:
     description: str = ""            # human-readable NIC description
     mac: str = ""
     ipv4: list[str] = field(default_factory=list)
+    ipv4_netmask: list[str] = field(default_factory=list)   # parallel to ipv4, same index
     ipv6: list[str] = field(default_factory=list)
     is_up: bool = False
     is_loopback: bool = False
@@ -52,6 +53,7 @@ def _psutil_interfaces() -> dict[str, InterfaceInfo]:
             fam = getattr(a, "family", None)
             if fam == socket.AF_INET:
                 info.ipv4.append(a.address)
+                info.ipv4_netmask.append(a.netmask or "")
             elif fam == socket.AF_INET6:
                 info.ipv6.append(a.address.split("%")[0])
             elif str(fam).endswith("AF_LINK") or str(fam).endswith("AF_PACKET"):
@@ -161,6 +163,32 @@ def resolve_capture_name(iface: str) -> str:
         if iface in (info.name, info.capture_name, info.description):
             return info.capture_name or info.name
     return iface
+
+
+def local_broadcast_addresses(iface: str) -> list[str]:
+    """The directed-broadcast address(es) of the capture interface's own
+    subnet(s) -- e.g. 12.10.5.5/255.255.240.0 -> 12.10.15.255. Used to
+    recognise LAN service-discovery broadcasts (Sentinel HASP, Spotify
+    Connect, and similar UDP heartbeats to x.y.z.255) as protocol
+    housekeeping rather than C2 beaconing on networks whose address space
+    isn't RFC1918 (a private-use campus/enterprise block, for example),
+    where the hardcoded 10./172.16-31./192.168./169.254. heuristic in
+    src/engines/eng02_c2_beaconing.py doesn't apply. Never raises -- an
+    interface with no usable netmask just contributes nothing."""
+    import ipaddress
+    out: list[str] = []
+    for info in list_interfaces(include_down=True, include_loopback=True):
+        if iface not in (info.name, info.capture_name, info.description):
+            continue
+        for addr, mask in zip(info.ipv4, info.ipv4_netmask):
+            if not mask:
+                continue
+            try:
+                net = ipaddress.ip_network(f"{addr}/{mask}", strict=False)
+                out.append(str(net.broadcast_address))
+            except ValueError:
+                continue
+    return out
 
 
 if __name__ == "__main__":

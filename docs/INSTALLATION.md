@@ -88,8 +88,14 @@ buys you).
 On Windows, a one-off elevated run (one UAC prompt) looks like:
 
 ```powershell
-powershell -File scripts\start_sensor.ps1 -Port 8100
+scripts\start_sensor.cmd 8100
 ```
+
+Use the `.cmd` wrapper, not `powershell -File scripts\start_sensor.ps1` directly — a fresh Windows install's default
+PowerShell execution policy (`Restricted` or `AllSigned`) refuses to even load an unsigned `.ps1` file, which fails with
+`UnauthorizedAccess` before the script's own internal elevation step ever runs. The `.cmd` wrapper passes
+`-ExecutionPolicy Bypass` for that first hop; nothing about the machine's policy needs to change. (If you still prefer the
+`.ps1` directly: `powershell -ExecutionPolicy Bypass -File scripts\start_sensor.ps1 -Port 8100`.)
 
 For a sensor that survives reboots and crashes without a repeated UAC prompt, see the next section instead.
 
@@ -100,8 +106,10 @@ only).
 
 ### Windows
 ```powershell
-# From an elevated PowerShell:
-packaging\windows\install_sensor_task.ps1 -Port 8100
+# From an elevated PowerShell (a fresh machine's default execution policy blocks
+# an unsigned local script even here -- add -ExecutionPolicy Bypass if you hit
+# "cannot be loaded ... is not digitally signed"):
+powershell -ExecutionPolicy Bypass -File packaging\windows\install_sensor_task.ps1 -Port 8100
 ```
 Registers a scheduled task that starts at boot, runs as `NT AUTHORITY\SYSTEM` (so Npcap's Administrators-only mode never
 prompts for a UAC approval), and supervises the sensor process itself — relaunching it 3 seconds after any exit, whether from

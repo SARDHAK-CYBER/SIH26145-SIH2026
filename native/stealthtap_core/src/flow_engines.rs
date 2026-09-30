@@ -48,11 +48,15 @@ pub struct FlowEngines {
 }
 
 impl FlowEngines {
-    pub fn new(single_flow_min_bytes: f64) -> Self {
+    pub fn new(single_flow_min_bytes: f64, local_broadcast: Vec<String>) -> Self {
+        let mut e02 = NativeEng02::new_core();
+        let mut e05 = NativeEng05::new_core();
+        e02.set_local_broadcast(local_broadcast.clone());
+        e05.set_local_broadcast(local_broadcast);
         FlowEngines {
             e01: NativeEng01::new_core(),
-            e02: NativeEng02::new_core(),
-            e05: NativeEng05::new_core(),
+            e02,
+            e05,
             e06: NativeEng06::new_core(),
             e13: NativeEng13::new_core(),
             single_flow_min_bytes,

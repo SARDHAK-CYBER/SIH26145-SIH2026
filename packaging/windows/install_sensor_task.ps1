@@ -14,7 +14,13 @@ if (-not (Test-Path $py)) { throw "venv not found at $py -- create it and pip in
 $log = "$repo\sensor-$Port.log"
 # The loop lives INSIDE the task: Task Scheduler only restarts a task that exits with a failure, and a sensor that dies, is killed,
 # or loses a port race can exit "cleanly" from the wrapper's point of view. Log is appended and truncated above 50 MB.
-$cmd = "`$env:SCAPY_USE_PCAPDNET='1'; Set-Location '$repo'; while (`$true) { if ((Test-Path '$log') -and (Get-Item '$log').Length -gt 52428800) { Clear-Content '$log' }; & '$py' -m src.capture.live_agent serve --host $BindHost --port $Port *>> '$log'; Start-Sleep -Seconds 3 }"
+# Loads .env (same file docker-compose reads via ${VAR} interpolation) before the loop so this process shares
+# STEALTHTAP_TOKEN_SECRET with the Docker `api` container -- without it, this sensor signs login tokens with its
+# own random per-process secret, and a token from the dashboard's login (which always hits the API on :8000)
+# fails verification here with a generic "session not accepted", even with the right password.
+$envFile = "$repo\.env"
+$loadEnv = "if (Test-Path '$envFile') { Get-Content '$envFile' | ForEach-Object { if (`$_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*`$' -and `$_ -notmatch '^\s*#') { [System.Environment]::SetEnvironmentVariable(`$Matches[1], `$Matches[2], 'Process') } } }"
+$cmd = "`$env:SCAPY_USE_PCAPDNET='1'; Set-Location '$repo'; $loadEnv; while (`$true) { if ((Test-Path '$log') -and (Get-Item '$log').Length -gt 52428800) { Clear-Content '$log' }; & '$py' -m src.capture.live_agent serve --host $BindHost --port $Port *>> '$log'; Start-Sleep -Seconds 3 }"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$cmd`""
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries

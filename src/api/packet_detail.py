@@ -54,8 +54,11 @@ def dissect(raw: bytes, ts: float = 0.0, wire_len: int | None = None) -> dict:
     try:
         pkt = Ether(raw)
     except Exception as exc:  # malformed beyond scapy's tolerance -- still show the bytes
+        # The exception class name is enough for the UI ("this frame didn't parse"); the raw
+        # message isn't shown -- it can vary by scapy/Python version and, over a raw-bytes parser,
+        # occasionally echoes back a fragment of attacker-controlled packet data.
         return {"ts": ts, "wire_len": wire_len or len(raw), "captured": len(raw), "layers": [],
-                "error": f"{type(exc).__name__}: {exc}", "hex": hexdump(raw)}
+                "error": type(exc).__name__, "hex": hexdump(raw)}
 
     off = 0
     p = pkt

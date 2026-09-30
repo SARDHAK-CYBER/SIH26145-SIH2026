@@ -604,12 +604,26 @@ _CLASSIC_PCAP_MAGICS = (bytes.fromhex("d4c3b2a1"), bytes.fromhex("a1b2c3d4"),
                        bytes.fromhex("4d3cb2a1"), bytes.fromhex("a1b23c4d"))
 
 
+def _validate_analysis_id(analysis_id: str) -> None:
+    """analysis_id reaches the filesystem (owner file, index, export) straight from the URL path,
+    with no format constraint from FastAPI's routing -- a '..' or an OS path separator smuggled
+    through would let it address a file outside CAPTURE_STORE. Every caller that touches disk with
+    it must validate first; _get_index() already did, but _check_owner() (called first, on every
+    inspector request) did not, so a request could read an arbitrary '<payload>.tenant' file before
+    the id was ever checked. Enforced once here instead of duplicated per call site."""
+    try:
+        uuid.UUID(analysis_id)
+    except ValueError:
+        raise HTTPException(400, "bad analysis id")
+
+
 def _owner_file(analysis_id: str) -> Path:
     return CAPTURE_STORE / f"{analysis_id}.tenant"
 
 
 def _check_owner(analysis_id: str, request: Request) -> None:
     """A stored capture is visible only to the tenant that uploaded it (404, not 403, so ids do not leak)."""
+    _validate_analysis_id(analysis_id)
     tenant = getattr(request.state, "tenant", None) or "default"
     try:
         owner = _owner_file(analysis_id).read_text().strip()
@@ -645,10 +659,7 @@ def _store_capture(analysis_id: str, contents: bytes, tenant: str = "default") -
 
 
 def _get_index(analysis_id: str):
-    try:
-        uuid.UUID(analysis_id)
-    except ValueError:
-        raise HTTPException(400, "bad analysis id")
+    _validate_analysis_id(analysis_id)
     path = CAPTURE_STORE / f"{analysis_id}.pcap"
     if not path.is_file():
         raise HTTPException(404, "capture not stored (pcapng, expired, or analysed before the inspector existed)")

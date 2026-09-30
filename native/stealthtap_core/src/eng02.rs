@@ -10,7 +10,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const MAX_TRACKED_TIMESTAMPS: usize = 50;
 const TIMESTAMP_TTL_SECONDS: f64 = 3600.0;
@@ -58,6 +58,15 @@ pub struct NativeEng02 {
     // (src_ip, dst_ip) -> (last MAX_TRACKED_TIMESTAMPS timestamps, last_ts seen)
     history: HashMap<(String, String), (Vec<f64>, f64)>,
     since_prune: u32,
+    // The directed-broadcast address(es) of whatever subnet the live capture
+    // interface is actually on -- set once from Python at capture start
+    // (src/capture/interfaces.py:local_broadcast_addresses). The RFC1918-only
+    // heuristic in is_multicast_or_broadcast() doesn't know a network's real
+    // broadcast address when that network uses a non-RFC1918 block privately
+    // (found on a real Wi-Fi capture: a campus-style 12.10.0.0/20 block, real
+    // broadcast 12.10.15.255, carrying periodic UDP service-discovery
+    // heartbeats that this check alone can't tell apart from a beacon).
+    local_broadcast: HashSet<String>,
 }
 
 pub struct Eng02Hit {
@@ -70,11 +79,16 @@ pub struct Eng02Hit {
 
 impl NativeEng02 {
     pub fn new_core() -> Self {
-        NativeEng02 { history: HashMap::new(), since_prune: 0 }
+        NativeEng02 { history: HashMap::new(), since_prune: 0, local_broadcast: HashSet::new() }
+    }
+
+    pub fn set_local_broadcast(&mut self, addrs: Vec<String>) {
+        self.local_broadcast = addrs.into_iter().collect();
     }
 
     pub fn core(&mut self, src_ip: &str, dst_ip: &str, ts: f64) -> Option<Eng02Hit> {
-        if is_multicast_or_broadcast(dst_ip) || is_multicast_or_broadcast(src_ip) { return None; }
+        if is_multicast_or_broadcast(dst_ip) || is_multicast_or_broadcast(src_ip)
+            || self.local_broadcast.contains(dst_ip) || self.local_broadcast.contains(src_ip) { return None; }
         self.since_prune += 1;
         if self.since_prune >= PRUNE_EVERY {
             self.since_prune = 0;
@@ -151,6 +165,11 @@ impl NativeEng02 {
     #[new]
     fn new() -> Self {
         NativeEng02::new_core()
+    }
+
+    #[pyo3(name = "set_local_broadcast")]
+    fn py_set_local_broadcast(&mut self, addrs: Vec<String>) {
+        self.set_local_broadcast(addrs);
     }
 
     fn check(&mut self, py: Python<'_>, src_ip: &str, dst_ip: &str, ts: f64) -> PyResult<Option<PyObject>> {

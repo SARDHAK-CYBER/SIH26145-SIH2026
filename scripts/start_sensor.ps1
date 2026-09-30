@@ -21,4 +21,19 @@ if (-not $isAdmin) {
 }
 Set-Location $repo
 $env:SCAPY_USE_PCAPDNET = '1'
+
+# Load .env into this process's environment -- same file docker-compose reads via ${VAR}
+# interpolation. Without this, STEALTHTAP_TOKEN_SECRET is unset here, so this process
+# signs login tokens with its own random per-process secret: a token from the Docker
+# `api` container (port 8000) then fails verification against this sensor (port 8100)
+# with a generic "session not accepted", even though the password was correct.
+$envFile = Join-Path $repo ".env"
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$' -and $_ -notmatch '^\s*#') {
+            [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process')
+        }
+    }
+}
+
 & "$repo\venv\Scripts\python.exe" -m src.capture.live_agent serve --port $Port *> "$repo\sensor-$Port.log"

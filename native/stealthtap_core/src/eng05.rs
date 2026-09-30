@@ -11,6 +11,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::{HashMap, HashSet};
 
+use crate::eng02::is_multicast_or_broadcast;
+
 const WINDOW_SECONDS: f64 = 300.0;
 const FANOUT_THRESHOLD: usize = 25;
 const PROBE_MAX_ORIG_BYTES: f64 = 512.0;
@@ -21,6 +23,13 @@ const EXCLUDED_FANOUT_PORTS: [u16; 1] = [7680];
 pub struct NativeEng05 {
     seen: HashMap<String, Vec<(f64, String, u16)>>,
     since_prune: u32,
+    // Same rationale as NativeEng02::local_broadcast -- SSDP/mDNS discovery
+    // bursts to a multicast/broadcast group are probe-shaped (no response,
+    // tiny originator payload) and repeat to a new (dst_ip, dst_port) tuple
+    // often enough to cross FANOUT_THRESHOLD on their own. Found on a real
+    // Wi-Fi capture: ordinary SSDP announcements to 239.255.255.250 flagged
+    // as RECONNAISSANCE.
+    local_broadcast: HashSet<String>,
 }
 
 pub struct Eng05Hit {
@@ -30,11 +39,18 @@ pub struct Eng05Hit {
 
 impl NativeEng05 {
     pub fn new_core() -> Self {
-        NativeEng05 { seen: HashMap::new(), since_prune: 0 }
+        NativeEng05 { seen: HashMap::new(), since_prune: 0, local_broadcast: HashSet::new() }
+    }
+
+    pub fn set_local_broadcast(&mut self, addrs: Vec<String>) {
+        self.local_broadcast = addrs.into_iter().collect();
     }
 
     pub fn core(&mut self, src_ip: &str, dst_ip: &str, dst_port: u16, ts: f64, orig_bytes: f64, resp_bytes: f64) -> Option<Eng05Hit> {
         if EXCLUDED_FANOUT_PORTS.contains(&dst_port) {
+            return None;
+        }
+        if is_multicast_or_broadcast(dst_ip) || self.local_broadcast.contains(dst_ip) {
             return None;
         }
         let is_probe = resp_bytes == 0.0 && orig_bytes <= PROBE_MAX_ORIG_BYTES;
@@ -87,5 +103,10 @@ impl NativeEng05 {
             Some(h) => Ok(Some(hit_to_py(py, &h)?)),
             None => Ok(None),
         }
+    }
+
+    #[pyo3(name = "set_local_broadcast")]
+    fn py_set_local_broadcast(&mut self, addrs: Vec<String>) {
+        self.set_local_broadcast(addrs);
     }
 }

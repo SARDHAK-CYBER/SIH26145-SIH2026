@@ -922,9 +922,9 @@ impl NativeCapture {
     /// Turn the native flow engines on (ENG-01/02/05/06/13 evaluated in Rust). After this,
     /// `snapshot_scored` / `expire_scored` / `flush_scored` return only hits; the plain
     /// snapshot/expire/flush keep returning raw flow records for the Python path.
-    #[pyo3(signature = (single_flow_min_bytes=4194304.0))]
-    fn enable_flow_engines(&self, single_flow_min_bytes: f64) {
-        *self.sh.engines.lock().unwrap() = Some(FlowEngines::new(single_flow_min_bytes));
+    #[pyo3(signature = (single_flow_min_bytes=4194304.0, local_broadcast=Vec::new()))]
+    fn enable_flow_engines(&self, single_flow_min_bytes: f64, local_broadcast: Vec<String>) {
+        *self.sh.engines.lock().unwrap() = Some(FlowEngines::new(single_flow_min_bytes, local_broadcast));
     }
 
     /// Snapshot active flows through ENG-01/05/13 in Rust: -> [(engine, conn_dict, hit_dict), ...]

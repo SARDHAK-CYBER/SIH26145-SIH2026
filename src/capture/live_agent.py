@@ -44,7 +44,7 @@ if ROOT not in sys.path:
 
 from src.capture.backends import select_backend, capabilities, CaptureError
 from src.capture.flow_assembler import FlowAssembler
-from src.capture.interfaces import list_interfaces, resolve_capture_name
+from src.capture.interfaces import list_interfaces, resolve_capture_name, local_broadcast_addresses
 from src import allowlist as _allowlist
 
 try:
@@ -174,6 +174,15 @@ class LiveAgent:
         self.iface_req = iface
         self.iface = resolve_capture_name(iface)
         self.bpf = bpf
+        # Tell ENG-02 (and ENG-05, which reuses the same check) this
+        # network's real directed-broadcast address(es) before any flow is
+        # scored -- see src/capture/interfaces.py:local_broadcast_addresses
+        # for why the hardcoded RFC1918 .255 heuristic alone isn't enough.
+        try:
+            from src.engines.eng02_c2_beaconing import set_local_broadcast_addresses
+            set_local_broadcast_addresses(local_broadcast_addresses(self.iface_req))
+        except Exception as exc:
+            print(f"[live_agent] local broadcast address lookup failed (non-fatal): {exc}")
         # Optional: a short historical pcap of THIS network, parsed once at
         # start and fed to the online behavioural baseline (see
         # src/inference/online_baseline.py's warm_start) so a fresh
@@ -361,7 +370,7 @@ class LiveAgent:
         if (self._scoring is not None and hasattr(cap, "enable_flow_engines")
                 and os.environ.get("STEALTHTAP_PY_FLOW_ENGINES") != "1"):
             from src.engines.eng06_exfiltration import MIN_SINGLE_FLOW_BYTES
-            cap.enable_flow_engines(float(MIN_SINGLE_FLOW_BYTES))
+            cap.enable_flow_engines(float(MIN_SINGLE_FLOW_BYTES), local_broadcast_addresses(self.iface_req))
             self._native_flow_engines = True
         self._replay_source = bool(pcap)
         self._backend = _NativeBackendInfo()

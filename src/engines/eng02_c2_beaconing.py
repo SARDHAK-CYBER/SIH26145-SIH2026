@@ -60,10 +60,34 @@ MIN_INTERVAL_SECONDS = 2.0     # faster than this is normal app chatter, not a C
 MAX_INTERVAL_SECONDS = 3600.0  # slower than an hour is out of scope for this check
 
 
+# The directed-broadcast address(es) of whatever subnet the live capture
+# interface is actually on -- populated by set_local_broadcast_addresses()
+# when live capture starts (src/capture/live_agent.py). The .255-in-RFC1918
+# heuristic below only covers the traditional private ranges; a network
+# using a non-RFC1918 block privately (a campus/enterprise block, for
+# example -- found on a real Wi-Fi capture: repeated UDP heartbeats from
+# several hosts to 12.10.15.255, the true broadcast address of that
+# network's actual 255.255.240.0 subnet) needs the real netmask, not a
+# guess from the address text alone. Seeded from the environment at import
+# so a spawned multi-core worker process (src/capture/engine_pool.py) picks
+# up the value the parent process already computed.
+_LOCAL_BROADCAST: set[str] = {
+    a for a in os.environ.get("STEALTHTAP_LOCAL_BROADCAST_ADDRS", "").split(",") if a
+}
+
+
+def set_local_broadcast_addresses(addrs) -> None:
+    global _LOCAL_BROADCAST
+    _LOCAL_BROADCAST = {a for a in addrs if a}
+    os.environ["STEALTHTAP_LOCAL_BROADCAST_ADDRS"] = ",".join(sorted(_LOCAL_BROADCAST))
+
+
 def _is_multicast_or_broadcast(ip: str) -> bool:
     """Periodic multicast/broadcast (LLMNR, mDNS, SSDP, DHCP, IPv6 ND) is protocol housekeeping, not C2 --
     found on REAL Wi-Fi capture (a neighbour's LLMNR queries to 224.0.0.252:5355 were flagged)."""
     if ip == "255.255.255.255" or ip.lower().startswith("ff") and ":" in ip:
+        return True
+    if ip in _LOCAL_BROADCAST:
         return True
     # directed broadcast in private / link-local space (x.y.z.255, e.g. NetBIOS-NS to 169.254.255.255 on a real capture); twin of eng02.rs
     if ip.endswith(".255"):
@@ -90,6 +114,8 @@ class C2BeaconingDetector(Detector):
         self._native = None
         if _NATIVE_ENG02_AVAILABLE and not _FORCE_PYTHON_ENG02:
             self._native = stealthtap_core.NativeEng02()
+            if _LOCAL_BROADCAST and hasattr(self._native, "set_local_broadcast"):
+                self._native.set_local_broadcast(list(_LOCAL_BROADCAST))
 
     def _key(self, src_ip: str, dst_ip: str) -> str:
         return f"{self.key_prefix}eng02:beacon_ts:{src_ip}:{dst_ip}"

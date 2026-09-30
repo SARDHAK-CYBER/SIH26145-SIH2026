@@ -4,6 +4,8 @@ from collections import defaultdict
 from typing import Optional
 from src.alert_schema import Alert, FlowIdentifier, MitreAttack
 from src.engines.base import Detector
+from src.engines import eng02_c2_beaconing as _eng02
+from src.engines.eng02_c2_beaconing import _is_multicast_or_broadcast
 
 try:
     # Native fast-path -- see native/stealthtap_core/src/eng05.rs and
@@ -65,6 +67,8 @@ class ReconDetector(Detector):
         self._native = None
         if _NATIVE_ENG05_AVAILABLE and not _FORCE_PYTHON_ENG05:
             self._native = stealthtap_core.NativeEng05()
+            if _eng02._LOCAL_BROADCAST and hasattr(self._native, "set_local_broadcast"):
+                self._native.set_local_broadcast(list(_eng02._LOCAL_BROADCAST))
 
     def _prune(self, now: float) -> None:
         cutoff = now - WINDOW_SECONDS
@@ -102,6 +106,16 @@ class ReconDetector(Detector):
     async def score(self, flow: dict) -> Optional[Alert]:
         src_ip = flow["src_ip"]
         now = flow["ts"]
+
+        # SSDP/mDNS-style discovery bursts to a multicast/broadcast group
+        # look exactly like a "probe" (no response payload, tiny originator
+        # payload) and repeat to a NEW (dst_ip, dst_port) tuple often enough
+        # to cross FANOUT_THRESHOLD on their own -- found on a real Wi-Fi
+        # capture: ordinary SSDP announcements to 239.255.255.250 flagged as
+        # RECONNAISSANCE. Checked before the native dispatch (like ENG-02)
+        # so the exclusion applies regardless of which backend runs.
+        if _is_multicast_or_broadcast(flow["dst_ip"]):
+            return None
 
         if self._native is not None:
             hit = self._native.check(

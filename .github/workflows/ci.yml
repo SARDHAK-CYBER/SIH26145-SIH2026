@@ -3,6 +3,11 @@ on:
   push: { branches: [main] }
   pull_request:
 
+# Least-privilege GITHUB_TOKEN: every job here only checks out the repo and
+# runs tests/builds -- none push commits, create releases, or comment on PRs.
+permissions:
+  contents: read
+
 jobs:
   python:
     strategy:

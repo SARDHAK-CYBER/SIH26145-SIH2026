@@ -188,6 +188,13 @@ class FlowScoreRequest(BaseModel):
     mitre_tactic: Optional[str] = None
     mitre_technique_id: Optional[str] = None
     mitre_technique_name: Optional[str] = None
+    # /score is a diagnostic/preview endpoint (dashboard "test a domain" playground,
+    # system_check.py latency benchmarks) -- real detections are stored by the live
+    # capture/streaming pipeline (src/streaming_engine.py, src/capture/scoring.py),
+    # which never calls this HTTP route. Default false so scoring a flow here never
+    # writes a synthetic alert into the production alerts table; callers that
+    # explicitly want the result recorded (rare) opt in.
+    persist: bool = False
 
 
 def tenant_of(request: Request) -> str:
@@ -245,8 +252,9 @@ async def score_flow(family: str, req: FlowScoreRequest, request: Request):
         detection_mode=result["detection_mode"],
         model_scores=result["model_scores"],
     )
-    await _store_alert(alert, tenant_of(request))
-    return {"fired": True, "alert": json.loads(alert.model_dump_json())}
+    if req.persist:
+        await _store_alert(alert, tenant_of(request))
+    return {"fired": True, "persisted": req.persist, "alert": json.loads(alert.model_dump_json())}
 
 
 async def _store_alert(alert: Alert, tenant: str = "default") -> bool:
